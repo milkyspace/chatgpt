@@ -51,37 +51,37 @@ user_semaphores = {}
 user_tasks = {}
 
 
-HELP_MESSAGE = """Commands:
+HELP_MESSAGE = """Команды:
 
-⚪ /new – Start new dialog 
-⚪ /retry – Regenerate last bot answer 
-⚪ /mode – Select chat mode 
-⚪ /balance – Show balance 
-⚪ /topup – Add credits to your account 
-⚪ /settings – Show settings 
-⚪ /help – Show the commands
-⚪ /role – Show your role 
+⚪ /new – Начать новый диалог
+⚪ /retry – Перегенерировать последний ответ бота
+⚪ /mode – Выбрать режим чата
+⚪ /balance – Показать баланс
+⚪ /topup – Пополнить счёт
+⚪ /settings – Показать настройки
+⚪ /help – Показать команды
+⚪ /role – Показать вашу роль
 
-🎨 Generate images from text prompts in <b>👩‍🎨 Artist</b> /mode
-👥 Add bot to <b>group chat</b>: /help_group_chat
-🎤 You can send <b>Voice Messages</b> instead of text
-⌨️ Generate transcripts from voice messages in <b> ⌨️ Stenographer</b> /mode
+🎨 Генерация изображений по текстовым запросам в режиме <b>👩‍🎨 Художник</b> /mode
+👥 Добавить бота в <b>групповой чат</b>: /help_group_chat
+🎤 Вы можете отправлять <b>Голосовые Сообщения</b> вместо текста
+⌨️ Создание расшифровок голосовых сообщений в режиме <b>⌨️ Стенограф</b> /mode
 
-Important notes:\n
-1. The <b>longer</b> your dialog, the <b>more tokens</b> are spent with each new message, <i><b>I remember our conversation!</b></i> \nTo start a <b>new dialog</b>, send the /new command\n
-2. <b>Cyber Dud</b> is the default <b>blank mode</b>, it has no special instructions as to how to act. Experiment with the other <b>modes</b> and see which one suits you best!
+Важные заметки:\n
+1. Чем <b>длиннее</b> ваш диалог, тем <b>больше токенов</b> тратится с каждым новым сообщением, <i><b>Я помню наш разговор!</b></i> \nЧтобы начать <b>новый диалог</b>, отправьте команду /new\n
+2. <b>Кибер-чувак</b> - это режим по умолчанию <b>без специальных инструкций</b>, он не имеет специальных указаний, как действовать. Экспериментируйте с другими <b>режимами</b> и посмотрите, какой подходит вам лучше всего!
 
 """
-#add "(see <b>video</b> below)" after instructions if you have the video set up
-HELP_GROUP_CHAT_MESSAGE = """You can add bot to any <b>group chat</b> to help and entertain its participants!
+#добавьте "(см. <b>видео</b> ниже)" после инструкций, если у вас настроено видео
+HELP_GROUP_CHAT_MESSAGE = """Вы можете добавить бота в любой <b>групповой чат</b>, чтобы помогать и развлекать его участников!
 
-Instructions:
-1. Add the bot to the group chat
-2. Make it an <b>admin</b>, so that it can see messages (all other rights can be restricted)
-3. You're awesome!
+Инструкции:
+1. Добавьте бота в групповой чат
+2. Сделайте его <b>администратором</b>, чтобы он мог видеть сообщения (все остальные права можно ограничить)
+3. Вы великолепны!
 
-To get a reply from the bot in the chat – @ <b>tag</b> it or <b>reply</b> to its message.
-For example: "{bot_username} write a poem about Telegram"
+Чтобы получить ответ от бота в чате – @ <b>упомяните</b> его или <b>ответьте</b> на его сообщение.
+Например: "{bot_username} напиши стихотворение о Telegram"
 """
 
 def update_user_roles_from_config(db, roles):

@@ -44,7 +44,7 @@ class Database:
             "first_seen": datetime.now(),
 
             "current_dialog_id": None,
-            "current_chat_mode": "cyberdud",
+            "current_chat_mode": "default",
             "current_model": config.models["available_text_models"][2],
             "image_preferences": {
                 "model": config.models["available_image_models"][0],
