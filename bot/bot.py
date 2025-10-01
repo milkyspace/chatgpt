@@ -192,7 +192,7 @@ async def start_handle(update: Update, context: CallbackContext):
     reply_text = "👋 Привет! Мы <b>Ducks GPT</b>\n"
     reply_text += "Компактный чат-бот на базе <b>ChatGPT</b>\n"
     reply_text += "Рады знакомству!\n\n"
-    reply_text += "- Доступны в <b>РФ 🇷🇺</b>\n"
+    reply_text += "- Доступны в <b>РФ</b>🇷🇺\n"
     reply_text += "- <b>Без месячной подписки</b> Платишь только за использование\n\n"
     reply_text += "🎁 <b>100 ₽ за наш счёт!</b>\n\n"
     reply_text += HELP_MESSAGE
