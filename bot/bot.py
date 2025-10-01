@@ -1870,12 +1870,18 @@ async def show_balance_handle_full_details(update: Update, context: CallbackCont
 
     total_n_spent_dollars += voice_recognition_n_spent_dollars
 
-    text = f"Your euro balance is <b>€{current_euro_balance}</b> \n\n"
-    text += "You:\n\n"
-    text += f"   Have yet to make your first payment 😢\n" if total_topup == 0 else f"   Paid <b>{total_topup:.02f}€</b> ❤️\n" if total_topup < 30 else f"   Paid <b>{total_topup:.02f}€</b>. I'm glad you really like using the bot!❤️\n"
-    text += f"   Have not made any donations.\n\n" if total_donated == 0 else f"   Donated <b>{total_donated:.02f}€</b>. You're a legend! ❤️\n\n" if total_donated < 10 else f"   \nDonated <b>{total_donated:.02f}€</b>. I appreciate your continued support!! ❤️❤️\n\n"
-    text += f"   Spent ≈ <b>{total_n_spent_dollars:.03f}$</b> 💵\n"
-    text += f"   Used <b>{total_n_used_tokens}</b> tokens 🪙\n\n"
+    text = f"Ваш баланс <b>€{current_euro_balance}</b> \n\n"
+    text += "Вы:\n\n"
+    text += f"Ещё не было первого пополнения 😢\n" if total_topup == 0 else \
+        f"Пополнено <b>{total_topup:.02f}€</b> ❤️\n" if total_topup < 30 else \
+            f"Пополнено <b>{total_topup:.02f}€</b>. Рад, что тебе нравится бот! ❤️\n"
+
+    text += f"Пожертвований пока не было.\n\n" if total_donated == 0 else \
+        f"Пожертвовано <b>{total_donated:.02f}€</b>. Ты легенда! ❤️\n\n" if total_donated < 10 else \
+            f"Пожертвовано <b>{total_donated:.02f}€</b>. Спасибо за поддержку!! ❤️❤️\n\n"
+
+    text += f"Потрачено ≈ <b>{total_n_spent_dollars:.03f}$</b> 💵\n"
+    text += f"Использовано <b>{total_n_used_tokens}</b> токенов 🪙\n\n"
     text += details_text
 
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
