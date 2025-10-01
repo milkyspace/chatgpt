@@ -190,13 +190,12 @@ async def start_handle(update: Update, context: CallbackContext):
     developer = config.developer_username
     developer_info = ' '.join(developer) if isinstance(developer, list) else developer
 
-    reply_text = "👋 Привет — я <b>Ducks GPT</b>\n"
-    reply_text += "Компактный чат-бот на базе <b>ChatGPT</b>. Рад знакомству!\n\n"
-    reply_text += "Почему я крутой:\n"
-    reply_text += "- Доступен в РФ.\n"
-    reply_text += "- Платишь только за то, что используешь — без месячной подписки.\n"
-    reply_text += "- Нет лимита сообщений в час: общаемся пока есть деньги на балансе.\n"
-    reply_text += "🎁 Первые <b>100 ₽</b> за мой счёт!\n\n"
+    reply_text = "👋 Привет! Мы <b>Ducks GPT</b>\n"
+    reply_text += "Компактный чат-бот на базе <b>ChatGPT</b>\n"
+    reply_text += "Рады знакомству!\n\n"
+    reply_text += "- Доступны <b>в РФ</b>\n"
+    reply_text += "- <b>Без месячной подписки</b> Платишь только за использование\n\n"
+    reply_text += "🎁 <b>100 ₽ за наш счёт!</b>\n\n"
     reply_text += HELP_MESSAGE
 
     await update.message.reply_text(reply_text, parse_mode=ParseMode.HTML)
