@@ -528,7 +528,7 @@ async def topup_handle(update: Update, context: CallbackContext, chat_id=None):
 
         await context.bot.send_message(
             chat_id=user_id,
-            text="This bot does not have the payment system turned on :(", 
+            text="Система оплаты недоступна :(",
             parse_mode='Markdown'
         )
         return
