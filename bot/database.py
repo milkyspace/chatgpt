@@ -1,19 +1,16 @@
 from typing import Optional, Any
-
 import pymongo
 import uuid
 from datetime import datetime
-
 import config
-
 
 class Database:
     def __init__(self):
         self.client = pymongo.MongoClient(config.mongodb_uri)
         self.db = self.client["chatgpt_telegram_bot"]
-
         self.user_collection = self.db["user"]
         self.dialog_collection = self.db["dialog"]
+        self.payment_collection = self.db["payment"]
 
     def check_if_user_exists(self, user_id: int, raise_exception: bool = False):
         if self.user_collection.count_documents({"_id": user_id}) > 0:
@@ -35,14 +32,11 @@ class Database:
         user_dict = {
             "_id": user_id,
             "chat_id": chat_id,
-
             "username": username,
             "first_name": first_name,
             "last_name": last_name,
-
             "last_interaction": datetime.now(),
             "first_seen": datetime.now(),
-
             "current_dialog_id": None,
             "current_chat_mode": "default",
             "current_model": config.models["available_text_models"][2],
@@ -52,22 +46,61 @@ class Database:
                 "resolution": "1024x1024",
                 "n_images": 1
             },
-
             "n_used_tokens": {},
             "total_spent": 0,
             "dalle_2": {"images": 0, "cost": 0.0},
             "dalle_3": {"images": 0, "cost": 0.0},
             "n_generated_images": 0,
-            "n_transcribed_seconds": 0.0,  # voice message transcription
-            "token_balance": 100000,  # Initialize token balance for new users
+            "n_transcribed_seconds": 0.0,
+            "token_balance": 100000,
             "role": "trial_user",
-            "euro_balance": 1,
+            "rub_balance": 100,  # Изменено с euro_balance на rub_balance
             "total_topup": 0,
             "total_donated": 0
         }
 
         if not self.check_if_user_exists(user_id):
             self.user_collection.insert_one(user_dict)
+
+    def update_rub_balance(self, user_id: int, rub_amount: float):
+        self.check_if_user_exists(user_id, raise_exception=True)
+        self.user_collection.update_one(
+            {"_id": user_id},
+            {"$inc": {"rub_balance": rub_amount}}
+        )
+
+    def get_user_rub_balance(self, user_id: int) -> float:
+        user = self.user_collection.find_one({"_id": user_id})
+        return user.get("rub_balance", 0.0)
+
+    def deduct_rub_balance(self, user_id: int, rub_amount: float):
+        self.check_if_user_exists(user_id, raise_exception=True)
+        if rub_amount < 0:
+            raise ValueError("Сумма списания должна быть положительной")
+        self.user_collection.update_one(
+            {"_id": user_id},
+            {"$inc": {"rub_balance": -rub_amount, "total_spent": rub_amount}}
+        )
+
+    def add_payment_record(self, payment_id: str, user_id: int, amount: float, status: str = "pending"):
+        payment_dict = {
+            "_id": payment_id,
+            "user_id": user_id,
+            "amount": amount,
+            "status": status,
+            "created_at": datetime.now(),
+            "updated_at": datetime.now()
+        }
+        self.payment_collection.insert_one(payment_dict)
+
+    def update_payment_status(self, payment_id: str, status: str):
+        self.payment_collection.update_one(
+            {"_id": payment_id},
+            {"$set": {"status": status, "updated_at": datetime.now()}}
+        )
+
+    def get_payment(self, payment_id: str):
+        return self.payment_collection.find_one({"_id": payment_id})
 
     def start_new_dialog(self, user_id: int):
         self.check_if_user_exists(user_id, raise_exception=True)

@@ -6,8 +6,8 @@ import html
 import json
 from datetime import datetime, timedelta
 import openai
+import uuid
 
-import stripe
 import telegram
 from telegram import (
     Update,
@@ -42,6 +42,14 @@ import requests
 from telegram import InputFile
 import pytz
 
+# Импорт YooKassa
+from yookassa import Payment, Configuration
+import asyncio
+import aiohttp
+
+# Настройка YooKassa
+Configuration.configure(config.yookassa_shop_id, config.yookassa_secret_key)
+
 # setup
 db = database.Database()
 
@@ -49,7 +57,6 @@ logger = logging.getLogger(__name__)
 
 user_semaphores = {}
 user_tasks = {}
-
 
 HELP_MESSAGE = """Команды:
 
@@ -242,15 +249,15 @@ async def token_balance_preprocessor(update: Update, context: CallbackContext):
         context.user_data['process_allowed'] = True
         return True
 
-async def euro_balance_preprocessor(update: Update, context: CallbackContext):
+async def rub_balance_preprocessor(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
-    current_euro_balance = db.get_user_euro_balance(user_id)  
-    minimum_euro_required = 0.01  # Set the minimum required balance in euros. This value should be dynamic based on the operation.
+    current_rub_balance = db.get_user_rub_balance(user_id)
+    minimum_rub_required = 1.0  # Минимальный требуемый баланс в рублях
 
-    if current_euro_balance < minimum_euro_required:  
+    if current_rub_balance < minimum_rub_required:
         context.user_data['process_allowed'] = False
         await update.message.reply_text(
-            f"Oops, your balance is too low :( Please top up to continue. Your current euro balance is €{current_euro_balance:.2f}",
+            f"😔 На вашем балансе недостаточно средств. Пожалуйста, пополните счёт для продолжения. Ваш текущий баланс: {current_rub_balance:.2f}₽",
             parse_mode='Markdown'
         )
         return False
@@ -269,7 +276,7 @@ async def retry_handle(update: Update, context: CallbackContext):
     #for tokens
     #if not await token_balance_preprocessor(update, context):
         #return
-    if not await euro_balance_preprocessor(update, context):
+    if not await rub_balance_preprocessor(update, context):
         return
 
     dialog_messages = db.get_dialog_messages(user_id, dialog_id=None)
@@ -523,150 +530,235 @@ async def token_balance_command(update: Update, context: CallbackContext):
     token_balance = db.check_token_balance(user_id)
     await update.message.reply_text(f"Your current token balance is: `{token_balance}`", parse_mode='Markdown')
 
+
 async def topup_handle(update: Update, context: CallbackContext, chat_id=None):
-
     user_id = chat_id if chat_id else update.effective_user.id
-    
-    if config.stripe_secret_key is None or config.stripe_secret_key == "":
 
+    if config.yookassa_shop_id is None or config.yookassa_shop_id == "":
         await context.bot.send_message(
             chat_id=user_id,
-            text="This bot does not have the payment system turned on :(", 
+            text="В боте не включена система оплаты :(",
             parse_mode='Markdown'
         )
         return
 
-    # Define euro amount options for balance top-up
-    euro_amount_options = {
-        "€1.25": 125,  # Pay €1.25 and add €1 to balance
-        "€3": 300,  # Add €3 to balance
-        "€5": 500,  # Add €5 to balance
-        "€10": 1000,  # Add €10 to balance
-        "€20": 2000,  # Add €20 to balance
-        "Other amount...": "custom",  # Custom amount option
-        "Donation ❤️": "donation"
+    # Опции пополнения в рублях
+    rub_amount_options = {
+        "100 рублей": 10000,  # в копейках
+        "300 рублей": 30000,
+        "500 рублей": 50000,
+        "1000 рублей": 100000,
+        "2000 рублей": 200000,
+        "Другая сумма...": "custom",
+        "Донат ❤️": "donation"
     }
-    
-    # Generate inline keyboard buttons for each euro amount option
+
+    # Генерация клавиатуры
     keyboard = [
         [InlineKeyboardButton(text, callback_data=f"topup|topup_{amount}")]
-        for text, amount in euro_amount_options.items()
+        for text, amount in rub_amount_options.items()
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await context.bot.send_photo(chat_id=user_id, photo=open(config.payment_banner_photo_path, 'rb')) #Send the banner
 
-    # Send message with euro amount options
+    # Отправка баннера (если есть)
+    try:
+        await context.bot.send_photo(chat_id=user_id, photo=open(config.payment_banner_photo_path, 'rb'))
+    except:
+        pass
+
+    # Сообщение с опциями пополнения
     await context.bot.send_message(
         chat_id=user_id,
-        text="Currently supported payment methods: *Card*, *GooglePay*, *PayPal*, *iDeal*.\n\n For *GPT-4*, *€1* gives you *75,000* words, or *200 A4 pages*!\n\n For *GPT-3.5*, its almost *20 times cheaper*. \n\nPlease select the *amount* you wish to add to your *balance*:\n\n", #topup 1.25 message
+        text="Поддерживаемые методы оплаты: *Банковские карты*, *ЮMoney*, *Сбербанк Онлайн*, *QIWI*, *WebMoney*.\n\n"
+             "Для *GPT-4*, *100 рублей* дают вам *~50,000 слов*!\n\n"
+             "Для *GPT-3.5*, стоимость почти *в 20 раз ниже*.\n\n"
+             "Выберите *сумму* для пополнения *баланса*:",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
 
+
+async def create_yookassa_payment(user_id: int, amount_rub: float, description: str = "Пополнение баланса"):
+    """Создание платежа в YooKassa"""
+    try:
+        idempotence_key = str(uuid.uuid4())
+
+        payment = Payment.create({
+            "amount": {
+                "value": f"{amount_rub:.2f}",
+                "currency": "RUB"
+            },
+            "confirmation": {
+                "type": "redirect",
+                "return_url": "https://t.me/your_bot"  # Замените на username вашего бота
+            },
+            "capture": True,
+            "description": description,
+            "metadata": {
+                "user_id": user_id
+            }
+        }, idempotence_key)
+
+        # Сохраняем информацию о платеже в базу
+        db.add_payment_record(payment.id, user_id, amount_rub)
+
+        return payment.confirmation.confirmation_url, payment.id
+
+    except Exception as e:
+        logger.error(f"Ошибка создания платежа YooKassa: {e}")
+        raise
+
+
+async def check_payment_status(payment_id: str):
+    """Проверка статуса платежа"""
+    try:
+        payment = Payment.find_one(payment_id)
+        return payment.status
+    except Exception as e:
+        logger.error(f"Ошибка проверки статуса платежа: {e}")
+        return None
+
+
 async def topup_callback_handle(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
-    
+
     data = query.data
 
-    #context.user_data['is_donation'] = False
-
     if data == "topup|topup_custom" or data == "topup|topup_donation":
-        #custom_type = "donation" if "donation" in data else "custom"
         is_donation = "donation" in data
-        prompt_text = "Thank you for considering *donating*! \n\nPlease enter the *donation* amount in euros(e.g., *5* for *€5*):" if is_donation == "donation" else "Please enter the *custom amount* in euros (e.g., *5* for *€5*):"
-        # Prompt the user to enter a custom amount
-        keyboard = [[InlineKeyboardButton("⬅️", callback_data="topup|back_to_topup_options")]]
+        prompt_text = "Спасибо, что хотите поддержать нас! ❤️\n\nВведите сумму доната в рублях (например, *500* для *500 рублей*):" if is_donation else "Введите сумму пополнения в рублях (например, *500* для *500 рублей*):"
+
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="topup|back_to_topup_options")]]
         await query.edit_message_text(
             text=prompt_text,
-            reply_markup=InlineKeyboardMarkup([]), #write keyboard instead of the brackets "[]" if you want the button
+            reply_markup=InlineKeyboardMarkup([]),
             parse_mode='Markdown'
         )
-        
-        context.user_data['awaiting_custom_topup'] = "donation" if is_donation else "custom" # Store a flag in the user's context to indicate awaiting a custom top-up amount
-        context.user_data['is_donation'] = is_donation # store a flag in the user's context to differentiate between donation and others
 
+        context.user_data['awaiting_custom_topup'] = "donation" if is_donation else "custom"
+        context.user_data['is_donation'] = is_donation
         return
 
     elif data == "topup|back_to_topup_options":
-        
         context.user_data['awaiting_custom_topup'] = False
         context.user_data.pop('is_donation', None)
-            # Define euro amount options for balance top-up
-        euro_amount_options = {
-            "€1.25": 125,  # Example: Add €10 to balance
-            "€3": 300,  # Example: Add €10 to balance
-            "€5": 500,  # Example: Add €10 to balance
-            "€10": 1000,  # Example: Add €20 to balance
-            "€20": 2000,  # Example: Add €50 to balance
-            "Other amount...": "custom",  # Custom amount option
-            "Donation ❤️": "donation"
+
+        rub_amount_options = {
+            "100 рублей": 10000,
+            "300 рублей": 30000,
+            "500 рублей": 50000,
+            "1000 рублей": 100000,
+            "2000 рублей": 200000,
+            "Другая сумма...": "custom",
+            "Донат ❤️": "donation"
         }
 
-    # Generate inline keyboard buttons for each euro amount option
         keyboard = [
             [InlineKeyboardButton(text, callback_data=f"topup|topup_{amount if amount != 'custom' else 'custom'}")]
-            for text, amount in euro_amount_options.items()
+            for text, amount in rub_amount_options.items()
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # Replace the existing message with the top-up options message
         await query.edit_message_text(
-            text="Currently supported payment methods: *Card*, *GooglePay*, *PayPal*, *iDeal*.\n\n For *GPT-4*, *€1* gives you *75,000* words, or *200 A4 pages*!\n\n For *GPT-3.5*, its almost *20 times cheaper*. \n\nPlease select the *amount* you wish to add to your *balance*:\n\n",
+            text="Поддерживаемые методы оплаты: *Банковские карты*, *ЮMoney*, *Сбербанк Онлайн*, *QIWI*, *WebMoney*.\n\n"
+                 "Для *GPT-4*, *100 рублей* дают вам *~50,000 слов*!\n\n"
+                 "Для *GPT-3.5*, стоимость почти *в 20 раз ниже*.\n\n"
+                 "Выберите *сумму* для пополнения *баланса*:",
             reply_markup=reply_markup,
             parse_mode='Markdown'
-        ) 
+        )
 
     else:
-        
-        await query.edit_message_text("⏳ Generating payment link...")
+        await query.edit_message_text("⏳ Создаю ссылку для оплаты...")
         context.user_data.pop('is_donation', None)
         user_id = update.effective_user.id
         _, amount_str = query.data.split("_")
-        amount_cents = int(amount_str)  # Amount in cents for Stripe
+        amount_kopecks = int(amount_str)  # Сумма в копейках
+        amount_rub = amount_kopecks / 100  # Конвертируем в рубли
 
-        session_url = await create_stripe_session(user_id, amount_cents, context)
+        is_donation = context.user_data.get('is_donation', False)
+        description = "Донат для поддержки проекта ❤️" if is_donation else f"Пополнение баланса на {amount_rub:.2f} рублей"
 
-    # Conditional warning for the €1.25 top-up
-        if amount_cents == 125:  # Check if the amount is 125 cents (€1.25)                                                    
-            warning_message = "\n\n*Note:* Stripe charges a *€0.25 fee* per transaction. Therefore, you'll receive *€1.00* in credit so that I don't end up loosing money. \nFor all other payment options, I'll take care of the tax for you. \n*Thank you* for understanding! ❤️"
+        try:
+            payment_url, payment_id = await create_yookassa_payment(user_id, amount_rub, description)
+
+            payment_text = (
+                f"Нажмите на кнопку ниже для оплаты *{amount_rub:.2f} рублей*!\n\n"
+                "🔐 Бот использует *безопасную платежную систему [YooKassa](https://yookassa.ru/)*. "
+                "*Мы не храним ваши платежные данные.*\n\n"
+                "После успешной оплаты баланс будет пополнен автоматически в течение нескольких минут."
+            )
+
+            keyboard = [
+                [InlineKeyboardButton("💳 Оплатить", url=payment_url)],
+                [InlineKeyboardButton("🔄 Проверить оплату", callback_data=f"check_payment|{payment_id}")],
+                [InlineKeyboardButton("⬅️ Назад", callback_data="topup|back_to_topup_options")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await query.edit_message_text(
+                text=payment_text,
+                parse_mode='Markdown',
+                reply_markup=reply_markup,
+                disable_web_page_preview=True
+            )
+
+        except Exception as e:
+            await query.edit_message_text(
+                "😔 Произошла ошибка при создании платежа. Пожалуйста, попробуйте позже.",
+                parse_mode='Markdown'
+            )
+
+
+async def check_payment_handler(update: Update, context: CallbackContext):
+    """Обработчик проверки статуса платежа"""
+    query = update.callback_query
+    await query.answer()
+
+    _, payment_id = query.data.split("|")
+
+    try:
+        status = await check_payment_status(payment_id)
+
+        if status == "succeeded":
+            payment_data = db.get_payment(payment_id)
+            if payment_data:
+                user_id = payment_data["user_id"]
+                amount = payment_data["amount"]
+
+                # Зачисляем средства
+                db.update_rub_balance(user_id, amount)
+                db.update_payment_status(payment_id, "completed")
+
+                if payment_data.get("is_donation"):
+                    db.update_total_donated(user_id, amount)
+                    message = f"❤️ Спасибо за ваш донат в размере {amount:.2f} рублей! Ваша поддержка очень важна для нас!"
+                else:
+                    db.update_total_topup(user_id, amount)
+                    message = f"✅ Платеж подтвержден! На ваш баланс зачислено {amount:.2f} рублей."
+
+                    # Обновляем роль пользователя после первого пополнения
+                    user_role = db.get_user_role(user_id)
+                    if user_role == "trial_user":
+                        db.user_collection.update_one(
+                            {"_id": user_id},
+                            {"$set": {"role": "regular_user"}}
+                        )
+                        message += "\n\nВаш статус обновлен до *постоянного пользователя*! Спасибо за доверие! ❤️"
+
+                await query.edit_message_text(message, parse_mode='Markdown')
+
+        elif status == "pending":
+            await query.answer("⏳ Платеж еще обрабатывается. Попробуйте проверить через минуту.", show_alert=True)
+        elif status == "canceled":
+            await query.answer("❌ Платеж отменен.", show_alert=True)
         else:
-            warning_message = ""
+            await query.answer("ℹ️ Статус платежа неизвестен. Обратитесь в поддержку.", show_alert=True)
 
-        payment_text = (
-        f"Tap the button below to complete your *€{amount_cents / 100:.2f}* payment! {warning_message}\n\n"
-        "🔐 The bot uses a *trusted* payment service [Stripe](https://stripe.com/legal/ssa). "
-        "*It does not store your payment data.* \n\nOnce you make a payment, you will receive a *confirmation message*!"
-        )
-        keyboard = [
-        [InlineKeyboardButton("💳Pay", url=session_url)],
-        [InlineKeyboardButton("⬅️", callback_data="topup|back_to_topup_options")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+    except Exception as e:
+        await query.answer("⚠️ Ошибка при проверке платежа. Попробуйте позже.", show_alert=True)
 
-        await query.edit_message_text(text=payment_text, parse_mode='Markdown', reply_markup=reply_markup, disable_web_page_preview=True)
-
-async def create_stripe_session(user_id: int, amount_cents: int, context: CallbackContext):
-    stripe.api_key = config.stripe_secret_key
-    is_donation = context.user_data.get('is_donation', False)
-    product_name = "Donation❤️" if is_donation else "Balance Top-up"
-    session = stripe.checkout.Session.create(
-        payment_method_types=['card', 'paypal', 'ideal'],
-        line_items=[{
-            'price_data': {
-                'currency': 'eur',
-                'product_data': {'name': product_name},
-                'unit_amount': amount_cents,
-            },
-            'quantity': 1,
-        }],
-        mode='payment',
-        success_url='https://t.me/ChatdudBot',  # Adjust with your success URL
-        cancel_url='https://t.me/ChatdudBot',  # Adjust with your cancel URL
-        metadata={'user_id': user_id, 'is_donation': str(is_donation).lower()}, # Metadata to track which user is making the payment
-    )
-    return session.url
 
 async def send_confirmation_message_async(user_id, euro_amount, is_donation):
     user = db.user_collection.find_one({"_id": user_id})
@@ -1040,7 +1132,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
     user_id = update.message.from_user.id
     chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
 
-    if not await euro_balance_preprocessor(update, context):
+    if not await rub_balance_preprocessor(update, context):
         return
 
     if chat_mode == "artist":
@@ -1304,7 +1396,7 @@ async def voice_message_handle(update: Update, context: CallbackContext):
     #if not await token_balance_preprocessor(update, context):
         #return
 
-    if not await euro_balance_preprocessor(update, context):
+    if not await rub_balance_preprocessor(update, context):
         return
 
     chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
@@ -1885,18 +1977,16 @@ async def show_balance_handle_full_details(update: Update, context: CallbackCont
 
 async def show_balance_handle(update: Update, context: CallbackContext):
     await register_user_if_not_exists(update, context, update.message.from_user)
-
     user_id = update.message.from_user.id
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-    current_token_balance = db.check_token_balance(user_id) #if you use token balance
-    current_euro_balance = db.get_user_euro_balance(user_id)
+    current_rub_balance = db.get_user_rub_balance(user_id)
 
-    text = f"Your euro balance is <b>€{current_euro_balance:.2f}</b> 💶\n\n"
-    text += "Press 'Details' for more information.\n"
+    text = f"Ваш баланс: <b>{current_rub_balance:.2f}₽</b> 💰\n\n"
+    text += "Нажмите 'Подробнее' для дополнительной информации.\n"
 
     keyboard = [
-        [InlineKeyboardButton("🏷️ Details", callback_data='show_details')]
+        [InlineKeyboardButton("📊 Подробнее", callback_data='show_details')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -1967,91 +2057,153 @@ def initialize_total_spent_field():
                 {"$set": {"total_spent": 0}}
             )
 
+
 async def callback_show_details(update: Update, context: CallbackContext):
-    print("Details button pressed")
+    """
+    Показывает детальную информацию о балансе и использовании средств пользователя.
+    Вызывается при нажатии кнопки 'Подробнее' в сообщении с балансом.
+    """
+    print("Нажата кнопка 'Подробнее'")
     query = update.callback_query
     await query.answer()
 
     user_id = query.from_user.id
 
-    initialize_total_spent_field()
-    # Initialize missing fields for DALL-E 2 and DALL-E 3 tracking
-    default_dalle_2 = {"images": 0, "cost": 0.0}
-    default_dalle_3 = {"images": 0, "cost": 0.0}
+    try:
+        # Инициализация поля total_spent для всех существующих пользователей
+        initialize_total_spent_field()
 
-    all_users = db.user_collection.find()
-    for user in all_users:
-        if "dalle_2" not in user or user["dalle_2"] is None:
+        # Получаем текущий баланс в рублях
+        current_rub_balance = db.get_user_rub_balance(user_id)
+
+        # Получаем данные об использовании
+        n_used_tokens_dict = db.get_user_attribute(user_id, "n_used_tokens")
+        n_generated_images = db.get_user_attribute(user_id, "n_generated_images")
+        n_transcribed_seconds = db.get_user_attribute(user_id, "n_transcribed_seconds")
+
+        # Получаем финансовую информацию
+        financials = db.get_user_financials(user_id)
+        total_topup = financials['total_topup']
+        total_donated = financials['total_donated']
+        total_spent = db.get_user_attribute(user_id, "total_spent")
+
+        # Инициализация данных по DALL-E
+        default_dalle_2 = {"images": 0, "cost": 0.0}
+        default_dalle_3 = {"images": 0, "cost": 0.0}
+
+        # Проверяем и инициализируем поля DALL-E при необходимости
+        user_data = db.user_collection.find_one({"_id": user_id})
+        if "dalle_2" not in user_data or user_data["dalle_2"] is None:
             db.user_collection.update_one(
-                {"_id": user["_id"]},
+                {"_id": user_id},
                 {"$set": {"dalle_2": default_dalle_2}}
             )
-        if "dalle_3" not in user or user["dalle_3"] is None:
+        if "dalle_3" not in user_data or user_data["dalle_3"] is None:
             db.user_collection.update_one(
-                {"_id": user["_id"]},
+                {"_id": user_id},
                 {"$set": {"dalle_3": default_dalle_3}}
             )
 
-    # Fetch current balance and stats after ensuring fields exist
-    current_euro_balance = db.get_user_euro_balance(user_id)
-    n_used_tokens_dict = db.get_user_attribute(user_id, "n_used_tokens")
-    n_generated_images = db.get_user_attribute(user_id, "n_generated_images")
-    n_transcribed_seconds = db.get_user_attribute(user_id, "n_transcribed_seconds")
-    financials = db.get_user_financials(user_id)
-    total_topup = financials['total_topup']
-    total_donated = financials['total_donated']
-    total_spent = db.get_user_attribute(user_id, "total_spent")
+        # Получаем актуальные данные по DALL-E
+        dalle_2_data = db.get_user_attribute(user_id, "dalle_2") or default_dalle_2
+        dalle_3_data = db.get_user_attribute(user_id, "dalle_3") or default_dalle_3
 
-    # Retrieve DALL-E 2 and DALL-E 3 data
-    dalle_2_data = db.get_user_attribute(user_id, "dalle_2") or default_dalle_2
-    dalle_3_data = db.get_user_attribute(user_id, "dalle_3") or default_dalle_3
+        # Формируем детализированную информацию
+        details_text = "📊 Детали использования:\n"
+        total_n_spent_rub = 0
+        total_n_used_tokens = 0
 
-    details_text = "🏷️ Details:\n"
-    total_n_spent_dollars = 0
-    total_n_used_tokens = 0
+        # Расчет затрат по моделям (в рублях)
+        for model_key in sorted(n_used_tokens_dict.keys()):
+            n_input_tokens, n_output_tokens = n_used_tokens_dict[model_key]["n_input_tokens"], \
+            n_used_tokens_dict[model_key]["n_output_tokens"]
+            total_n_used_tokens += n_input_tokens + n_output_tokens
 
-    # Calculate the total spent for each model
-    for model_key in sorted(n_used_tokens_dict.keys()):
-        n_input_tokens, n_output_tokens = n_used_tokens_dict[model_key]["n_input_tokens"], n_used_tokens_dict[model_key]["n_output_tokens"]
-        total_n_used_tokens += n_input_tokens + n_output_tokens
+            # Используем цены в рублях из config.model_pricing
+            price_per_1000_input = config.model_pricing.get(model_key, {}).get('price_per_1000_input_tokens', 0)
+            price_per_1000_output = config.model_pricing.get(model_key, {}).get('price_per_1000_output_tokens', 0)
 
-        n_input_spent_dollars = config.models["info"][model_key]["price_per_1000_input_tokens"] * (n_input_tokens / 1000)
-        n_output_spent_dollars = config.models["info"][model_key]["price_per_1000_output_tokens"] * (n_output_tokens / 1000)
-        total_n_spent_dollars += n_input_spent_dollars + n_output_spent_dollars
+            n_input_spent_rub = price_per_1000_input * (n_input_tokens / 1000)
+            n_output_spent_rub = price_per_1000_output * (n_output_tokens / 1000)
+            total_n_spent_rub += n_input_spent_rub + n_output_spent_rub
 
-        details_text += f"- {model_key}: <b>{n_input_spent_dollars + n_output_spent_dollars:.03f}€</b> / <b>{n_input_tokens + n_output_tokens} tokens</b>\n"
+            details_text += f"- {model_key}: <b>{n_input_spent_rub + n_output_spent_rub:.2f}₽</b> / <b>{n_input_tokens + n_output_tokens} токенов</b>\n"
 
-    # Add DALL-E 2 and DALL-E 3 usage to the details
-    details_text += f"- DALL·E 2 (image generation): <b>{dalle_2_data['cost']:.03f}€</b> / <b>{dalle_2_data['images']} images</b>\n"
-    details_text += f"- DALL·E 3 (image generation): <b>{dalle_3_data['cost']:.03f}€</b> / <b>{dalle_3_data['images']} images</b>\n"
+        # Добавляем информацию по генерации изображений DALL-E
+        details_text += f"- DALL·E 2 (генерация изображений): <b>{dalle_2_data['cost']:.2f}₽</b> / <b>{dalle_2_data['images']} изображений</b>\n"
+        details_text += f"- DALL·E 3 (генерация изображений): <b>{dalle_3_data['cost']:.2f}₽</b> / <b>{dalle_3_data['images']} изображений</b>\n"
 
-    # Add Whisper usage
-    voice_recognition_n_spent_dollars = config.models["info"]["whisper"]["price_per_1_min"] * (n_transcribed_seconds / 60)
-    total_n_spent_dollars += voice_recognition_n_spent_dollars
+        # Добавляем информацию по распознаванию голоса (Whisper)
+        voice_recognition_n_spent_rub = config.model_pricing.get("whisper", {}).get("price_per_1_min", 0.45) * (
+                    n_transcribed_seconds / 60)
+        total_n_spent_rub += voice_recognition_n_spent_rub
 
-    details_text += f"- Whisper (voice recognition): <b>{voice_recognition_n_spent_dollars:.03f}€</b> / <b>{n_transcribed_seconds:.01f} seconds</b>\n"
+        details_text += f"- Whisper (распознавание голоса): <b>{voice_recognition_n_spent_rub:.2f}₽</b> / <b>{n_transcribed_seconds:.01f} секунд</b>\n"
 
-    # Summary information
-    text = f"Your euro balance is <b>€{current_euro_balance:.3f}</b> 💶\n\n"
-    text += "You:\n\n"
-    text += f"   Have yet to make your first payment 😢\n" if total_topup == 0 else f"   Paid <b>{total_topup:.02f}€</b> ❤️\n" if total_topup < 30 else f"   Paid <b>{total_topup:.02f}€</b>. I'm glad you really like using the bot!❤️\n"
-    text += f"   Have not made any donations.\n\n" if total_donated == 0 else f"   Donated <b>{total_donated:.02f}€</b>. You're a legend! ❤️\n\n" if total_donated < 10 else f"   \nDonated <b>{total_donated:.02f}€</b>!. I appreciate your continued support!! ❤️❤️\n\n"
-    text += f"   Spent ≈ <b>{total_spent:.03f}€</b> 💵\n"
-    text += f"   Used <b>{total_n_used_tokens}</b> tokens 🪙\n\n"
-    text += details_text
+        # Формируем итоговое сообщение
+        text = f"💳 Ваш текущий баланс: <b>{current_rub_balance:.2f}₽</b>\n\n"
+        text += "📈 Статистика:\n\n"
 
-    print("Attempting to edit message")
-    try:
-        await query.edit_message_text(text=text, parse_mode=ParseMode.HTML)
+        # Информация о платежах
+        if total_topup == 0:
+            text += "   Вы еще не совершали пополнений 😢\n"
+        elif total_topup < 1000:
+            text += f"   Всего пополнено: <b>{total_topup:.2f}₽</b> ❤️\n"
+        else:
+            text += f"   Всего пополнено: <b>{total_topup:.2f}₽</b>. Спасибо за доверие! ❤️\n"
+
+        # Информация о донатах
+        if total_donated == 0:
+            text += "   Донаты не осуществлялись.\n\n"
+        elif total_donated < 500:
+            text += f"   Донатов на сумму: <b>{total_donated:.2f}₽</b>. Вы великолепны! ❤️\n\n"
+        else:
+            text += f"   Донатов на сумму: <b>{total_donated:.2f}₽</b>. Благодарим за поддержку!! ❤️❤️\n\n"
+
+        # Общая статистика использования
+        text += f"   Всего потрачено: <b>{total_spent:.2f}₽</b> 💵\n"
+        text += f"   Использовано токенов: <b>{total_n_used_tokens}</b> 🪙\n\n"
+        text += details_text
+
+        # Добавляем информацию о следующем пополнении
+        if current_rub_balance < 50:
+            text += "\n⚠️ <i>Баланс заканчивается. Рекомендуем пополнить счёт для бесперебойной работы.</i>"
+
+        print("Пытаюсь отредактировать сообщение")
+        try:
+            await query.edit_message_text(text=text, parse_mode=ParseMode.HTML)
+        except Exception as e:
+            print(f"Не удалось отредактировать сообщение: {e}")
+            # Пытаемся отправить новое сообщение в случае ошибки редактирования
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=text,
+                parse_mode=ParseMode.HTML
+            )
+        print("Сообщение обработано")
+
     except Exception as e:
-        print(f"Failed to edit message: {e}")
-    print("Message edit attempted")
+        error_text = f"😔 Произошла ошибка при получении детальной информации. Пожалуйста, попробуйте позже.\n\nОшибка: {str(e)}"
+        print(f"Ошибка в callback_show_details: {e}")
+        try:
+            await query.edit_message_text(text=error_text, parse_mode=ParseMode.HTML)
+        except:
+            await context.bot.send_message(chat_id=user_id, text=error_text, parse_mode=ParseMode.HTML)
+
+
+def initialize_total_spent_field():
+    """
+    Инициализирует поле total_spent для всех пользователей в базе данных.
+    """
+    all_users = db.user_collection.find()
+    for user in all_users:
+        if "total_spent" not in user:
+            db.user_collection.update_one(
+                {"_id": user["_id"]},
+                {"$set": {"total_spent": 0}}
+            )
 
 async def edited_message_handle(update: Update, context: CallbackContext):
-
-    
-
-
     if update.edited_message.chat.type == "private":
         text = "🥲 Unfortunately, message <b>editing</b> is not supported"
         await update.edited_message.reply_text(text, parse_mode=ParseMode.HTML)
@@ -2210,6 +2362,7 @@ def run_bot() -> None:
     application.add_handler(CommandHandler('token_balance', token_balance_command))
     application.add_handler(CommandHandler("topup", topup_handle, filters=filters.ALL))
     application.add_handler(CallbackQueryHandler(topup_callback_handle, pattern='^topup\\|'))
+    application.add_handler(CallbackQueryHandler(check_payment_handler, pattern='^check_payment\\|'))
 
     #admin commands
     application.add_handler(CommandHandler("admin", admin_command))

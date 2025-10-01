@@ -15,11 +15,11 @@ config_env = dotenv.dotenv_values(config_dir / "config.env")
 telegram_token = config_yaml["telegram_token"]
 openai_api_key = config_yaml["openai_api_key"]
 anthropic_api_key = config_yaml.get("anthropic_api_key", None)
-developer_username =  config_yaml.get("developer_username", "")
+developer_username = config_yaml.get("developer_username", "")
 timezone = config_yaml.get("database_timezone", "UTC")
 enable_detailed_logging = config_yaml.get("enable_detailed_logging", True)
-stripe_secret_key = config_yaml.get("stripe_secret_key", None)
-stripe_webhook_secret = config_yaml.get("stripe_webhook_secret", None)  
+yookassa_shop_id = config_yaml.get("yookassa_shop_id", None)
+yookassa_secret_key = config_yaml.get("yookassa_secret_key", None)
 openai_api_base = config_yaml.get("openai_api_base", None)
 allowed_telegram_usernames = config_yaml["allowed_telegram_usernames"]
 new_dialog_timeout = config_yaml["new_dialog_timeout"]
@@ -32,16 +32,14 @@ model_pricing = config_yaml.get('model_pricing', {})
 role_deduction_rates = config_yaml.get('role_deduction_rates', {})
 roles = config_yaml.get('roles', {})
 
-
 # chat_modes
-with open(config_dir / "chat_modes.yml", 'r') as f:
+with open(config_dir / "chat_modes.yml", 'r', encoding='utf-8') as f:
     chat_modes = yaml.safe_load(f)
 
 # models
-with open(config_dir / "models.yml", 'r') as f:
+with open(config_dir / "models.yml", 'r', encoding='utf-8') as f:
     models = yaml.safe_load(f)
 
 # files
 help_group_chat_video_path = Path(__file__).parent.parent.resolve() / "static" / "help_group_chat.mp4"
-
 payment_banner_photo_path = Path(__file__).parent.parent.resolve() / "static" / "payment_banner.png"

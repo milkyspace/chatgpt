@@ -1,14 +1,12 @@
-python-telegram-bot[rate-limiter]==20.1
-openai==0.28.1 #chatgpt library
-tiktoken>=0.3.0 #tokenizer 
-PyYAML==6.0 #configs 
-pymongo==4.3.3 #database
-python-dotenv==0.21.0 #.env files
-stripe>=2.60.0 #payment method
-Flask==2.0.1 #payment recieve notif
-Werkzeug==2.0.1 #payment recieve notif and debug
-redis>=4.0.2 #payment recieve notif
-aioredis>=2.0.0 #payment recieve notif
-pytz==2023.3 #timezone management
-anthropic #claude library
-#tokenizers #other tokenizer if you want to also use the one in the utils file
+python-telegram-bot==20.7
+openai==1.3.0
+pymongo==4.6.0
+PyYAML==6.0.1
+python-dotenv==1.0.0
+pytz==2023.3
+yookassa==3.7.1
+aioredis==2.0.1
+aiohttp==3.9.0
+anthropic==0.7.0
+tiktoken==0.5.2
+requests==2.31.0
