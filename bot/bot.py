@@ -1895,8 +1895,8 @@ async def show_balance_handle(update: Update, context: CallbackContext):
     current_token_balance = db.check_token_balance(user_id) #if you use token balance
     current_euro_balance = db.get_user_euro_balance(user_id)
 
-    text = f"Your euro balance is <b>€{current_euro_balance:.2f}</b> 💶\n\n"
-    text += "Press 'Details' for more information.\n"
+    text = f"Ваш баланс <b>€{current_euro_balance:.2f}</b> 💶\n\n"
+    text += "Нажмите 'Детально' для полной информации.\n"
 
     keyboard = [
         [InlineKeyboardButton("🏷️ Details", callback_data='show_details')]
@@ -1945,12 +1945,12 @@ async def callback_show_details_old(update: Update, context: CallbackContext):
     details_text += f"- DALL·E 2 (image generation): <b>{image_generation_n_spent_dollars:.03f}$</b> / <b>{n_generated_images} images</b>\n"
     details_text += f"- Whisper (voice recognition): <b>{voice_recognition_n_spent_dollars:.03f}$</b> / <b>{n_transcribed_seconds:.01f} seconds</b>\n"
 
-    text = f"Your euro balance is <b>€{current_euro_balance:.3f}</b> 💶\n\n"
-    text += "You:\n\n"
-    text += f"   Have yet to make your first payment 😢\n" if total_topup == 0 else f"   Paid <b>{total_topup:.02f}€</b> ❤️\n" if total_topup < 30 else f"   Paid <b>{total_topup:.02f}€</b>. I'm glad you really like using the bot!❤️\n"
-    text += f"   Have not made any donations.\n\n" if total_donated == 0 else f"   Donated <b>{total_donated:.02f}€</b>. You're a legend! ❤️\n\n" if total_donated < 10 else f"   \nDonated <b>{total_donated:.02f}€</b>!. I appreciate your continued support!! ❤️❤️\n\n"
-    text += f"   Spent ≈ <b>{total_n_spent_dollars:.03f}$</b> 💵\n"
-    text += f"   Used <b>{total_n_used_tokens}</b> tokens 🪙\n\n"
+    text = f"Ваш баланс <b>€{current_euro_balance:.3f}</b> 💶\n\n"
+    text += "Ты:\n\n"
+    text += f"   Ещё не сделал(а) первый платёж 😢\n" if total_topup == 0 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}€</b> ❤️\n" if total_topup < 30 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}€</b>. Рад, что тебе действительно нравится пользоваться ботом! ❤️\n"
+    text += f"   Ещё не делал(а) донатов.\n\n" if total_donated == 0 else f"   Задонатил(а) <b>{total_donated:.02f}€</b>. Ты — легенда! ❤️\n\n" if total_donated < 10 else f"   \nЗадонатил(а) <b>{total_donated:.02f}€</b>! Я очень ценю твою постоянную поддержку!! ❤️❤️\n\n"
+    text += f"   Потратил(а) ≈ <b>{total_n_spent_dollars:.03f}$</b> 💵\n"
+    text += f"   Использовал(а) <b>{total_n_used_tokens}</b> токенов 🪙\n\n"
     text += details_text
 
     print("Attempting to edit message")
@@ -2035,12 +2035,12 @@ async def callback_show_details(update: Update, context: CallbackContext):
     details_text += f"- Whisper (voice recognition): <b>{voice_recognition_n_spent_dollars:.03f}€</b> / <b>{n_transcribed_seconds:.01f} seconds</b>\n"
 
     # Summary information
-    text = f"Your euro balance is <b>€{current_euro_balance:.3f}</b> 💶\n\n"
-    text += "You:\n\n"
-    text += f"   Have yet to make your first payment 😢\n" if total_topup == 0 else f"   Paid <b>{total_topup:.02f}€</b> ❤️\n" if total_topup < 30 else f"   Paid <b>{total_topup:.02f}€</b>. I'm glad you really like using the bot!❤️\n"
-    text += f"   Have not made any donations.\n\n" if total_donated == 0 else f"   Donated <b>{total_donated:.02f}€</b>. You're a legend! ❤️\n\n" if total_donated < 10 else f"   \nDonated <b>{total_donated:.02f}€</b>!. I appreciate your continued support!! ❤️❤️\n\n"
-    text += f"   Spent ≈ <b>{total_spent:.03f}€</b> 💵\n"
-    text += f"   Used <b>{total_n_used_tokens}</b> tokens 🪙\n\n"
+    text = f"Ваш баланс <b>€{current_euro_balance:.3f}</b> 💶\n\n"
+    text += "Ты:\n\n"
+    text += f"   Ещё не сделал(а) первый платёж 😢\n" if total_topup == 0 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}€</b> ❤️\n" if total_topup < 30 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}€</b>. Рад, что тебе действительно нравится пользоваться ботом! ❤️\n"
+    text += f"   Ещё не делал(а) донатов.\n\n" if total_donated == 0 else f"   Задонатил(а) <b>{total_donated:.02f}€</b>. Ты — легенда! ❤️\n\n" if total_donated < 10 else f"   \nЗадонатил(а) <b>{total_donated:.02f}€</b>! Я очень ценю твою постоянную поддержку!! ❤️❤️\n\n"
+    text += f"   Потратил(а) ≈ <b>{total_spent:.03f}€</b> 💵\n"
+    text += f"   Использовал(а) <b>{total_n_used_tokens}</b> токенов 🪙\n\n"
     text += details_text
 
     print("Attempting to edit message")
