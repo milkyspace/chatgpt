@@ -60,8 +60,8 @@ HELP_MESSAGE = """<b>Команды:</b>
 /settings – Показать настройки
 /help – Помощь
 
-🎨 Генерация изображений /modeart
-⌨️ Расшифровка голосовых сообщений /modemesaudio
+🎨 Генерация изображений /mode_art
+⌨️ Расшифровка голосовых сообщений /mode_mesageaudio
 🎤 Вы можете отправлять <b>голосовые Сообщения</b> вместо текста
 👥 Добавить бота в <b>групповой чат</b>: /help_group_chat
 
@@ -198,7 +198,7 @@ async def start_handle(update: Update, context: CallbackContext):
     reply_text += HELP_MESSAGE
 
     await update.message.reply_text(reply_text, parse_mode=ParseMode.HTML)
-    await show_chat_modes_handle(update, context)
+    # await show_chat_modes_handle(update, context)
 
 
 async def help_handle(update: Update, context: CallbackContext):
@@ -1548,12 +1548,12 @@ async def set_chat_mode_handle(update: Update, context: CallbackContext):
     )
 
 def get_settings_menu(user_id: int):
-    text = "⚙️ Settings:"
+    text = "⚙️ Настройки:"
 
     # Define the buttons for the settings menu
     keyboard = [
-        [InlineKeyboardButton("🧠 AI Model", callback_data='model-ai_model')],
-        [InlineKeyboardButton("🎨 Artist Model", callback_data='model-artist_model')]
+        [InlineKeyboardButton("🧠 Модель нейросети", callback_data='model-ai_model')],
+        [InlineKeyboardButton("🎨 Модель художника", callback_data='model-artist_model')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
