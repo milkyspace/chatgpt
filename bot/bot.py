@@ -191,13 +191,13 @@ async def start_handle(update: Update, context: CallbackContext):
     developer = config.developer_username
     developer_info = ' '.join(developer) if isinstance(developer, list) else developer
 
-    reply_text = "👋 Heyoo! I'm <b>Chatdud</b>, your friendly neighborhood chatbot. Nice to meet ya! \n\n"
-    reply_text += "     I'm a telegram bot 🤖 powered by <b>ChatGPT</b> and maybe <b>Claude</b>, and I'm here to help with any questions you might have. \n\n"
-    reply_text += "You might ask yourself:\n  <i><b>Why use this bot when I can just use ChatGPT in my browser?</b></i> 🤔\n\n"
-    reply_text += "  Well, I use a <b>top-up</b> balance system, meaning you can pay as you go. Don't worry about no monthly $20 subscription!\n\n"
-    reply_text += "Also, there is <b>no message limit</b> per hour. As long as you have at least <b>€1.25</b> to feed me, we can chat <b>as much as you want!</b>\n Ain’t that cool?? 😎\n\n"
-    reply_text += " 🤫 Psst!\nDon't tell my creator, buut <b>the first euro is on the house!</b> \n\n You have plenty of time to decide if you want to continue using me and support us both. <b>We really appreciate it!</b> 🥰 \n\n"
-    reply_text += f"I'm currently in development, for any <b>issues</b> or <b>feedback</b>, {'don’t hesitate to contact my developer ' + developer_info if developer_info else ' '} \n\n"
+    reply_text = "👋 Привет! Я <b>Chatdud</b>, твой дружелюбный чат-бот по соседству. Рад знакомству! \n\n"
+    reply_text += "     Я телеграм-бот 🤖 на базе <b>ChatGPT</b> и, возможно, <b>Claude</b>, и я здесь, чтобы помочь с любыми твоими вопросами. \n\n"
+    reply_text += "Ты можешь спросить себя:\n  <i><b>Зачем использовать этого бота, если можно просто открыть ChatGPT в браузере?</b></i> 🤔\n\n"
+    reply_text += "  Всё просто: у меня система <b>пополнения баланса</b>, то есть ты платишь только за то, что используешь. Не нужно переживать из-за подписки на $20 в месяц!\n\n"
+    reply_text += "К тому же, у меня <b>нет лимита сообщений</b> в час. Пока у тебя есть хотя бы <b>€1.25</b> на балансе, мы можем болтать <b>сколько угодно!</b>\n Разве это не круто? 😎\n\n"
+    reply_text += " 🤫 Тсс!\nТолько не говори моему создателю, но <b>первый евро — за мой счёт!</b> \n\n У тебя будет достаточно времени, чтобы решить, хочешь ли ты продолжать пользоваться мной и поддержать нас обоих. <b>Мы очень это ценим!</b> 🥰 \n\n"
+    reply_text += f"Я сейчас в разработке, если появятся <b>вопросы</b> или <b>отзывы</b>, {'не стесняйся связаться с моим разработчиком ' + developer_info if developer_info else ' '} \n\n"
     reply_text += HELP_MESSAGE
 
     await update.message.reply_text(reply_text, parse_mode=ParseMode.HTML)
