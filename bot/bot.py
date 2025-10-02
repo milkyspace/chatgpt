@@ -1368,7 +1368,7 @@ async def generate_image_handle(update: Update, context: CallbackContext, messag
     message = message or update.message.text
 
     # Send a placeholder message
-    placeholder_message = await update.message.reply_text("<i>Waking up Picasso...</i>", parse_mode=ParseMode.HTML)
+    placeholder_message = await update.message.reply_text("<i>Рисуем...</i>", parse_mode=ParseMode.HTML)
 
     # Generate the images based on user preferences
     try:
@@ -1405,7 +1405,7 @@ async def generate_image_handle(update: Update, context: CallbackContext, messag
     db.deduct_cost_for_action(user_id=user_id, action_type=action_type, action_params=action_params)
 
     # Update the placeholder message with the final image message
-    pre_generation_message = f"Here is my attempt at drawing 🎨:\n\n  <i>{message or ''}</i>  \n\n Hold on, the picture is on its way!"
+    pre_generation_message = f"Нарисовали 🎨:\n\n  <i>{message or ''}</i>  \n\n Подождите немного, изображение почти готово!"
     await context.bot.edit_message_text(pre_generation_message, chat_id=placeholder_message.chat_id, message_id=placeholder_message.message_id, parse_mode=ParseMode.HTML)
 
     # Upload each generated image
@@ -1417,7 +1417,7 @@ async def generate_image_handle(update: Update, context: CallbackContext, messag
             image_url=image_url
         )
     
-    post_generation_message = f"Here is my attempt at drawing 🎨:\n\n  <i>{message or ''}</i>  \n\n Do you like it??"
+    post_generation_message = f"Нарисовали 🎨:\n\n  <i>{message or ''}</i>  \n\n Как вам??"
     await context.bot.edit_message_text(post_generation_message, chat_id=placeholder_message.chat_id, message_id=placeholder_message.message_id, parse_mode=ParseMode.HTML)
 
 #some resolutions were throwing an error, so I changed to send the image from memory
