@@ -1401,7 +1401,7 @@ async def generate_image_handle(update: Update, context: CallbackContext, messag
 
     # Token usage and cost deduction
     db.set_user_attribute(user_id, "n_generated_images", n_images + db.get_user_attribute(user_id, "n_generated_images"))
-    action_type = user_preferences.get("model", "dalle-2")
+    action_type = user_preferences.get("model", "dalle-3")
     db.deduct_cost_for_action(user_id=user_id, action_type=action_type, action_params=action_params)
 
     # Update the placeholder message with the final image message

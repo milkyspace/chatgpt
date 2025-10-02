@@ -7,6 +7,7 @@
     <list default="true" id="c49b2697-deab-421e-88ce-4ba8723f2a80" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/bot/bot.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/bot.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/config/chat_modes.yml" beforeDir="false" afterPath="$PROJECT_DIR$/config/chat_modes.yml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -66,7 +67,7 @@
       <option name="presentableId" value="Default" />
       <updated>1759295985110</updated>
       <workItem from="1759295986176" duration="9436000" />
-      <workItem from="1759306889566" duration="7168000" />
+      <workItem from="1759306889566" duration="7560000" />
     </task>
     <servers />
   </component>
