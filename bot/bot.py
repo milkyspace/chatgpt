@@ -1,10 +1,8 @@
-import io
 import logging
 import asyncio
 import traceback
 import html
-import json
-from datetime import datetime, timedelta
+from datetime import datetime
 import openai
 
 import stripe
@@ -26,7 +24,7 @@ from telegram.ext import (
     AIORateLimiter,
     filters
 )
-from telegram.constants import ParseMode, ChatAction
+from telegram.constants import ParseMode
 
 import config
 import database
