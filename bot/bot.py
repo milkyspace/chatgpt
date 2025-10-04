@@ -261,7 +261,7 @@ async def rub_balance_preprocessor(update: Update, context: CallbackContext):
     if current_rub_balance < minimum_rub_required:
         context.user_data['process_allowed'] = False
         await update.message.reply_text(
-            f"Ваш баланс слишком мал :( Пожалуйста, пополните баланс для продолжения.\nВаш баланс €{current_rub_balance:.2f}",
+            f"Ваш баланс слишком мал :( Пожалуйста, пополните баланс для продолжения.\nВаш баланс ₽{current_rub_balance:.2f}",
             parse_mode='Markdown'
         )
         return False
@@ -1907,7 +1907,7 @@ async def show_balance_handle_full_details(update: Update, context: CallbackCont
 
     total_n_spent_dollars += voice_recognition_n_spent_dollars
 
-    text = f"Ваш баланс <b>€{current_rub_balance}</b> \n\n"
+    text = f"Ваш баланс <b>₽{current_rub_balance}</b> \n\n"
     text += "Вы:\n\n"
     text += f"Ещё не было первого пополнения 😢\n" if total_topup == 0 else \
         f"Пополнено <b>{total_topup:.02f}€</b> ❤️\n" if total_topup < 30 else \
@@ -1933,7 +1933,7 @@ async def show_balance_handle(update: Update, context: CallbackContext):
     current_euro_balance = db.get_user_euro_balance(user_id)
     current_rub_balance = db.get_user_rub_balance(user_id)
 
-    text = f"Ваш баланс <b>€{current_rub_balance:.2f}</b> 💶\n\n"
+    text = f"Ваш баланс <b>₽{current_rub_balance:.2f}</b> 💶\n\n"
     text += "Нажмите 'Детально' для полной информации.\n"
 
     keyboard = [
@@ -1984,7 +1984,7 @@ async def callback_show_details_old(update: Update, context: CallbackContext):
     details_text += f"- DALL·E 2 (image generation): <b>{image_generation_n_spent_dollars:.03f}$</b> / <b>{n_generated_images} images</b>\n"
     details_text += f"- Whisper (voice recognition): <b>{voice_recognition_n_spent_dollars:.03f}$</b> / <b>{n_transcribed_seconds:.01f} seconds</b>\n"
 
-    text = f"Ваш баланс <b>€{current_rub_balance:.3f}</b> 💶\n\n"
+    text = f"Ваш баланс <b>₽{current_rub_balance:.3f}</b> 💶\n\n"
     text += "Ты:\n\n"
     text += f"   Ещё не сделал(а) первый платёж 😢\n" if total_topup == 0 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}€</b> ❤️\n" if total_topup < 30 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}€</b>. Рад, что тебе действительно нравится пользоваться ботом! ❤️\n"
     text += f"   Ещё не делал(а) донатов.\n\n" if total_donated == 0 else f"   Задонатил(а) <b>{total_donated:.02f}€</b>. Ты — легенда! ❤️\n\n" if total_donated < 10 else f"   \nЗадонатил(а) <b>{total_donated:.02f}€</b>! Я очень ценю твою постоянную поддержку!! ❤️❤️\n\n"
@@ -2075,7 +2075,7 @@ async def callback_show_details(update: Update, context: CallbackContext):
     details_text += f"- Whisper (voice recognition): <b>{voice_recognition_n_spent_dollars:.03f}€</b> / <b>{n_transcribed_seconds:.01f} seconds</b>\n"
 
     # Summary information
-    text = f"Ваш баланс <b>€{current_rub_balance:.3f}</b> 💶\n\n"
+    text = f"Ваш баланс <b>₽{current_rub_balance:.3f}</b> 💶\n\n"
     text += "Ты:\n\n"
     text += f"   Ещё не сделал(а) первый платёж 😢\n" if total_topup == 0 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}€</b> ❤️\n" if total_topup < 30 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}€</b>. Рад, что тебе действительно нравится пользоваться ботом! ❤️\n"
     text += f"   Ещё не делал(а) донатов.\n\n" if total_donated == 0 else f"   Задонатил(а) <b>{total_donated:.02f}€</b>. Ты — легенда! ❤️\n\n" if total_donated < 10 else f"   \nЗадонатил(а) <b>{total_donated:.02f}€</b>! Я очень ценю твою постоянную поддержку!! ❤️❤️\n\n"
