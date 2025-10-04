@@ -253,6 +253,22 @@ async def euro_balance_preprocessor(update: Update, context: CallbackContext):
         context.user_data['process_allowed'] = True
         return True
 
+async def rub_balance_preprocessor(update: Update, context: CallbackContext):
+    user_id = update.effective_user.id
+    current_rub_balance = db.get_user_rub_balance(user_id)
+    minimum_rub_required = 1  # Set the minimum required balance in rub. This value should be dynamic based on the operation.
+
+    if current_rub_balance < minimum_rub_required:
+        context.user_data['process_allowed'] = False
+        await update.message.reply_text(
+            f"Ваш баланс слишком мал :( Пожалуйста, пополните баланс для продолжения.\nВаш баланс €{current_rub_balance:.2f}",
+            parse_mode='Markdown'
+        )
+        return False
+    else:
+        context.user_data['process_allowed'] = True
+        return True
+
 
 async def retry_handle(update: Update, context: CallbackContext):
     await register_user_if_not_exists(update, context, update.message.from_user)
@@ -264,7 +280,9 @@ async def retry_handle(update: Update, context: CallbackContext):
     #for tokens
     #if not await token_balance_preprocessor(update, context):
         #return
-    if not await euro_balance_preprocessor(update, context):
+    # if not await euro_balance_preprocessor(update, context):
+    #     return
+    if not await rub_balance_preprocessor(update, context):
         return
 
     dialog_messages = db.get_dialog_messages(user_id, dialog_id=None)
@@ -541,11 +559,21 @@ async def topup_handle(update: Update, context: CallbackContext, chat_id=None):
         "Other amount...": "custom",  # Custom amount option
         "Donation ❤️": "donation"
     }
+    rub_amount_options = {
+        "₽100": 100,
+        "₽300": 300,
+        "₽500": 500,
+        "₽1000": 1000,
+        "₽2000": 2000,
+        "₽5000": 5000,
+        "Другая сумма...": "custom",  # Custom amount option
+        "Пожертвование ❤️": "donation"
+    }
     
     # Generate inline keyboard buttons for each euro amount option
     keyboard = [
         [InlineKeyboardButton(text, callback_data=f"topup|topup_{amount}")]
-        for text, amount in euro_amount_options.items()
+        for text, amount in rub_amount_options.items()
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -598,11 +626,21 @@ async def topup_callback_handle(update: Update, context: CallbackContext):
             "Other amount...": "custom",  # Custom amount option
             "Donation ❤️": "donation"
         }
+        rub_amount_options = {
+            "₽100": 100,
+            "₽300": 300,
+            "₽500": 500,
+            "₽1000": 1000,
+            "₽2000": 2000,
+            "₽5000": 5000,
+            "Другая сумма...": "custom",  # Custom amount option
+            "Пожертвование ❤️": "donation"
+        }
 
     # Generate inline keyboard buttons for each euro amount option
         keyboard = [
             [InlineKeyboardButton(text, callback_data=f"topup|topup_{amount if amount != 'custom' else 'custom'}")]
-            for text, amount in euro_amount_options.items()
+            for text, amount in rub_amount_options.items()
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 

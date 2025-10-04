@@ -62,6 +62,7 @@ class Database:
             "token_balance": 100000,  # Initialize token balance for new users
             "role": "trial_user",
             "euro_balance": 1,
+            "rub_balance": 100,
             "total_topup": 0,
             "total_donated": 0
         }
@@ -210,6 +211,13 @@ class Database:
             {"$inc": {"euro_balance": euro_amount}}
         )
 
+    def update_rub_balance(self, user_id: int, rub_amount: float):
+        self.check_if_user_exists(user_id, raise_exception=True)
+        self.user_collection.update_one(
+            {"_id": user_id},
+            {"$inc": {"rub_balance": rub_amount}}
+        )
+
     def update_total_topup(self, user_id, amount):
         self.user_collection.update_one(
             {"_id": user_id},
@@ -228,6 +236,11 @@ class Database:
         user = self.user_collection.find_one({"_id": user_id})
         return user.get("euro_balance", 0.0)
 
+    def get_user_rub_balance(self, user_id: int) -> float:
+
+        user = self.user_collection.find_one({"_id": user_id})
+        return user.get("rub_balance", 0.0)
+
     def get_user_financials(self, user_id):
         user_data = self.user_collection.find_one({"_id": user_id}, {"total_topup": 1, "total_donated": 1})
         if not user_data:
@@ -245,6 +258,16 @@ class Database:
         self.user_collection.update_one(
             {"_id": user_id},
             {"$inc": {"euro_balance": -euro_amount, "total_spent": euro_amount}}
+        )
+
+    def deduct_rub_balance(self, user_id: int, rub_amount: float):
+        self.check_if_user_exists(user_id, raise_exception=True)
+    # Ensure the deduction amount is not negative to avoid accidental balance increase
+        if rub_amount < 0:
+            raise ValueError("Deduction amount must be positive")
+        self.user_collection.update_one(
+            {"_id": user_id},
+            {"$inc": {"rub_balance": -rub_amount, "total_spent": rub_amount}}
         )
 
     def deduct_cost_for_action(self, user_id: int, action_type: str, action_params: dict):
@@ -268,6 +291,7 @@ class Database:
 
             # Calculate the cost based on input and output tokens
             cost_in_euros = ((action_params.get('n_input_tokens', 0) / 1000) * price_per_1000_input + (action_params.get('n_output_tokens', 0) / 1000) * price_per_1000_output) * deduction_rate
+            cost_in_rubs = ((action_params.get('n_input_tokens', 0) / 1000) * price_per_1000_input + (action_params.get('n_output_tokens', 0) / 1000) * price_per_1000_output) * deduction_rate
 
         # Handle DALLE-2 (per image)
         elif action_type == 'dalle-2':
@@ -279,11 +303,12 @@ class Database:
             price_per_image = dalle2_resolutions.get(resolution, {}).get('price_per_1_image', 0.020)
 
             cost_in_euros = n_images * price_per_image * deduction_rate
+            cost_in_rubs = n_images * price_per_image * deduction_rate
 
             # Update DALL-E 2 tracking in the user database
             self.user_collection.update_one(
                 {"_id": user_id},
-                {"$inc": {"dalle_2.images": n_images, "dalle_2.cost": cost_in_euros}}
+                {"$inc": {"dalle_2.images": n_images, "dalle_2.cost": cost_in_rubs}}
             )
 
         elif action_type == 'dalle-3':
@@ -298,11 +323,12 @@ class Database:
             price_per_image = resolution_info.get('price_per_1_image', 0.040)
 
             cost_in_euros = n_images * price_per_image * deduction_rate
+            cost_in_rubs = n_images * price_per_image * deduction_rate
 
             # Update DALL-E 3 tracking in the user database
             self.user_collection.update_one(
                 {"_id": user_id},
-                {"$inc": {"dalle_3.images": n_images, "dalle_3.cost": cost_in_euros}}
+                {"$inc": {"dalle_3.images": n_images, "dalle_3.cost": cost_in_rubs}}
             )
 
         # Handle Whisper (per minute)
@@ -311,10 +337,11 @@ class Database:
             price_per_minute = model_info.get('price_per_1_min', 0.006)
 
             cost_in_euros = audio_duration_minutes * price_per_minute * deduction_rate
+            cost_in_rubs = audio_duration_minutes * price_per_minute * deduction_rate
 
         else:
             raise ValueError(f"Unknown action type: {action_type}")
 
         # Deduct the calculated cost from the user's balance
-        self.deduct_euro_balance(user_id, cost_in_euros)
+        self.deduct_rub_balance(user_id, cost_in_rubs)
         
