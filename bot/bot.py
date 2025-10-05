@@ -1343,9 +1343,9 @@ async def voice_message_handle(update: Update, context: CallbackContext):
     chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
 
     if chat_mode == "stenographer":
-        placeholder_message = await update.message.reply_text("⌨️: <i>Transcribing...</i>", parse_mode=ParseMode.HTML)
+        placeholder_message = await update.message.reply_text("⌨️: <i>Распознаю аудио...</i>", parse_mode=ParseMode.HTML)
     else:
-        placeholder_message = await update.message.reply_text("🎤: <i>Transcribing...</i>", parse_mode=ParseMode.HTML)
+        placeholder_message = await update.message.reply_text("🎤: <i>Распознаю аудио...</i>", parse_mode=ParseMode.HTML)
     
 
     voice = update.message.voice
