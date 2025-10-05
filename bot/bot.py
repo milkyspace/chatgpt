@@ -384,7 +384,7 @@ async def _vision_message_handle_fn(
 
     try:
         # send placeholder message to user
-        placeholder_message = await update.message.reply_text("<i>Making shit up...</i>", parse_mode=ParseMode.HTML)
+        placeholder_message = await update.message.reply_text("<i>Думаю...</i>", parse_mode=ParseMode.HTML)
         message = update.message.caption or update.message.text or transcribed_text or ''
 
         # send typing action
@@ -1177,7 +1177,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
         try:
     
             # send placeholder message to user
-            placeholder_message = await update.message.reply_text("<i>Making shit up...</i>", parse_mode=ParseMode.HTML)
+            placeholder_message = await update.message.reply_text("<i>Думаю...</i>", parse_mode=ParseMode.HTML)
 
             # send typing action
             await update.message.chat.send_action(action="typing")
