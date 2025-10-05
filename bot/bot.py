@@ -1496,7 +1496,7 @@ async def cancel_handle(update: Update, context: CallbackContext):
         task = user_tasks[user_id]
         task.cancel()
     else:
-        await update.message.reply_text("<i>Nothing to cancel...</i>", parse_mode=ParseMode.HTML)
+        await update.message.reply_text("<i>Нечего отменять...</i>", parse_mode=ParseMode.HTML)
 
 def get_chat_mode_menu(page_index: int):
     n_chat_modes_per_page = config.n_chat_modes_per_page
@@ -1934,10 +1934,10 @@ async def show_balance_handle(update: Update, context: CallbackContext):
     current_rub_balance = db.get_user_rub_balance(user_id)
 
     text = f"Ваш баланс <b>₽{current_rub_balance:.2f}</b> 💶\n\n"
-    text += "Нажмите 'Детально' для полной информации.\n"
+    text += "Нажмите «🏷️ Детально» для полной информации.\n"
 
     keyboard = [
-        [InlineKeyboardButton("🏷️ Details", callback_data='show_details')]
+        [InlineKeyboardButton("🏷️ Детально", callback_data='show_details')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
