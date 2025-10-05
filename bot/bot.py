@@ -1507,28 +1507,28 @@ def get_chat_mode_menu(page_index: int):
     page_chat_mode_keys = chat_mode_keys[page_index * n_chat_modes_per_page:(page_index + 1) * n_chat_modes_per_page]
 
     keyboard = []
-    for chat_mode_key in page_chat_mode_keys:
+    row = []
+    for i, chat_mode_key in enumerate(page_chat_mode_keys):
         name = config.chat_modes[chat_mode_key]["name"]
-        keyboard.append([InlineKeyboardButton(name, callback_data=f"set_chat_mode|{chat_mode_key}")])
+        row.append(InlineKeyboardButton(name, callback_data=f"set_chat_mode|{chat_mode_key}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:  # если осталась одна кнопка
+        keyboard.append(row)
 
     # pagination
     if len(chat_mode_keys) > n_chat_modes_per_page:
         is_first_page = (page_index == 0)
         is_last_page = ((page_index + 1) * n_chat_modes_per_page >= len(chat_mode_keys))
 
-        if is_first_page:
-            keyboard.append([
-                InlineKeyboardButton("»", callback_data=f"show_chat_modes|{page_index + 1}")
-            ])
-        elif is_last_page:
-            keyboard.append([
-                InlineKeyboardButton("«", callback_data=f"show_chat_modes|{page_index - 1}"),
-            ])
-        else:
-            keyboard.append([
-                InlineKeyboardButton("«", callback_data=f"show_chat_modes|{page_index - 1}"),
-                InlineKeyboardButton("»", callback_data=f"show_chat_modes|{page_index + 1}")
-            ])
+        pagination_row = []
+        if not is_first_page:
+            pagination_row.append(InlineKeyboardButton("«", callback_data=f"show_chat_modes|{page_index - 1}"))
+        if not is_last_page:
+            pagination_row.append(InlineKeyboardButton("»", callback_data=f"show_chat_modes|{page_index + 1}"))
+        if pagination_row:
+            keyboard.append(pagination_row)
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
