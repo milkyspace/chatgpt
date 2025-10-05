@@ -1896,26 +1896,26 @@ async def show_balance_handle_full_details(update: Update, context: CallbackCont
     # image generation
     image_generation_n_spent_dollars = config.models["info"]["dalle-2"]["price_per_1_image"] * n_generated_images
     if n_generated_images != 0:
-        details_text += f"- DALL·E 2 (image generation): <b>{image_generation_n_spent_dollars:.03f}$</b> / <b>{n_generated_images} generated images</b>\n"
+        details_text += f"- DALL·E 2 (генерация изображений): <b>{image_generation_n_spent_dollars:.03f}$</b> / <b>{n_generated_images} generated images</b>\n"
 
     total_n_spent_dollars += image_generation_n_spent_dollars
 
     # voice recognition
     voice_recognition_n_spent_dollars = config.models["info"]["whisper"]["price_per_1_min"] * (n_transcribed_seconds / 60)
     if n_transcribed_seconds != 0:
-        details_text += f"- Whisper (voice recognition): <b>{voice_recognition_n_spent_dollars:.03f}$</b> / <b>{n_transcribed_seconds:.01f} seconds</b>\n"
+        details_text += f"- Whisper (распознавание голоса): <b>{voice_recognition_n_spent_dollars:.03f}$</b> / <b>{n_transcribed_seconds:.01f} seconds</b>\n"
 
     total_n_spent_dollars += voice_recognition_n_spent_dollars
 
     text = f"Ваш баланс <b>₽{current_rub_balance}</b> \n\n"
     text += "Вы:\n\n"
     text += f"Ещё не было первого пополнения 😢\n" if total_topup == 0 else \
-        f"Пополнено <b>{total_topup:.02f}€</b> ❤️\n" if total_topup < 30 else \
-            f"Пополнено <b>{total_topup:.02f}€</b>. Рад, что тебе нравится бот! ❤️\n"
+        f"Пополнено <b>{total_topup:.02f}₽</b> ❤️\n" if total_topup < 30 else \
+            f"Пополнено <b>{total_topup:.02f}₽</b>. Рад, что тебе нравится бот! ❤️\n"
 
     text += f"Пожертвований пока не было.\n\n" if total_donated == 0 else \
-        f"Пожертвовано <b>{total_donated:.02f}€</b>. Ты легенда! ❤️\n\n" if total_donated < 10 else \
-            f"Пожертвовано <b>{total_donated:.02f}€</b>. Спасибо за поддержку!! ❤️❤️\n\n"
+        f"Пожертвовано <b>{total_donated:.02f}₽</b>. Ты легенда! ❤️\n\n" if total_donated < 10 else \
+            f"Пожертвовано <b>{total_donated:.02f}₽</b>. Спасибо за поддержку!! ❤️❤️\n\n"
 
     text += f"Потрачено ≈ <b>{total_n_spent_dollars:.03f}$</b> 💵\n"
     text += f"Использовано <b>{total_n_used_tokens}</b> токенов 🪙\n\n"
@@ -1981,13 +1981,13 @@ async def callback_show_details_old(update: Update, context: CallbackContext):
 
     total_n_spent_dollars += image_generation_n_spent_dollars + voice_recognition_n_spent_dollars
 
-    details_text += f"- DALL·E 2 (image generation): <b>{image_generation_n_spent_dollars:.03f}$</b> / <b>{n_generated_images} images</b>\n"
-    details_text += f"- Whisper (voice recognition): <b>{voice_recognition_n_spent_dollars:.03f}$</b> / <b>{n_transcribed_seconds:.01f} seconds</b>\n"
+    details_text += f"- DALL·E 2 (генерация изображений): <b>{image_generation_n_spent_dollars:.03f}$</b> / <b>{n_generated_images} images</b>\n"
+    details_text += f"- Whisper (распознавание голоса): <b>{voice_recognition_n_spent_dollars:.03f}$</b> / <b>{n_transcribed_seconds:.01f} seconds</b>\n"
 
     text = f"Ваш баланс <b>₽{current_rub_balance:.3f}</b> 💶\n\n"
     text += "Ты:\n\n"
-    text += f"   Ещё не сделал(а) первый платёж 😢\n" if total_topup == 0 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}€</b> ❤️\n" if total_topup < 30 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}€</b>. Рад, что тебе действительно нравится пользоваться ботом! ❤️\n"
-    text += f"   Ещё не делал(а) донатов.\n\n" if total_donated == 0 else f"   Задонатил(а) <b>{total_donated:.02f}€</b>. Ты — легенда! ❤️\n\n" if total_donated < 10 else f"   \nЗадонатил(а) <b>{total_donated:.02f}€</b>! Я очень ценю твою постоянную поддержку!! ❤️❤️\n\n"
+    text += f"   Ещё не сделал(а) первый платёж 😢\n" if total_topup == 0 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}₽</b> ❤️\n" if total_topup < 30 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}₽</b>. Рад, что тебе действительно нравится пользоваться ботом! ❤️\n"
+    text += f"   Ещё не делал(а) донатов.\n\n" if total_donated == 0 else f"   Задонатил(а) <b>{total_donated:.02f}₽</b>. Ты — легенда! ❤️\n\n" if total_donated < 10 else f"   \nЗадонатил(а) <b>{total_donated:.02f}₽</b>! Я очень ценю твою постоянную поддержку!! ❤️❤️\n\n"
     text += f"   Потратил(а) ≈ <b>{total_n_spent_dollars:.03f}$</b> 💵\n"
     text += f"   Использовал(а) <b>{total_n_used_tokens}</b> токенов 🪙\n\n"
     text += details_text
@@ -2062,24 +2062,24 @@ async def callback_show_details(update: Update, context: CallbackContext):
         n_output_spent_dollars = config.models["info"][model_key]["price_per_1000_output_tokens"] * (n_output_tokens / 1000)
         total_n_spent_dollars += n_input_spent_dollars + n_output_spent_dollars
 
-        details_text += f"- {model_key}: <b>{n_input_spent_dollars + n_output_spent_dollars:.03f}€</b> / <b>{n_input_tokens + n_output_tokens} tokens</b>\n"
+        details_text += f"- {model_key}: <b>{n_input_spent_dollars + n_output_spent_dollars:.03f}₽</b> / <b>{n_input_tokens + n_output_tokens} tokens</b>\n"
 
     # Add DALL-E 2 and DALL-E 3 usage to the details
-    details_text += f"- DALL·E 2 (image generation): <b>{dalle_2_data['cost']:.03f}€</b> / <b>{dalle_2_data['images']} images</b>\n"
-    details_text += f"- DALL·E 3 (image generation): <b>{dalle_3_data['cost']:.03f}€</b> / <b>{dalle_3_data['images']} images</b>\n"
+    details_text += f"- DALL·E 2 (генерация изображений): <b>{dalle_2_data['cost']:.03f}₽</b> / <b>{dalle_2_data['images']} images</b>\n"
+    details_text += f"- DALL·E 3 (генерация изображений): <b>{dalle_3_data['cost']:.03f}₽</b> / <b>{dalle_3_data['images']} images</b>\n"
 
     # Add Whisper usage
     voice_recognition_n_spent_dollars = config.models["info"]["whisper"]["price_per_1_min"] * (n_transcribed_seconds / 60)
     total_n_spent_dollars += voice_recognition_n_spent_dollars
 
-    details_text += f"- Whisper (voice recognition): <b>{voice_recognition_n_spent_dollars:.03f}€</b> / <b>{n_transcribed_seconds:.01f} seconds</b>\n"
+    details_text += f"- Whisper (распознавание голоса): <b>{voice_recognition_n_spent_dollars:.03f}₽</b> / <b>{n_transcribed_seconds:.01f} seconds</b>\n"
 
     # Summary information
     text = f"Ваш баланс <b>₽{current_rub_balance:.3f}</b> 💶\n\n"
     text += "Ты:\n\n"
-    text += f"   Ещё не сделал(а) первый платёж 😢\n" if total_topup == 0 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}€</b> ❤️\n" if total_topup < 30 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}€</b>. Рад, что тебе действительно нравится пользоваться ботом! ❤️\n"
-    text += f"   Ещё не делал(а) донатов.\n\n" if total_donated == 0 else f"   Задонатил(а) <b>{total_donated:.02f}€</b>. Ты — легенда! ❤️\n\n" if total_donated < 10 else f"   \nЗадонатил(а) <b>{total_donated:.02f}€</b>! Я очень ценю твою постоянную поддержку!! ❤️❤️\n\n"
-    text += f"   Потратил(а) ≈ <b>{total_spent:.03f}€</b> 💵\n"
+    text += f"   Ещё не сделал(а) первый платёж 😢\n" if total_topup == 0 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}₽</b> ❤️\n" if total_topup < 30 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}₽</b>. Рад, что тебе действительно нравится пользоваться ботом! ❤️\n"
+    text += f"   Ещё не делал(а) донатов.\n\n" if total_donated == 0 else f"   Задонатил(а) <b>{total_donated:.02f}₽</b>. Ты — легенда! ❤️\n\n" if total_donated < 10 else f"   \nЗадонатил(а) <b>{total_donated:.02f}₽</b>! Мы очень ценим твою постоянную поддержку! ❤️❤️\n\n"
+    text += f"   Потратил(а) ≈ <b>{total_spent:.03f}₽</b> 💵\n"
     text += f"   Использовал(а) <b>{total_n_used_tokens}</b> токенов 🪙\n\n"
     text += details_text
 
