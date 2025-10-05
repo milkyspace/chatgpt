@@ -1628,7 +1628,7 @@ async def display_model_info(query, user_id, context):
     for score_key, score_value in scores.items():
         details_text += f"{'🟢' * score_value}{'⚪️' * (5 - score_value)} – {score_key}\n"
     
-    details_text += "\nSelect <b>model</b>:"
+    details_text += "\nВыберите <b>модель</b>:"
     
     buttons = []
     claude_buttons = []
@@ -1882,7 +1882,7 @@ async def show_balance_handle_full_details(update: Update, context: CallbackCont
     n_generated_images = db.get_user_attribute(user_id, "n_generated_images")
     n_transcribed_seconds = db.get_user_attribute(user_id, "n_transcribed_seconds")
 
-    details_text = "🏷️ Details:\n"
+    details_text = "🏷️ Детально:\n"
     for model_key in sorted(n_used_tokens_dict.keys()):
         n_input_tokens, n_output_tokens = n_used_tokens_dict[model_key]["n_input_tokens"], n_used_tokens_dict[model_key]["n_output_tokens"]
         total_n_used_tokens += n_input_tokens + n_output_tokens
@@ -1961,7 +1961,7 @@ async def callback_show_details_old(update: Update, context: CallbackContext):
     total_donated = financials['total_donated']
     
     
-    details_text = "🏷️ Details:\n"
+    details_text = "🏷️ Детально:\n"
     total_n_spent_dollars = 0
     total_n_used_tokens = 0
     
