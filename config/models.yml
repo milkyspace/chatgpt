@@ -9,8 +9,8 @@ info:
     name: ChatGPT
     description: ChatGPT is that well-known model. It's <b>fast</b> and <b>cheap</b>. Ideal for everyday tasks. If there are some tasks it can't handle, try the <b>GPT-4</b>.
 
-    price_per_1000_input_tokens: 0.0015
-    price_per_1000_output_tokens: 0.002
+    price_per_1000_input_tokens: 0.35
+    price_per_1000_output_tokens: 0.43
 
     scores:
       Smart: 3
@@ -22,8 +22,8 @@ info:
     name: GPT-16K
     description: ChatGPT is that well-known model. It's <b>fast</b> and <b>cheap</b>. Ideal for everyday tasks. If there are some tasks it can't handle, try the <b>GPT-4</b>.
 
-    price_per_1000_input_tokens: 0.003
-    price_per_1000_output_tokens: 0.004
+    price_per_1000_input_tokens: 0.6
+    price_per_1000_output_tokens: 0.77
 
     scores:
       Smart: 2
@@ -35,8 +35,8 @@ info:
     name: GPT-4
     description: GPT-4 is the <b>smartest</b> and most advanced model in the world. But it is slower and not as cost-efficient as ChatGPT. Best choice for <b>complex</b> intellectual tasks.
 
-    price_per_1000_input_tokens: 0.03
-    price_per_1000_output_tokens: 0.06
+    price_per_1000_input_tokens: 5.94
+    price_per_1000_output_tokens: 9.87
 
     scores:
       Smart: 5
@@ -48,8 +48,8 @@ info:
     name: GPT-4 Turbo
     description: GPT-4 Turbo is a <b>faster</b> and <b>cheaper</b> version of GPT-4. It's as smart as GPT-4, so you should use it instead of GPT-4.
 
-    price_per_1000_input_tokens: 0.01
-    price_per_1000_output_tokens: 0.03
+    price_per_1000_input_tokens: 2.65
+    price_per_1000_output_tokens: 5.94
 
     scores:
       smart: 5
@@ -61,8 +61,8 @@ info:
     name: GPT-4 Vision 
     description: Ability to <b>understand images</b>, in addition to all other GPT-4 Turbo capabilties.
 
-    price_per_1000_input_tokens: 0.01
-    price_per_1000_output_tokens: 0.03
+    price_per_1000_input_tokens: 2.65
+    price_per_1000_output_tokens: 5.94
 
     scores:
       smart: 5
@@ -75,8 +75,8 @@ info:
     name: GPT-4 Turbo
     description: "GPT-4 Turbo is a <b>faster</b> and <b>cheaper</b> version of GPT-4. It's as smart as GPT-4, so you should use it instead of GPT-4.\n\n This version of turbo is from 09.04.2024."
 
-    price_per_1000_input_tokens: 0.01
-    price_per_1000_output_tokens: 0.03
+    price_per_1000_input_tokens: 2.65
+    price_per_1000_output_tokens: 5.94
 
     scores:
       smart: 5
@@ -89,8 +89,8 @@ info:
     name: GPT-4omni
     description: "GPT-4o is <b>2x faster</b> and is <b>50% cheaper</b> than GPT-4 Turbo. It has the best vision and performance across non-English languages of any of the OpenAI models.\n\n It just released so expect it to be buggy and weird, try it out and let me know what you think. OpenAI says its knowledge cutoff is october 2023, even if when asked it says something different. I reduced the consumption for this testing period.\n Use the <b>/model</b> command to check which model is currently being used in the api"
     #GPT-4o is <b>2x faster</b> and is <b>50% cheaper</b> than GPT-4 Turbo. It has the best vision and performance across non-English languages of any of the OpenAI models.
-    price_per_1000_input_tokens: 0.005
-    price_per_1000_output_tokens: 0.015
+    price_per_1000_input_tokens: 1.82
+    price_per_1000_output_tokens: 3.47
 
     scores:
       smart: 5
@@ -103,8 +103,8 @@ info:
     name: Claude Opus
     description: "Claude 3 Opus is the latest model from Anthropic. It's designed to be highly intelligent and versatile, making it suitable for a wide range of applications. It offers excellent performance at a competitive price."
     
-    price_per_1000_input_tokens: 0.015
-    price_per_1000_output_tokens: 0.075
+    price_per_1000_input_tokens: 3.47
+    price_per_1000_output_tokens: 13.34
 
     scores:
       smart: 5
@@ -117,8 +117,8 @@ info:
     name: Claude Sonnet
     description: "Claude 3 Sonnet is optimized for creative writing and content generation. It provides smart and contextually aware outputs, making it ideal for artistic and literary tasks."
     
-    price_per_1000_input_tokens: 0.003
-    price_per_1000_output_tokens: 0.015
+    price_per_1000_input_tokens: 1.5
+    price_per_1000_output_tokens: 3.47
 
     scores:
       smart: 4
@@ -131,8 +131,8 @@ info:
     name: Claude Haiku
     description: "Claude 3 Haiku is designed for concise and insightful responses. It excels in tasks that require brevity and clarity, making it perfect for summarizations and quick insights."
     
-    price_per_1000_input_tokens: 0.00025
-    price_per_1000_output_tokens: 0.00125
+    price_per_1000_input_tokens: 1.04
+    price_per_1000_output_tokens: 1.21
 
     scores:
       smart: 3
@@ -144,8 +144,8 @@ info:
     name: GPT-3.5
     description: GPT-3.5 is a legacy model. Actually there is <b>no reason to use it</b>, because it is more expensive and slower than ChatGPT, but just about as smart.
 
-    price_per_1000_input_tokens: 0.02
-    price_per_1000_output_tokens: 0.02
+    price_per_1000_input_tokens: 4.29
+    price_per_1000_output_tokens: 4.29
 
     scores:
       Smart: 3
@@ -158,11 +158,11 @@ info:
     description: "<b>DALL-E 2</b> is ideal for generating <b>one</b> or <b>multiple</b> variations of images designs and works quickly with multiple resolution options. Perfect for users seeking results at <b>faster</b> speeds and <b>lower</b> costs."
     resolutions:
       1024x1024:
-        price_per_1_image: 0.020
+        price_per_1_image: 4.29
       512x512:
-        price_per_1_image: 0.018
+        price_per_1_image: 3.96
       256x256:
-        price_per_1_image: 0.016
+        price_per_1_image: 3.63
 
     scores:
       Quality: 3
@@ -177,19 +177,19 @@ info:
       standard:
         resolutions:
           1024x1024:
-            price_per_1_image: 0.040
+            price_per_1_image: 6.5
           1024x1792:
-            price_per_1_image: 0.080
+            price_per_1_image: 7.58
           1792x1024:
-            price_per_1_image: 0.080
+            price_per_1_image: 14.16
       hd:
         resolutions:
           1024x1024:
-            price_per_1_image: 0.080
+            price_per_1_image: 13.5
           1024x1792:
-            price_per_1_image: 0.120
+            price_per_1_image: 14.16
           1792x1024:
-            price_per_1_image: 0.120
+            price_per_1_image: 20.74
 
     scores:
       Quality: 5
@@ -198,4 +198,4 @@ info:
 
   whisper:
     type: audio
-    price_per_1_min: 0.006
+    price_per_1_min: 1
