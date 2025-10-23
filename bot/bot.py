@@ -48,7 +48,6 @@ if config.yookassa_shop_id and config.yookassa_secret_key:
     Configuration.account_id = config.yookassa_shop_id
     Configuration.secret_key = config.yookassa_secret_key
 
-print(config)
 logger = logging.getLogger(__name__)
 
 user_semaphores = {}

@@ -8,6 +8,7 @@ config_dir = Path(__file__).parent.parent.resolve() / "config"
 with open(config_dir / "config.yml", 'r') as f:
     config_yaml = yaml.safe_load(f)
 
+print(config_yaml)
 # load .env config
 config_env = dotenv.dotenv_values(config_dir / "config.env")
 
