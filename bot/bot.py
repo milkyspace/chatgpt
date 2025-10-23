@@ -308,10 +308,11 @@ async def create_yookassa_payment(user_id: int, amount_rub: int, context: Callba
         if context.user_data.get('is_donation'):
             description = "Добровольное пожертвование"
 
+        currency = "RUB"
         payment = Payment.create({
             "amount": {
-                "value": f"{amount_rub}.00",
-                "currency": "RUB"
+                "value": amount_rub,
+                "currency": currency
             },
             "confirmation": {
                 "type": "redirect",
@@ -319,6 +320,24 @@ async def create_yookassa_payment(user_id: int, amount_rub: int, context: Callba
             },
             "capture": True,
             "description": description,
+            "receipt": {
+                "customer": {
+                    "email": "liliatchesnokova@gmail.com",
+                },
+                "items": [
+                    {
+                        "description": description,
+                        "quantity": "1.00",
+                        "amount": {
+                            "value": amount_rub,
+                            "currency": currency
+                        },
+                        "vat_code": "1",
+                        "payment_mode": "full_payment",
+                        "payment_subject": "commodity",
+                    },
+                ]
+            },
             "metadata": {
                 "user_id": user_id,
                 "is_donation": str(context.user_data.get('is_donation', False)).lower()
@@ -361,14 +380,14 @@ async def create_subscription_yookassa_payment(user_id: int, subscription_type: 
             "description": label,
             "receipt": {
                 "customer": {
-                    "email": "liliatchesnokovatest@gmail.com",
+                    "email": "liliatchesnokova@gmail.com",
                 },
                 "items": [
                     {
                         "description": label,
                         "quantity": "1.00",
                         "amount": {
-                            "value": 100,
+                            "value": price,
                             "currency": currency
                         },
                         "vat_code": "1",
