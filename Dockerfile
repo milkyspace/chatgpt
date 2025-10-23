@@ -22,5 +22,4 @@ RUN pip3 install yookassa
 COPY . /code
 WORKDIR /code
 
-# Запускаем supervisord который будет управлять процессами
 CMD ["python3", "bot/bot.py"]

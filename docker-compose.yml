@@ -9,7 +9,6 @@ services:
       - 127.0.0.1:${MONGODB_PORT:-27017}:${MONGODB_PORT:-27017}
     volumes:
       - ${MONGODB_PATH:-./mongodb}:/data/db
-    # TODO: add auth
 
   chatgpt_telegram_bot:
     container_name: chatgpt_telegram_bot
@@ -20,39 +19,11 @@ services:
       dockerfile: Dockerfile
     depends_on:
       - mongo
-      - redis
     environment:
       - YOOKASSA_SHOP_ID=${YOOKASSA_SHOP_ID}
       - YOOKASSA_SECRET_KEY=${YOOKASSA_SECRET_KEY}
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-
-  flask_app:
-    container_name: flask_yookassa_webhook
-    build:
-      context: "."
-      dockerfile: Dockerfile
-    ports:
-      - "5000:5000"
-    volumes:
-      - .:/code
-    command: python3 bot/flask_app.py
-    environment:
-      - YOOKASSA_SHOP_ID=${YOOKASSA_SHOP_ID}
-      - YOOKASSA_SECRET_KEY=${YOOKASSA_SECRET_KEY}
-      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - MONGODB_PORT=${MONGODB_PORT:-27017}
-    depends_on:
-      - mongo
-      - redis
-
-  redis:
-    container_name: redis
-    image: redis:latest
-    restart: always
-    ports:
-      - "6379:6379"
 
   mongo_express:
     container_name: mongo-express
@@ -69,16 +40,3 @@ services:
       - ME_CONFIG_BASICAUTH_PASSWORD=${MONGO_EXPRESS_PASSWORD:-password}
     depends_on:
       - mongo
-
-  nginx:
-    container_name: nginx_proxy
-    image: nginx:alpine
-    restart: always
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-      - ./ssl:/etc/nginx/ssl
-    depends_on:
-      - flask_app

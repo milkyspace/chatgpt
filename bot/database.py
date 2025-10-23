@@ -1,9 +1,7 @@
 from typing import Optional, Any
-
 import pymongo
 import uuid
 from datetime import datetime, timedelta
-
 import config
 from subscription import SubscriptionType, SUBSCRIPTION_PRICES, SUBSCRIPTION_DURATIONS
 
@@ -16,6 +14,7 @@ class Database:
         self.user_collection = self.db["user"]
         self.subscription_collection = self.db["subscriptions"]
         self.dialog_collection = self.db["dialog"]
+        self.payment_collection = self.db["payments"]
 
     def check_if_user_exists(self, user_id: int, raise_exception: bool = False):
         if self.user_collection.count_documents({"_id": user_id}) > 0:
@@ -445,3 +444,48 @@ class Database:
                 "requests_used": 0,
                 "images_used": 0
             }
+
+    def create_payment(self, user_id: int, payment_id: str, amount: float,
+                       payment_type: str, description: str = "") -> None:
+        """Создает запись о платеже"""
+        payment_data = {
+            "user_id": user_id,
+            "payment_id": payment_id,
+            "amount": amount,
+            "currency": "RUB",
+            "type": payment_type,  # 'topup', 'donation', 'subscription'
+            "description": description,
+            "status": "pending",  # pending, succeeded, canceled, waiting_for_capture
+            "created_at": datetime.now(),
+            "updated_at": datetime.now()
+        }
+        self.payment_collection.insert_one(payment_data)
+
+    def update_payment_status(self, payment_id: str, status: str) -> None:
+        """Обновляет статус платежа"""
+        self.payment_collection.update_one(
+            {"payment_id": payment_id},
+            {
+                "$set": {
+                    "status": status,
+                    "updated_at": datetime.now()
+                }
+            }
+        )
+
+    def get_pending_payments(self) -> list:
+        """Возвращает список pending платежей"""
+        return list(self.payment_collection.find({
+            "status": {"$in": ["pending", "waiting_for_capture"]}
+        }))
+
+    def get_payment_by_id(self, payment_id: str) -> dict:
+        """Возвращает платеж по ID"""
+        return self.payment_collection.find_one({"payment_id": payment_id})
+
+    def get_user_pending_payments(self, user_id: int) -> list:
+        """Возвращает pending платежи пользователя"""
+        return list(self.payment_collection.find({
+            "user_id": user_id,
+            "status": {"$in": ["pending", "waiting_for_capture"]}
+        }))

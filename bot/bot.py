@@ -33,8 +33,6 @@ import database
 import openai_utils
 
 import base64
-import aioredis
-import threading
 import json
 from json import JSONEncoder
 import io
@@ -44,6 +42,11 @@ import pytz
 
 # setup
 db = database.Database()
+
+# Инициализация Yookassa
+if config.yookassa_shop_id and config.yookassa_secret_key:
+    Configuration.account_id = config.yookassa_shop_id
+    Configuration.secret_key = config.yookassa_secret_key
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +59,8 @@ HELP_MESSAGE = """<b>Команды:</b>
 /retry – Перегенерировать ответ бота
 /balance – Показать баланс
 /topup – Пополнить счёт
+/subscription – Управление подписками
+/my_payments – Мои платежи
 /settings – Показать настройки
 /help – Помощь
 
@@ -69,7 +74,7 @@ HELP_MESSAGE = """<b>Команды:</b>
 2. «Ассистент» — режим по умолчанию. Попробуйте другие режимы: /mode
 </blockquote>
 """
-# добавьте "(см. <b>видео</b> ниже)" после инструкций, если у вас настроено видео
+
 HELP_GROUP_CHAT_MESSAGE = """Вы можете добавить бота в любой <b>групповой чат</b>, чтобы помогать и развлекать его участников!
 
 Инструкции:
@@ -98,13 +103,10 @@ def split_text_into_chunks(text, chunk_size):
 
 
 def configure_logging():
-    # Configure logging based on the enable_detailed_logging value
     if config.enable_detailed_logging:
         logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
     else:
         logging.basicConfig(level=logging.CRITICAL, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
-
-    # Set the logger level based on configuration
     logger.setLevel(logging.getLogger().level)
 
 
@@ -135,9 +137,8 @@ async def register_user_if_not_exists(update: Update, context: CallbackContext, 
     if db.get_user_attribute(user.id, "current_model") is None:
         db.set_user_attribute(user.id, "current_model", config.models["available_text_models"][0])
 
-    # back compatibility for n_used_tokens field
     n_used_tokens = db.get_user_attribute(user.id, "n_used_tokens")
-    if isinstance(n_used_tokens, int) or isinstance(n_used_tokens, float):  # old format
+    if isinstance(n_used_tokens, int) or isinstance(n_used_tokens, float):
         new_n_used_tokens = {
             "gpt-4-1106-preview": {
                 "n_input_tokens": 0,
@@ -146,16 +147,13 @@ async def register_user_if_not_exists(update: Update, context: CallbackContext, 
         }
         db.set_user_attribute(user.id, "n_used_tokens", new_n_used_tokens)
 
-    # voice message transcription
     if db.get_user_attribute(user.id, "n_transcribed_seconds") is None:
         db.set_user_attribute(user.id, "n_transcribed_seconds", 0.0)
 
-    # image generation
     if db.get_user_attribute(user.id, "n_generated_images") is None:
         db.set_user_attribute(user.id, "n_generated_images", 0)
 
     if user_registered_now:
-        # Notify admins that a new user has just registered
         username = user.username or "No username"
         first_name = user.first_name or "No first name"
         last_name = user.last_name or "No last name"
@@ -164,7 +162,6 @@ async def register_user_if_not_exists(update: Update, context: CallbackContext, 
             try:
                 await context.bot.send_message(chat_id=admin_id, text=notification_text)
             except Exception as e:
-                # Log the error or handle it appropriately
                 print(
                     f"Failed to send registration to admin: {str(e)}\n\n Don't worry, this doesn't affect you in anyway!")
 
@@ -194,11 +191,9 @@ async def start_handle(update: Update, context: CallbackContext):
 
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-    # Пробуем начать новый диалог, но обрабатываем возможную ошибку отсутствия подписки
     try:
         db.start_new_dialog(user_id)
     except PermissionError as e:
-        # Если нет активной подписки, показываем сообщение с предложением приобрести
         reply_text = "👋 Привет! Мы <b>Ducks GPT</b>\n"
         reply_text += "Компактный чат-бот на базе <b>ChatGPT</b>\n"
         reply_text += "Рады знакомству!\n\n"
@@ -235,53 +230,209 @@ async def help_group_chat_handle(update: Update, context: CallbackContext):
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
     text = HELP_GROUP_CHAT_MESSAGE.format(bot_username="@" + context.bot.username)
-
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
-    # await update.message.reply_video(config.help_group_chat_video_path) remove the comment if you want the video to be sent
 
 
-# use if you want to check for tokens
-async def token_balance_preprocessor(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-    current_balance = db.check_token_balance(user_id)
-    user_role = db.get_user_role(user_id)
+async def check_pending_payments():
+    """Проверяет статус pending платежей"""
+    while True:
+        try:
+            pending_payments = db.get_pending_payments()
 
-    if user_role == "admin":
-        return True
+            for payment in pending_payments:
+                payment_id = payment["payment_id"]
+                user_id = payment["user_id"]
 
-    if db.check_token_balance(user_id) < 100:  # Number of minimum tokens needed
-        context.user_data['process_allowed'] = False
-        await update.message.reply_text(
-            f"_Oops, your balance is too low :( Please top up to continue._ \n\n Your current balance is {current_balance}",
-            parse_mode='Markdown'
+                try:
+                    payment_info = Payment.find_one(payment_id)
+                    status = payment_info.status
+
+                    db.update_payment_status(payment_id, status)
+
+                    if status == 'succeeded':
+                        await process_successful_payment(payment_info, user_id)
+                    elif status == 'canceled':
+                        logger.info(f"Payment {payment_id} was canceled")
+
+                except Exception as e:
+                    logger.error(f"Error checking payment {payment_id}: {e}")
+
+            await asyncio.sleep(30)
+
+        except Exception as e:
+            logger.error(f"Error in payment checking loop: {e}")
+            await asyncio.sleep(60)
+
+
+async def process_successful_payment(payment_info, user_id):
+    """Обрабатывает успешный платеж"""
+    try:
+        amount = float(payment_info.amount.value)
+        metadata = payment_info.metadata
+        is_donation = metadata.get('is_donation', 'false') == 'true'
+        subscription_type = metadata.get('subscription_type')
+
+        logger.info(f"Processing successful payment {payment_info.id} for user {user_id}, amount: {amount} RUB")
+
+        if subscription_type:
+            subscription_type_enum = SubscriptionType(subscription_type)
+            duration_days = SUBSCRIPTION_DURATIONS[subscription_type_enum].days
+
+            db.add_subscription(user_id, subscription_type_enum, duration_days)
+            await send_subscription_confirmation(user_id, subscription_type_enum)
+            logger.info(f"Subscription activated for user {user_id}: {subscription_type}")
+
+        else:
+            if not is_donation:
+                db.update_rub_balance(user_id, amount)
+                db.update_total_topup(user_id, amount)
+                logger.info(f"Balance updated for user {user_id}: +{amount} RUB")
+            else:
+                db.update_total_donated(user_id, amount)
+                logger.info(f"Donation received from user {user_id}: {amount} RUB")
+
+            await send_payment_confirmation(user_id, amount, is_donation)
+
+    except Exception as e:
+        logger.error(f"Error processing successful payment: {e}")
+
+
+async def send_payment_confirmation(user_id, amount_rub, is_donation):
+    """Отправляет подтверждение об успешной оплате"""
+    user = db.user_collection.find_one({"_id": user_id})
+    if user:
+        chat_id = user["chat_id"]
+
+        if is_donation:
+            message = f"Спасибо за ваше пожертвование *{amount_rub} ₽*! Ваша поддержка очень важна для нас! ❤️❤️"
+        else:
+            message = f"Пополнение на *{amount_rub} ₽* прошло успешно! 🎉\n\nБаланс обновлен."
+            if user.get("role") == "trial_user":
+                db.user_collection.update_one(
+                    {"_id": user_id},
+                    {"$set": {"role": "regular_user"}}
+                )
+                message += "\n\nВаш статус изменен на *обычного пользователя*! Спасибо за поддержку! ❤️"
+
+        await bot_instance.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
+
+
+async def send_subscription_confirmation(user_id, subscription_type):
+    """Отправляет подтверждение об активации подписки"""
+    user = db.user_collection.find_one({"_id": user_id})
+    if user:
+        chat_id = user["chat_id"]
+
+        duration_days = SUBSCRIPTION_DURATIONS[subscription_type].days
+
+        message = f"🎉 Подписка *{subscription_type.name.replace('_', ' ').title()}* активирована!\n"
+        message += f"📅 Действует *{duration_days} дней*\n\n"
+        message += "Теперь вы можете пользоваться ботом по подписке!"
+
+        await bot_instance.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
+
+
+async def create_yookassa_payment(user_id: int, amount_rub: int, context: CallbackContext):
+    """Создает платеж в Yookassa и возвращает URL для оплаты"""
+    try:
+        description = "Пополнение баланса"
+        if context.user_data.get('is_donation'):
+            description = "Добровольное пожертвование"
+
+        payment = Payment.create({
+            "amount": {
+                "value": f"{amount_rub}.00",
+                "currency": "RUB"
+            },
+            "confirmation": {
+                "type": "redirect",
+                "return_url": "https://t.me/gptducksbot"
+            },
+            "capture": True,
+            "description": description,
+            "metadata": {
+                "user_id": user_id,
+                "is_donation": str(context.user_data.get('is_donation', False)).lower()
+            }
+        })
+
+        db.create_payment(
+            user_id=user_id,
+            payment_id=payment.id,
+            amount=amount_rub,
+            payment_type="donation" if context.user_data.get('is_donation') else "topup",
+            description=description
         )
-        return False
-    else:
+
+        return payment.confirmation.confirmation_url, payment.id
+
+    except Exception as e:
+        logger.error(f"Error creating Yookassa payment: {e}")
+        raise e
+
+
+async def create_subscription_yookassa_payment(user_id: int, subscription_type: SubscriptionType,
+                                               context: CallbackContext):
+    """Создает платеж в Yookassa для подписки"""
+    price = SUBSCRIPTION_PRICES[subscription_type]
+
+    try:
+        payment = Payment.create({
+            "amount": {
+                "value": f"{price}.00",
+                "currency": "RUB"
+            },
+            "confirmation": {
+                "type": "redirect",
+                "return_url": "https://t.me/gptducksbot"
+            },
+            "capture": True,
+            "description": f"Подписка {subscription_type.name.replace('_', ' ').title()}",
+            "metadata": {
+                "user_id": user_id,
+                "subscription_type": subscription_type.value
+            }
+        })
+
+        db.create_payment(
+            user_id=user_id,
+            payment_id=payment.id,
+            amount=price,
+            payment_type="subscription",
+            description=f"Подписка {subscription_type.name.replace('_', ' ').title()}"
+        )
+
+        return payment.confirmation.confirmation_url
+
+    except Exception as e:
+        logger.error(f"Error creating Yookassa subscription payment: {e}")
+        raise e
+
+
+async def subscription_preprocessor(update: Update, context: CallbackContext) -> bool:
+    """Проверяет возможность выполнения запроса по подписке"""
+    user_id = update.effective_user.id
+    subscription_info = db.get_user_subscription_info(user_id)
+
+    if subscription_info["is_active"]:
+        if subscription_info["type"] == "pro_lite":
+            if subscription_info["requests_used"] >= 1000:
+                await update.message.reply_text(
+                    "❌ Лимит запросов по вашей подписке исчерпан. "
+                    "Пожалуйста, обновите подписку или пополните баланс.",
+                    parse_mode=ParseMode.HTML
+                )
+                return False
         context.user_data['process_allowed'] = True
         return True
-
-
-async def euro_balance_preprocessor(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-    current_euro_balance = db.get_user_euro_balance(user_id)
-    minimum_euro_required = 0.01  # Set the minimum required balance in euros. This value should be dynamic based on the operation.
-
-    if current_euro_balance < minimum_euro_required:
-        context.user_data['process_allowed'] = False
-        await update.message.reply_text(
-            f"Oops, your balance is too low :( Please top up to continue. Your current euro balance is €{current_euro_balance:.2f}",
-            parse_mode='Markdown'
-        )
-        return False
     else:
-        context.user_data['process_allowed'] = True
-        return True
+        return await rub_balance_preprocessor(update, context)
 
 
 async def rub_balance_preprocessor(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     current_rub_balance = db.get_user_rub_balance(user_id)
-    minimum_rub_required = 1  # Set the minimum required balance in rub. This value should be dynamic based on the operation.
+    minimum_rub_required = 1
 
     if current_rub_balance < minimum_rub_required:
         context.user_data['process_allowed'] = False
@@ -295,31 +446,6 @@ async def rub_balance_preprocessor(update: Update, context: CallbackContext):
         return True
 
 
-async def subscription_preprocessor(update: Update, context: CallbackContext) -> bool:
-    """Проверяет возможность выполнения запроса по подписке"""
-    user_id = update.effective_user.id
-
-    # Получаем информацию о подписке
-    subscription_info = db.get_user_subscription_info(user_id)
-
-    if subscription_info["is_active"]:
-        # Проверяем лимиты подписки
-        if subscription_info["type"] == "pro_lite":
-            if subscription_info["requests_used"] >= 1000:
-                await update.message.reply_text(
-                    "❌ Лимит запросов по вашей подписке исчерпан. "
-                    "Пожалуйста, обновите подписку или пополните баланс.",
-                    parse_mode=ParseMode.HTML
-                )
-                return False
-        # Для pro_plus и pro_premium - безлимитные запросы
-        context.user_data['process_allowed'] = True
-        return True
-    else:
-        # Если нет активной подписки, проверяем рублевый баланс
-        return await subscription_preprocessor(update, context)
-
-
 async def retry_handle(update: Update, context: CallbackContext):
     await register_user_if_not_exists(update, context, update.message.from_user)
     if await is_previous_message_not_answered_yet(update, context): return
@@ -327,7 +453,7 @@ async def retry_handle(update: Update, context: CallbackContext):
     user_id = update.message.from_user.id
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-    if not await subscription_preprocessor(update, context):
+    if not await rub_balance_preprocessor(update, context):
         return
 
     dialog_messages = db.get_dialog_messages(user_id, dialog_id=None)
@@ -336,40 +462,15 @@ async def retry_handle(update: Update, context: CallbackContext):
         return
 
     last_dialog_message = dialog_messages.pop()
-    db.set_dialog_messages(user_id, dialog_messages, dialog_id=None)  # last message was removed from the context
-    """ #APPARENTLY THIS BREAKS THE FUNCTION, keeping it in case I decide to fix it
-    try:
-        chatgpt_instance = openai_utils.ChatGPT(model=db.get_user_attribute(user_id, "current_model"))
-        answer, (n_input_tokens, n_output_tokens), _ = await chatgpt_instance.send_message(
-            message=last_dialog_message["user"],
-            dialog_messages=dialog_messages[:-1],  # Exclude the last message for retry
-            chat_mode=db.get_user_attribute(user_id, "current_chat_mode")
-        )
-        # Deduct tokens based on the tokens used for the query and response
-        #db.deduct_tokens_based_on_role(user_id, n_input_tokens, n_output_tokens)
+    db.set_dialog_messages(user_id, dialog_messages, dialog_id=None)
 
-        action_type = db.get_user_attribute(user_id, "current_model")  # This assumes the action type can be determined by the model
-        db.deduct_cost_for_action(user_id=user_id, action_type=action_type, action_params={'n_input_tokens': n_input_tokens, 'n_output_tokens': n_output_tokens})  
-       
-        # Now handle the response as needed, e.g., sending it back to the user
-        #await update.message.reply_text(answer)
-        except Exception as e:
-            await update.message.reply_text(f"Error retrying message: {str(e)}")
-
-    action_type = db.get_user_attribute(user_id, "current_model")  # This assumes the action type can be determined by the model
-    db.deduct_cost_for_action(user_id=user_id, action_type=action_type, action_params={'n_input_tokens': n_input_tokens, 'n_output_tokens': n_output_tokens})
-# APPARENTLY THIS BREAKS THE FUNCTION
-    """
     await message_handle(update, context, message=last_dialog_message["user"], use_new_dialog_timeout=False)
 
 
-# for errors
 class CustomEncoder(JSONEncoder):
     def default(self, obj):
         if isinstance(obj, datetime):
-            # Format date in ISO 8601 format, or any format you prefer
             return obj.isoformat()
-        # Let the base class default method raise the TypeError
         return JSONEncoder.default(self, obj)
 
 
@@ -389,7 +490,6 @@ async def _vision_message_handle_fn(
 
     chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
 
-    # new dialog timeout
     if use_new_dialog_timeout:
         if (datetime.now() - db.get_user_attribute(user_id,
                                                    "last_interaction")).seconds > config.new_dialog_timeout and len(
@@ -401,18 +501,15 @@ async def _vision_message_handle_fn(
 
     transcribed_text = ''
 
-    # Check for a voice message and transcribe if present
     if update.message.voice:
         voice = update.message.voice
         voice_file = await context.bot.get_file(voice.file_id)
 
-        # Store the file in memory, not on disk
         buf = io.BytesIO()
         await voice_file.download_to_memory(buf)
         buf.name = "voice.oga"
         buf.seek(0)
 
-        # Transcribe the audio
         transcribed_text = await openai_utils.transcribe_audio(buf)
         transcribed_text = transcribed_text.strip()
 
@@ -422,21 +519,17 @@ async def _vision_message_handle_fn(
         photo = update.message.photo[-1]
         photo_file = await context.bot.get_file(photo.file_id)
 
-        # store file in memory, not on disk
         buf = io.BytesIO()
         await photo_file.download_to_memory(buf)
-        buf.name = "image.jpg"  # file extension is required
-        buf.seek(0)  # move cursor to the beginning of the buffer
+        buf.name = "image.jpg"
+        buf.seek(0)
 
-    # in case of CancelledError
     n_input_tokens, n_output_tokens = 0, 0
 
     try:
-        # send placeholder message to user
         placeholder_message = await update.message.reply_text("<i>Думаю...</i>", parse_mode=ParseMode.HTML)
         message = update.message.caption or update.message.text or transcribed_text or ''
 
-        # send typing action
         await update.message.chat.send_action(action="typing")
 
         dialog_messages = db.get_dialog_messages(user_id, dialog_id=None)
@@ -481,9 +574,8 @@ async def _vision_message_handle_fn(
                 n_first_dialog_messages_removed,
             ) = gen_item
 
-            answer = answer[:4096]  # telegram message limit
+            answer = answer[:4096]
 
-            # update only when 100 new symbols are ready
             if abs(len(answer) - len(prev_answer)) < 100 and status != "finished":
                 continue
 
@@ -504,11 +596,9 @@ async def _vision_message_handle_fn(
                         message_id=placeholder_message.message_id,
                     )
 
-            await asyncio.sleep(0.01)  # wait a bit to avoid flooding
-
+            await asyncio.sleep(0.01)
             prev_answer = answer
 
-        # update user data
         if buf is not None:
             base_image = base64.b64encode(buf.getvalue()).decode("utf-8")
             new_dialog_message = {"user": [
@@ -522,12 +612,8 @@ async def _vision_message_handle_fn(
                 }
             ]
                 , "bot": answer, "date": datetime.now()}
-
-
         else:
-            # new_dialog_message = {"user": [{"type": "text", "text": message}], "bot": answer, "date": datetime.now()} #repo
-            new_dialog_message = {"user": message, "bot": answer, "date": datetime.now()}  # the test this works
-            # HERE IS THE VISION ISSUE
+            new_dialog_message = {"user": message, "bot": answer, "date": datetime.now()}
 
         db.set_dialog_messages(
             user_id,
@@ -542,12 +628,11 @@ async def _vision_message_handle_fn(
                                   action_params={'n_input_tokens': n_input_tokens, 'n_output_tokens': n_output_tokens})
 
     except asyncio.CancelledError:
-        # note: intermediate token updates only work when enable_message_streaming=True (config.yml)
         db.update_n_used_tokens(user_id, current_model, n_input_tokens, n_output_tokens)
         raise
 
     except Exception as e:
-        error_text = f"Something went wrong during completion_1. Reason: {e}"  # edit, FIRST_ISSUE
+        error_text = f"Something went wrong during completion_1. Reason: {e}"
         logger.error(error_text)
         await update.message.reply_text(error_text)
         return
@@ -563,25 +648,16 @@ async def unsupport_message_handle(update: Update, context: CallbackContext, mes
     return
 
 
-# custom commands
 async def show_user_role(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
-
-    # Fetch the user's role from the database
     user_role = db.get_user_role(user_id)
-
-    # Send a message to the user with their role
     await update.message.reply_text(f"Your current role is ~ `{user_role}` ~  \n\n Pretty neat huh?",
                                     parse_mode='Markdown')
 
 
 async def show_user_model(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
-
-    # Fetch the user's role from the database
     user_model = db.get_user_model(user_id)
-
-    # Send a message to the user with their role
     await update.message.reply_text(f"Your current model is ~ `{user_model}` ~", parse_mode='Markdown')
 
 
@@ -602,26 +678,23 @@ async def topup_handle(update: Update, context: CallbackContext, chat_id=None):
         )
         return
 
-    # Варианты пополнения в рублях
     rub_amount_options = {
-        "100 ₽": 100,
-        "300 ₽": 300,
-        "500 ₽": 500,
-        "1000 ₽": 1000,
-        "2000 ₽": 2000,
-        "5000 ₽": 5000,
+        "₽100": 100,
+        "₽300": 300,
+        "₽500": 500,
+        "₽1000": 1000,
+        "₽2000": 2000,
+        "₽5000": 5000,
         "Другая сумма...": "custom",
         "Пожертвование ❤️": "donation"
     }
 
-    # Генерируем inline keyboard
     keyboard = [
         [InlineKeyboardButton(text, callback_data=f"topup|topup_{amount}")]
         for text, amount in rub_amount_options.items()
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # Отправляем сообщение с вариантами
     await context.bot.send_message(
         chat_id=user_id,
         text="Выберите сумму для пополнения баланса:",
@@ -655,12 +728,12 @@ async def topup_callback_handle(update: Update, context: CallbackContext):
         context.user_data.pop('is_donation', None)
 
         rub_amount_options = {
-            "100 ₽": 100,
-            "300 ₽": 300,
-            "500 ₽": 500,
-            "1000 ₽": 1000,
-            "2000 ₽": 2000,
-            "5000 ₽": 5000,
+            "₽100": 100,
+            "₽300": 300,
+            "₽500": 500,
+            "₽1000": 1000,
+            "₽2000": 2000,
+            "₽5000": 5000,
             "Другая сумма...": "custom",
             "Пожертвование ❤️": "donation"
         }
@@ -689,7 +762,7 @@ async def topup_callback_handle(update: Update, context: CallbackContext):
         payment_text = (
             f"Для оплаты *{amount_rub} ₽* нажмите на кнопку ниже:\n\n"
             "🔐 Платежи обрабатываются через <b>ЮKassa</b> - надежную платежную систему.\n"
-            "После успешной оплаты баланс пополнится автоматически!"
+            "После успешной оплаты баланс пополнится автоматически в течение 1-2 минут!"
         )
         keyboard = [
             [InlineKeyboardButton("💳 Оплатить", url=payment_url)],
@@ -701,435 +774,153 @@ async def topup_callback_handle(update: Update, context: CallbackContext):
                                       disable_web_page_preview=True)
 
 
-async def create_yookassa_payment(user_id: int, amount_rub: int, context: CallbackContext):
-    """Создает платеж в Yookassa и возвращает URL для оплаты"""
-    try:
-        # Создаем описание платежа
-        description = "Пополнение баланса"
-        if context.user_data.get('is_donation'):
-            description = "Добровольное пожертвование"
+async def subscription_handle(update: Update, context: CallbackContext):
+    """Показывает доступные подписки"""
+    await register_user_if_not_exists(update, context, update.message.from_user)
+    user_id = update.message.from_user.id
+    db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        # Создаем платеж
-        payment = Payment.create({
-            "amount": {
-                "value": f"{amount_rub}.00",
-                "currency": "RUB"
-            },
-            "confirmation": {
-                "type": "redirect",
-                "return_url": "https://t.me/gptducksbot"  # URL для возврата после оплаты
-            },
-            "capture": True,
-            "description": description,
-            "metadata": {
-                "user_id": user_id,
-                "is_donation": str(context.user_data.get('is_donation', False)).lower()
-            }
-        })
+    subscription_info = db.get_user_subscription_info(user_id)
 
-        # Сохраняем payment_id в базе для верификации
-        db.set_user_attribute(user_id, "last_payment_id", payment.id)
+    text = "🔔 <b>Доступные подписки</b>\n\n"
 
-        return payment.confirmation.confirmation_url, payment.id
+    if subscription_info["is_active"]:
+        expires_str = subscription_info["expires_at"].strftime("%d.%m.%Y")
+        text += f"📋 <b>Текущая подписка:</b> {subscription_info['type'].upper()}\n"
+        text += f"📅 <b>Действует до:</b> {expires_str}\n"
+        if subscription_info["type"] == "pro_lite":
+            text += f"📊 <b>Запросы использовано:</b> {subscription_info['requests_used']}/1000\n"
+            text += f"🎨 <b>Изображения использовано:</b> {subscription_info['images_used']}/20\n"
+        text += "\n"
 
-    except Exception as e:
-        logger.error(f"Error creating Yookassa payment: {e}")
-        raise e
-
-
-async def send_confirmation_message_async(user_id, amount_rub, is_donation):
-    user = db.user_collection.find_one({"_id": user_id})
-    if user:
-        chat_id = user["chat_id"]
-
-        if is_donation:
-            message = f"Спасибо за ваше пожертвование *{amount_rub} ₽*! Ваша поддержка очень важна для нас! ❤️❤️"
-        else:
-            message = f"Пополнение на *{amount_rub} ₽* прошло успешно! 🎉\n\nБаланс обновлен."
-            if user.get("role") == "trial_user":
-                db.user_collection.update_one(
-                    {"_id": user_id},
-                    {"$set": {"role": "regular_user"}}
-                )
-                message += "\n\nВаш статус изменен на *обычного пользователя*! Спасибо за поддержку! ❤️"
-
-        await bot_instance.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
-
-
-def start_asyncio_loop():
-    if config.stripe_webhook_secret is None or config.stripe_webhook_secret == "":
-        return
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(start_redis_listener())
-    loop.run_forever()
-
-
-async def send_subscription_confirmation_async(user_id, subscription_type):
-    user = db.user_collection.find_one({"_id": user_id})
-    if user:
-        chat_id = user["chat_id"]
-
-        from subscription import SubscriptionType, SUBSCRIPTION_DURATIONS
-        subscription_type_enum = SubscriptionType(subscription_type)
-        duration_days = SUBSCRIPTION_DURATIONS[subscription_type_enum].days
-
-        message = f"🎉 Подписка *{subscription_type.replace('_', ' ').title()}* активирована!\n"
-        message += f"📅 Действует *{duration_days} дней*\n\n"
-        message += "Теперь вы можете пользоваться ботом по подписке!"
-
-        await bot_instance.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
-
-
-async def start_redis_listener():
-    if config.yookassa_shop_id is None or config.yookassa_secret_key is None:
-        return
-
-    redis = aioredis.from_url("redis://redis:6379", encoding="utf-8", decode_responses=True)
-
-    async with redis.client() as client:
-        sub = client.pubsub()
-        await sub.subscribe('payment_notifications')
-
-        async for msg in sub.listen():
-            if msg['type'] == 'message':
-                data = json.loads(msg['data'])
-
-                if data.get('message_type') == 'subscription':
-                    user_id = data['user_id']
-                    subscription_type = data['subscription_type']
-                    await send_subscription_confirmation_async(user_id, subscription_type)
-                else:
-                    user_id = data['user_id']
-                    amount_rub = data['amount_rub']
-                    is_donation = data.get('is_donation', False)
-                    await send_confirmation_message_async(user_id, amount_rub, is_donation)
-
-
-# admin commands
-async def admin_command(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-
-    # Check if the user has an admin role
-    user_role = db.get_user_role(user_id)
-
-    if user_id not in config.roles['admin']:
-        await update.message.reply_text("You're not allowed to use this command.")
-        return
-
-    # List of admin commands
-    admin_commands = [
-        "",
-        "/admin - List available admin commands",
-        "/get_user_count - Get the number of users",
-        "/list_user_roles - List users and their role",
-        "/change_role - Works even if youre not currently admin role",
-        "",
-        "Messaging commands:",
-        "",
-        "/send_message_to_id <user_id> <message>",
-        "/message_username <user_username> <message>",
-        "/message_name <user_first_name> <message>",
-        "/message_role <user_role> <message>",
-        "/message_all <message> - Message the entire database",
-        # Add more admin commands here
+    subscriptions = [
+        {
+            "name": "Pro Lite",
+            "type": SubscriptionType.PRO_LITE,
+            "price": 499,
+            "duration": "10 дней",
+            "features": "1000 запросов • 20 генераций изображений • До 4000 символов"
+        },
+        {
+            "name": "Pro Plus",
+            "type": SubscriptionType.PRO_PLUS,
+            "price": 1290,
+            "duration": "1 месяц",
+            "features": "Безлимитные запросы • До 32000 символов"
+        },
+        {
+            "name": "Pro Premium",
+            "type": SubscriptionType.PRO_PREMIUM,
+            "price": 2990,
+            "duration": "3 месяца",
+            "features": "Безлимитные запросы • До 32000 символов"
+        }
     ]
-    commands_text = "\n".join(admin_commands)
-    await update.message.reply_text(f"Available admin commands:\n{commands_text}")  # , parse_mode='Markdown'
 
+    keyboard = []
+    for sub in subscriptions:
+        btn_text = f"{sub['name']} - {sub['price']}₽"
+        callback_data = f"subscribe|{sub['type'].value}"
+        keyboard.append([InlineKeyboardButton(btn_text, callback_data=callback_data)])
 
-async def get_user_count(update, context):
-    user_id = update.effective_user.id
-
-    if user_id not in config.roles['admin']:
-        await update.message.reply_text("You're not allowed to use this command.")
-        return
-
-    user_count = db.get_user_count()
-    await update.message.reply_text(f"Total number of users: {user_count}")
-
-
-async def list_user_roles(update, context):
-    user_id = update.effective_user.id
-    local_timezone = config.timezone
-    LOCAL_TIMEZONE = pytz.timezone(local_timezone)
-
-    # Check if the user has the admin role
-    if user_id not in config.roles['admin']:
-        await update.message.reply_text("You're not allowed to use this command.")
-        return
-
-    users_and_roles = db.get_users_and_roles()
-    message_lines = []
-
-    for user in users_and_roles:
-        username = user.get('username', 'No Username')
-        first_name = user.get('first_name', 'No First Name')
-        role = user.get('role', 'No Role')
-        last_interaction = user.get('last_interaction')
-
-        # Adjusting the datetime
-        if last_interaction:
-            last_interaction = last_interaction.replace(tzinfo=pytz.UTC)  # Ensure it has UTC timezone
-            local_last_interaction = last_interaction.astimezone(LOCAL_TIMEZONE)
-            now_local = datetime.now(LOCAL_TIMEZONE)
-
-            if local_last_interaction.date() == now_local.date():
-                last_interaction_str = local_last_interaction.strftime('%H:%M')
-            else:
-                days_ago = (now_local.date() - local_last_interaction.date()).days
-                last_interaction_str = f"{days_ago} days ago"
-        else:
-            last_interaction_str = 'No Time'
-
-        message_lines.append(
-            f"`{username}` | `{first_name}` | `{role}` | `{last_interaction_str}`"
-        )
-
-    message_text = "\n\n".join(message_lines)
-
-    await update.message.reply_text(message_text, parse_mode='Markdown')
-
-
-async def send_message_to_id(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-
-    # Check if the user has the admin role
-    if user_id not in config.roles['admin']:
-        await update.message.reply_text("You're not allowed to use this command.")
-        return
-
-    # Extract user_id and message from the command
-    try:
-        _, target_user_id, *message_parts = update.message.text.split()
-        message_text = " ".join(message_parts)
-        target_user_id = int(target_user_id)  # Ensure it's an integer
-    except (ValueError, IndexError):
-        await update.message.reply_text("Usage: /send_message_to_user <user_id> <message>")
-        return
-
-    # Use the bot object to send a message to the target user
-    try:
-        await context.bot.send_message(chat_id=target_user_id, text=message_text)
-        await update.message.reply_text(f"Message sent to user {target_user_id}.")
-    except Exception as e:
-        await update.message.reply_text(f"Failed to send message: {str(e)}")
-
-
-async def send_message_to_username(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-
-    # Check if the user has the admin role
-    if user_id not in config.roles['admin']:
-        await update.message.reply_text("You're not allowed to use this command.")
-        return
-
-    try:
-        _, username, *message_parts = update.message.text.split()
-        message_text = " ".join(message_parts)
-    except ValueError:
-        await update.message.reply_text("Usage: /send_message_to_username <username> <message>")
-        return
-
-    # Find the user in the database by username
-    target_user = db.find_user_by_username(username.replace("@", ""))
-    if not target_user:
-        await update.message.reply_text(f"User {username} not found.")
-        return
-
-    # Send message
-    try:
-        await context.bot.send_message(chat_id=target_user["_id"], text=message_text)
-        await update.message.reply_text(f"Message sent to {username}.")
-    except Exception as e:
-        await update.message.reply_text(f"Failed to send message: {str(e)}")
-
-
-async def send_message_to_name(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-
-    if user_id not in config.roles['admin']:
-        await update.message.reply_text("You're not allowed to use this command.")
-        return
-
-    try:
-        _, first_name, *message_parts = update.message.text.split()
-        message_text = " ".join(message_parts)
-    except ValueError:
-        await update.message.reply_text("Usage: /send_message_to_name <first_name> <message>")
-        return
-
-    # Find users by first name
-    users = db.find_users_by_first_name(first_name)
-    if not users:
-        await update.message.reply_text(f"No users found with the first name {first_name}.")
-        return
-
-    # Send message to each user
-    for user in users:
-        try:
-            await context.bot.send_message(chat_id=user["_id"], text=message_text)
-        except Exception as e:
-            # Log or handle individual send errors
-            continue
-    await update.message.reply_text(f"Message sent to users with the first name {first_name}.")
-
-
-async def send_message_to_role(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-
-    if user_id not in config.roles['admin']:
-        await update.message.reply_text("You're not allowed to use this command.")
-        return
-
-    try:
-        _, role, *message_parts = update.message.text.split()
-        message_text = " ".join(message_parts)
-    except ValueError:
-        await update.message.reply_text("Usage: /send_message_to_role <role> <message>")
-        return
-
-    # Find users by role
-    users = db.find_users_by_role(role)
-    if not users:
-        await update.message.reply_text(f"No users found with the role {role}.")
-        return
-
-    formatted_message_text = f"_{message_text}_"
-    # formatted_message_text = f"<b><i>{message_text}</i></b>" #html
-    # Send message to each user
-    for user in users:
-        try:
-            await context.bot.send_message(chat_id=user["_id"], text=formatted_message_text, parse_mode='Markdown')
-        except Exception as e:
-            # Log or handle individual send errors
-            continue
-    await update.message.reply_text(f"Message sent to users with the role {role}.")
-
-
-async def send_message_to_all(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-
-    # Check if the user has the permission to send a broadcast
-    if user_id not in config.roles['admin']:
-        await update.message.reply_text("You're not allowed to use this command.", parse_mode='Markdown')
-        return
-
-    try:
-        _, *message_parts = update.message.text.split(
-            maxsplit=1)  # Split only once to get the whole message after the command
-        message_text = message_parts[0] if message_parts else "No message provided."
-    except ValueError:
-        await update.message.reply_text("Usage: /message_all <message>", parse_mode='Markdown')
-        return
-
-    # Retrieve all users' IDs from the database
-    users_ids = db.get_all_user_ids()  # This function now correctly returns just the user IDs
-    if not users_ids:
-        await update.message.reply_text("No users found in the database.", parse_mode='Markdown')
-        return
-
-    # Send message to each user ID
-    failed_count = 0
-    failed_users = []
-
-    for user_id in users_ids:
-        try:
-            await context.bot.send_message(chat_id=user_id, text=message_text, parse_mode='Markdown')
-        except Exception as e:
-            user_details = db.get_user_by_id(user_id)
-            if user_details:
-                failed_users.append(user_details.get('first_name', 'Unknown User'))
-
-            failed_count += 1
-            failed_users.append(str(user_id))
-            # Log or handle individual send errors
-
-    success_message = f"Message sent to all users. Failures: {failed_count}" if failed_count else "Message successfully sent to all users."
-    failed_users_message = f"\n\nFailed to send message to {failed_count} users: {', '.join(failed_users)}" if failed_users else ""
-    final_message = success_message + failed_users_message
-
-    await update.message.reply_text(final_message, parse_mode='Markdown')
-
-
-async def change_role(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-
-    # Assuming 'roles' is a dictionary in your config with user roles and their corresponding user IDs
-    if user_id not in config.roles['admin']:
-        await update.message.reply_text("You're not allowed to use this command.")
-        return
-
-    # Fetch the current user's role
-    user_data = db.user_collection.find_one({"_id": user_id})
-    current_role = user_data.get("role", "No role set") if user_data else "No user data found"
-
-    # Define available roles
-    roles = ["admin", "beta_tester", "friend", "regular_user", "trial_user"]
-
-    # Generate buttons for each role, marking the current role with a checkmark
-    keyboard = [
-        [InlineKeyboardButton(f"{role} {'✅' if role == current_role else ''}", callback_data=f"set_role|{role}")]
-        for role in roles
-    ]
+    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="subscription_back")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # Send message with role options
-    await update.message.reply_text(
-        "Please choose a role to switch to:",
-        reply_markup=reply_markup
-    )
+    for sub in subscriptions:
+        text += f"<b>{sub['name']}</b> - {sub['price']}₽ / {sub['duration']}\n"
+        text += f"   {sub['features']}\n\n"
+
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
 
-async def handle_role_change(update: Update, context: CallbackContext):
+async def subscription_callback_handle(update: Update, context: CallbackContext):
+    """Обрабатывает выбор подписки"""
     query = update.callback_query
     await query.answer()
 
-    user_id = query.from_user.id
     data = query.data
 
-    if data.startswith('set_role|'):
-        new_role = data.split('|')[1]
+    if data == "subscription_back":
+        await query.edit_message_text("Возврат в главное меню...")
+        return
 
-        # Update the user's role in the database
-        db.user_collection.update_one(
-            {"_id": user_id},
-            {"$set": {"role": new_role}}
+    if data.startswith("subscribe|"):
+        _, subscription_type_str = data.split("|")
+        subscription_type = SubscriptionType(subscription_type_str)
+
+        price = SUBSCRIPTION_PRICES[subscription_type]
+        duration = SUBSCRIPTION_DURATIONS[subscription_type]
+
+        payment_url = await create_subscription_yookassa_payment(
+            query.from_user.id, subscription_type, context
         )
 
-        # Fetch the updated role list with the current role now being the new_role
-        roles = ["admin", "beta_tester", "friend", "regular_user", "trial_user"]
+        text = f"💳 <b>Оформление подписки {subscription_type.name.replace('_', ' ').title()}</b>\n\n"
+        text += f"Стоимость: <b>{price}₽</b>\n"
+        text += f"Период: <b>{duration.days} дней</b>\n\n"
+        text += "Нажмите кнопку ниже для оплаты. После успешной оплаты подписка активируется автоматически в течение 1-2 минут!"
 
-        # Regenerate keyboard with updated checkmark
         keyboard = [
-            [InlineKeyboardButton(f"{role} {'✅' if role == new_role else ''}", callback_data=f"set_role|{role}")]
-            for role in roles
+            [InlineKeyboardButton("💳 Оплатить", url=payment_url)],
+            [InlineKeyboardButton("⬅️ Назад", callback_data="subscription_back")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        # Update the message with the new keyboard
-        await query.edit_message_text(
-            text="Please choose a role to switch to:",
-            reply_markup=reply_markup
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+
+
+async def check_my_payments_handle(update: Update, context: CallbackContext):
+    """Показывает статус pending платежей пользователя"""
+    await register_user_if_not_exists(update, context, update.message.from_user)
+    user_id = update.message.from_user.id
+    db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+    pending_payments = db.get_user_pending_payments(user_id)
+
+    if not pending_payments:
+        await update.message.reply_text(
+            "У вас нет ожидающих платежей.",
+            parse_mode=ParseMode.HTML
         )
+        return
+
+    text = "📋 <b>Ваши ожидающие платежи:</b>\n\n"
+
+    for payment in pending_payments:
+        amount = payment["amount"]
+        payment_id = payment["payment_id"]
+        status = payment["status"]
+        created_at = payment["created_at"].strftime("%d.%m.%Y %H:%M")
+
+        status_emoji = {
+            "pending": "⏳",
+            "waiting_for_capture": "🔄",
+            "succeeded": "✅",
+            "canceled": "❌"
+        }.get(status, "❓")
+
+        text += f"{status_emoji} <b>{amount} ₽</b> - {status}\n"
+        text += f"   ID: <code>{payment_id}</code>\n"
+        text += f"   Создан: {created_at}\n\n"
+
+    text += "Платежи проверяются автоматически каждые 30 секунд."
+
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
-# end of admin commands
+bot_instance = None
+
 
 async def message_handle(update: Update, context: CallbackContext, message=None, use_new_dialog_timeout=True):
-    # check if bot was mentioned (for group chats)
     if not await is_bot_mentioned(update, context):
         return
 
-    # check if message is edited
     if update.edited_message is not None:
         await edited_message_handle(update, context)
         return
 
     _message = message or update.message.text
 
-    # remove bot mention (in group chats)
     if update.message.chat.type != "private":
         _message = _message.replace("@" + context.bot.username, "").strip()
 
@@ -1139,7 +930,6 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
     user_id = update.message.from_user.id
     chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
 
-    # Use subscription preprocessor instead of euro/rub balance check
     if not await subscription_preprocessor(update, context):
         return
 
@@ -1153,12 +943,11 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
     current_model = db.get_user_attribute(user_id, "current_model")
 
-    # custom top up with Yookassa
     if 'awaiting_custom_topup' in context.user_data and context.user_data['awaiting_custom_topup']:
         user_input = update.message.text.replace(',', '.').strip()
         try:
             custom_amount = float(user_input)
-            min_amount = 10  # Минимальная сумма в рублях
+            min_amount = 10
             error_message = f"Минимальная сумма пополнения *{min_amount} ₽*. Введите другую сумму."
 
             if context.user_data['awaiting_custom_topup'] == "donation":
@@ -1181,12 +970,13 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
                 update.effective_user.id, int(custom_amount), context
             )
 
-            thank_you_message = "\n\nСпасибо за вашу поддержку! ❤️" if context.user_data['awaiting_custom_topup'] == "donation" else ""
+            thank_you_message = "\n\nСпасибо за вашу поддержку! ❤️" if context.user_data[
+                                                                           'awaiting_custom_topup'] == "donation" else ""
 
             payment_text = (
                 f"Для оплаты *{custom_amount:.0f} ₽* нажмите на кнопку ниже:{thank_you_message}\n\n"
                 "🔐 Платежи обрабатываются через <b>ЮKassa</b>.\n"
-                "После успешной оплаты баланс пополнится автоматически!"
+                "После успешной оплаты баланс пополнится автоматически в течение 1-2 минут!"
             )
             keyboard = [
                 [InlineKeyboardButton("💳 Оплатить", url=payment_url)],
@@ -1215,29 +1005,22 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
             )
             return
 
-    # chatgpt_instance = openai_utils.ChatGPT(model=current_model)
     async def message_handle_fn():
-
-        # new dialog timeout
         if use_new_dialog_timeout:
             if (datetime.now() - db.get_user_attribute(user_id,
                                                        "last_interaction")).seconds > config.new_dialog_timeout and len(
-                    db.get_dialog_messages(user_id)) > 0:
+                db.get_dialog_messages(user_id)) > 0:
                 db.start_new_dialog(user_id)
                 await update.message.reply_text(
                     f"Запуск нового диалога(<b>{config.chat_modes[chat_mode]['name']}</b>) ✅",
                     parse_mode=ParseMode.HTML)
         db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        # in case of CancelledError
         n_input_tokens, n_output_tokens = 0, 0
 
         try:
-
-            # send placeholder message to user
             placeholder_message = await update.message.reply_text("<i>Думаю...</i>", parse_mode=ParseMode.HTML)
 
-            # send typing action
             await update.message.chat.send_action(action="typing")
 
             if _message is None or len(_message) == 0:
@@ -1259,7 +1042,8 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
             else:
                 answer, (
-                n_input_tokens, n_output_tokens), n_first_dialog_messages_removed = await chatgpt_instance.send_message(
+                    n_input_tokens,
+                    n_output_tokens), n_first_dialog_messages_removed = await chatgpt_instance.send_message(
                     _message,
                     dialog_messages=dialog_messages,
                     chat_mode=chat_mode
@@ -1275,9 +1059,8 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
             async for gen_item in gen:
                 status, answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed = gen_item
 
-                answer = answer[:4096]  # telegram message limit
+                answer = answer[:4096]
 
-                # update only when 100 new symbols are ready
                 if abs(len(answer) - len(prev_answer)) < 100 and status != "finished":
                     continue
 
@@ -1292,13 +1075,11 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
                     else:
                         await context.bot.edit_message_text(answer, chat_id=placeholder_message.chat_id,
                                                             message_id=placeholder_message.message_id,
-                                                            disable_web_page_preview=True)  # maybe bug
+                                                            disable_web_page_preview=True)
 
-                await asyncio.sleep(0.01)  # wait a bit to avoid flooding
-
+                await asyncio.sleep(0.01)
                 prev_answer = answer
 
-            # update user data
             new_dialog_message = {"user": [{"type": "text", "text": _message}], "bot": answer,
                                   "date": datetime.now()}
 
@@ -1308,7 +1089,6 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
                 dialog_id=None
             )
 
-            # Update subscription usage or deduct from balance
             action_type = db.get_user_attribute(user_id, "current_model")
             db.deduct_cost_for_action(user_id=user_id, action_type=action_type,
                                       action_params={'n_input_tokens': n_input_tokens,
@@ -1317,7 +1097,6 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
             db.update_n_used_tokens(user_id, current_model, n_input_tokens, n_output_tokens)
 
         except asyncio.CancelledError:
-            # note: intermediate token updates only work when enable_message_streaming=True (config.yml)
             db.update_n_used_tokens(user_id, current_model, n_input_tokens, n_output_tokens)
 
             action_type = db.get_user_attribute(user_id, "current_model")
@@ -1333,7 +1112,6 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
             await update.message.reply_text(error_text)
             return
 
-        # send message if some messages were removed from the context
         if n_first_dialog_messages_removed > 0:
             if n_first_dialog_messages_removed == 1:
                 text = "✍️ <i>Note:</i> Your current dialog is too long, so your <b>first message</b> was removed from the context.\n Send /new command to start new dialog"
@@ -1383,7 +1161,6 @@ async def is_previous_message_not_answered_yet(update: Update, context: Callback
 
 
 async def voice_message_handle(update: Update, context: CallbackContext):
-    # check if bot was mentioned (for group chats)
     if not await is_bot_mentioned(update, context):
         return
 
@@ -1392,9 +1169,6 @@ async def voice_message_handle(update: Update, context: CallbackContext):
 
     user_id = update.message.from_user.id
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
-    # if not await token_balance_preprocessor(update, context):
-    # return
 
     if not await subscription_preprocessor(update, context):
         return
@@ -1410,21 +1184,18 @@ async def voice_message_handle(update: Update, context: CallbackContext):
     voice = update.message.voice
     voice_file = await context.bot.get_file(voice.file_id)
 
-    # store file in memory, not on disk
     buf = io.BytesIO()
     await voice_file.download_to_memory(buf)
-    buf.name = "voice.oga"  # file extension is required
-    buf.seek(0)  # move cursor to the beginning of the buffer
+    buf.name = "voice.oga"
+    buf.seek(0)
 
     transcribed_text = await openai_utils.transcribe_audio(buf)
     text = f"🎤: <i>{transcribed_text}</i>"
 
     audio_duration_minutes = voice.duration / 60.0
 
-    # update n_transcribed_seconds
     db.set_user_attribute(user_id, "n_transcribed_seconds",
                           voice.duration + db.get_user_attribute(user_id, "n_transcribed_seconds"))
-    # db.deduct_tokens_based_on_role(user_id, n_input_tokens, n_output_tokens)
     db.deduct_cost_for_action(user_id=user_id, action_type='whisper',
                               action_params={'audio_duration_minutes': audio_duration_minutes})
 
@@ -1443,33 +1214,27 @@ async def voice_message_handle(update: Update, context: CallbackContext):
 
 
 async def generate_image_handle(update: Update, context: CallbackContext, message=None):
-    """Generate images based on the user's preferences stored in the database."""
     await register_user_if_not_exists(update, context, update.message.from_user)
     if await is_previous_message_not_answered_yet(update, context): return
 
     user_id = update.message.from_user.id
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-    # Retrieve user preferences
     user_preferences = db.get_user_attribute(user_id, "image_preferences")
 
     model = user_preferences.get("model", "dalle-2")
     n_images = user_preferences.get("n_images", 3)
     resolution = user_preferences.get("resolution", "1024x1024")
 
-    # Ensure sufficient balance before proceeding
     if not await subscription_preprocessor(update, context):
         return
 
-    # Send typing action
     await update.message.chat.send_action(action="upload_photo")
 
     message = message or update.message.text
 
-    # Send a placeholder message
     placeholder_message = await update.message.reply_text("<i>Рисуем...</i>", parse_mode=ParseMode.HTML)
 
-    # Generate the images based on user preferences
     try:
         image_urls = await openai_utils.generate_images(prompt=message or update.message.text, model=model,
                                                         n_images=n_images, size=resolution)
@@ -1485,32 +1250,27 @@ async def generate_image_handle(update: Update, context: CallbackContext, messag
         return
 
     except Exception as e:
-        # General error handler for unexpected issues
         logging.error(f"Unexpected Error: {str(e)}")
         text = f"⚠️ An unexpected error occurred. Please try again. \n\n<b>Reason</b>: {str(e)}"
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
         return
 
-    # Action parameters
     action_params = {
-        "model": model,  # DALL-E model
-        "quality": user_preferences.get("quality", "standard"),  # Image quality
-        "resolution": resolution,  # Resolution (e.g., 1024x1024)
-        "n_images": n_images  # Number of images
+        "model": model,
+        "quality": user_preferences.get("quality", "standard"),
+        "resolution": resolution,
+        "n_images": n_images
     }
 
-    # Token usage and cost deduction
     db.set_user_attribute(user_id, "n_generated_images",
                           n_images + db.get_user_attribute(user_id, "n_generated_images"))
     action_type = user_preferences.get("model", "dalle-3")
     db.deduct_cost_for_action(user_id=user_id, action_type=action_type, action_params=action_params)
 
-    # Update the placeholder message with the final image message
     pre_generation_message = f"Нарисовали 🎨:\n\n  <i>{message or ''}</i>  \n\n Подождите немного, изображение почти готово!"
     await context.bot.edit_message_text(pre_generation_message, chat_id=placeholder_message.chat_id,
                                         message_id=placeholder_message.message_id, parse_mode=ParseMode.HTML)
 
-    # Upload each generated image
     for image_url in image_urls:
         await update.message.chat.send_action(action="upload_photo")
         await upload_image_from_memory(
@@ -1524,15 +1284,11 @@ async def generate_image_handle(update: Update, context: CallbackContext, messag
                                         message_id=placeholder_message.message_id, parse_mode=ParseMode.HTML)
 
 
-# some resolutions were throwing an error, so I changed to send the image from memory
 async def upload_image_from_memory(bot, chat_id, image_url):
-    # Download the image to an in-memory buffer
     response = requests.get(image_url, stream=True)
     if response.status_code == 200:
         image_buffer = io.BytesIO(response.content)
-        image_buffer.name = "image.jpg"  # Set a name for the file
-
-        # Send the photo using the in-memory buffer
+        image_buffer.name = "image.jpg"
         await bot.send_photo(chat_id=chat_id, photo=InputFile(image_buffer, "image.jpg"))
 
 
@@ -1543,19 +1299,22 @@ async def new_dialog_handle(update: Update, context: CallbackContext):
     user_id = update.message.from_user.id
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-    # Проверка подписки перед началом нового диалога
-    if not await subscription_preprocessor(update, context):
-        return
-
     current_model = db.get_user_attribute(user_id, "current_model")
     if current_model == "gpt-4-vision-preview":
         db.set_user_attribute(user_id, "current_model", "gpt-4-turbo-2024-04-09")
 
-    db.start_new_dialog(user_id)
-    await update.message.reply_text("Начинаем новый диалог ✅")
+    try:
+        db.start_new_dialog(user_id)
+        await update.message.reply_text("Начинаем новый диалог ✅")
 
-    chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
-    await update.message.reply_text(f"{config.chat_modes[chat_mode]['welcome_message']}", parse_mode=ParseMode.HTML)
+        chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
+        await update.message.reply_text(f"{config.chat_modes[chat_mode]['welcome_message']}", parse_mode=ParseMode.HTML)
+    except PermissionError as e:
+        await update.message.reply_text(
+            "❌ <b>Для начала нового диалога требуется активная подписка</b>\n\n"
+            "Используйте /subscription для управления подписками",
+            parse_mode=ParseMode.HTML
+        )
 
 
 async def cancel_handle(update: Update, context: CallbackContext):
@@ -1575,7 +1334,6 @@ def get_chat_mode_menu(page_index: int):
     n_chat_modes_per_page = config.n_chat_modes_per_page
     text = f"Выберите <b>режим чата</b> (Доступно {len(config.chat_modes)} режимов):"
 
-    # buttons
     chat_mode_keys = list(config.chat_modes.keys())
     page_chat_mode_keys = chat_mode_keys[page_index * n_chat_modes_per_page:(page_index + 1) * n_chat_modes_per_page]
 
@@ -1587,10 +1345,9 @@ def get_chat_mode_menu(page_index: int):
         if len(row) == 2:
             keyboard.append(row)
             row = []
-    if row:  # если осталась одна кнопка
+    if row:
         keyboard.append(row)
 
-    # pagination
     if len(chat_mode_keys) > n_chat_modes_per_page:
         is_first_page = (page_index == 0)
         is_last_page = ((page_index + 1) * n_chat_modes_per_page >= len(chat_mode_keys))
@@ -1663,7 +1420,6 @@ async def set_chat_mode_handle(update: Update, context: CallbackContext):
 def get_settings_menu(user_id: int):
     text = "⚙️ Настройки:"
 
-    # Define the buttons for the settings menu
     keyboard = [
         [InlineKeyboardButton("🧠 Модель нейросети", callback_data='model-ai_model')],
         [InlineKeyboardButton("🎨 Модель художника", callback_data='model-artist_model')]
@@ -1719,7 +1475,6 @@ async def display_model_info(query, user_id, context):
         if model_key == current_model:
             title = "✅ " + title
 
-        # Adjust callback data to include a prefix for Claude models
         if "claude" in model_key.lower():
             callback_data = f"claude-model-set_settings|{model_key}"
             claude_buttons.append(InlineKeyboardButton(title, callback_data=callback_data))
@@ -1741,7 +1496,6 @@ async def display_model_info(query, user_id, context):
             pass
 
 
-# for the settings menu
 async def model_settings_handler(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
@@ -1768,7 +1522,6 @@ async def model_settings_handler(update: Update, context: CallbackContext):
             if model_key == current_model:
                 title = "✅ " + title
 
-            # Adjust callback data to include a prefix for Claude models
             if "claude" in model_key.lower():
                 callback_data = f"claude-model-set_settings|{model_key}"
                 claude_buttons.append(InlineKeyboardButton(title, callback_data=callback_data))
@@ -1786,7 +1539,6 @@ async def model_settings_handler(update: Update, context: CallbackContext):
         await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
     elif data.startswith('claude-model-set_settings|'):
-        # Check for API key
         if config.anthropic_api_key is None or config.anthropic_api_key == "":
             await context.bot.send_message(
                 chat_id=user_id,
@@ -1794,14 +1546,12 @@ async def model_settings_handler(update: Update, context: CallbackContext):
                 parse_mode='Markdown'
             )
             return
-        # Continue handling setting the model as usual
         _, model_key = data.split("|")
         db.set_user_attribute(user_id, "current_model", model_key)
         await display_model_info(query, user_id, context)
 
     elif data.startswith('model-set_settings|'):
         _, model_key = data.split("|")
-        # Prevent Claude models from being set without API key
         if "claude" in model_key.lower() and (config.anthropic_api_key is None or config.anthropic_api_key == ""):
             await context.bot.send_message(
                 chat_id=user_id,
@@ -1820,7 +1570,6 @@ async def model_settings_handler(update: Update, context: CallbackContext):
         await artist_model_settings_handler(query, user_id)
 
     elif data.startswith('model-artist-set_model|'):
-        # Extract the model key and set it in the preferences
         _, model_key = data.split("|")
         preferences = db.get_user_attribute(user_id, "image_preferences")
         preferences["model"] = model_key
@@ -1849,12 +1598,11 @@ async def model_settings_handler(update: Update, context: CallbackContext):
         await artist_model_settings_handler(query, user_id)
 
     elif data == 'model-back_to_settings':
-        text, reply_markup = get_settings_menu(user_id)  # pass user_id correctly
+        text, reply_markup = get_settings_menu(user_id)
         await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
 
 async def artist_model_settings_handler(query, user_id):
-    """Display artist model selection settings."""
     current_preferences = db.get_user_attribute(user_id, "image_preferences")
     current_model = current_preferences.get("model", "dalle-2")
 
@@ -1862,12 +1610,10 @@ async def artist_model_settings_handler(query, user_id):
     description = model_info["description"]
     scores = model_info["scores"]
 
-    # Build the details text with the description and scores
     details_text = f"{description}\n\n"
     for score_key, score_value in scores.items():
         details_text += f"{'🟢' * score_value}{'⚪️' * (5 - score_value)} – {score_key}\n"
 
-    # Create buttons for available image models
     buttons = []
     for model_key in config.models["available_image_models"]:
         title = config.models["info"][model_key]["name"]
@@ -1875,10 +1621,8 @@ async def artist_model_settings_handler(query, user_id):
             title = "✅ " + title
         buttons.append(InlineKeyboardButton(title, callback_data=f"model-artist-set_model|{model_key}"))
 
-    # Add model-specific configurations
     if current_model == "dalle-2":
         details_text += "\nFor this model, choose the number of images to generate and the resolution:"
-        # Add checkmarked buttons for the number of images
         n_images = current_preferences.get("n_images", 1)
         images_buttons = [
             InlineKeyboardButton(
@@ -1886,7 +1630,6 @@ async def artist_model_settings_handler(query, user_id):
                 callback_data=f"model-artist-set_images|{i}")
             for i in range(1, 4)
         ]
-        # Add checkmarked buttons for the resolution
         current_resolution = current_preferences.get("resolution", "1024x1024")
         resolution_buttons = [
             InlineKeyboardButton(f"✅ {res_key}" if res_key == current_resolution else f"{res_key}",
@@ -1897,14 +1640,12 @@ async def artist_model_settings_handler(query, user_id):
 
     elif current_model == "dalle-3":
         details_text += "\nFor this model, choose the quality of the images and the resolution:"
-        # Add checkmarked buttons for quality levels
         current_quality = current_preferences.get("quality", "standard")
         quality_buttons = [
             InlineKeyboardButton(f"✅ {quality_key}" if quality_key == current_quality else f"{quality_key}",
                                  callback_data=f"model-artist-set_quality|{quality_key}")
             for quality_key in config.models["info"]["dalle-3"]["qualities"].keys()
         ]
-        # Add checkmarked buttons for resolution based on selected quality
         current_resolution = current_preferences.get("resolution", "1024x1024")
         resolution_buttons = [
             InlineKeyboardButton(f"✅ {res_key}" if res_key == current_resolution else f"{res_key}",
@@ -1915,7 +1656,6 @@ async def artist_model_settings_handler(query, user_id):
     else:
         keyboard = [buttons]
 
-    # Add back button
     keyboard.append([InlineKeyboardButton("⬅️", callback_data='model-back_to_settings')])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -1926,91 +1666,16 @@ async def artist_model_settings_handler(query, user_id):
             pass
 
 
-# is needed to make sure the api call isnt made with wrong parameters
 async def switch_between_artist_handler(query, user_id, model_key):
-    """Handle artist model selection and update preferences."""
     preferences = db.get_user_attribute(user_id, "image_preferences")
-
-    # Update the model and set other values based on the chosen model
     preferences["model"] = model_key
     if model_key == "dalle-2":
         preferences["quality"] = "standard"
     elif model_key == "dalle-3":
         preferences["n_images"] = 1
-    # Set the default resolution to 1024x1024 when switching models
     preferences["resolution"] = "1024x1024"
-
-    # Save the updated preferences back to the database
     db.set_user_attribute(user_id, "image_preferences", preferences)
     await artist_model_settings_handler(query, user_id)
-
-
-# name this show_balance_handle and change the name of the other one if you want all the details shown in one place
-async def show_balance_handle_full_details(update: Update, context: CallbackContext):
-    await register_user_if_not_exists(update, context, update.message.from_user)
-
-    user_id = update.message.from_user.id
-    db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
-    current_token_balance = db.check_token_balance(user_id)
-    current_euro_balance = db.get_user_euro_balance(user_id)
-    current_rub_balance = db.get_user_rub_balance(user_id)
-
-    # count total usage statistics
-    total_n_spent_dollars = 0
-    total_n_used_tokens = 0
-    financials = db.get_user_financials(user_id)
-    total_topup = financials['total_topup']
-    total_donated = financials['total_donated']
-
-    n_used_tokens_dict = db.get_user_attribute(user_id, "n_used_tokens")
-    n_generated_images = db.get_user_attribute(user_id, "n_generated_images")
-    n_transcribed_seconds = db.get_user_attribute(user_id, "n_transcribed_seconds")
-
-    details_text = "🏷️ Детально:\n"
-    for model_key in sorted(n_used_tokens_dict.keys()):
-        n_input_tokens, n_output_tokens = n_used_tokens_dict[model_key]["n_input_tokens"], \
-            n_used_tokens_dict[model_key]["n_output_tokens"]
-        total_n_used_tokens += n_input_tokens + n_output_tokens
-
-        n_input_spent_dollars = config.models["info"][model_key]["price_per_1000_input_tokens"] * (
-                n_input_tokens / 1000)
-        n_output_spent_dollars = config.models["info"][model_key]["price_per_1000_output_tokens"] * (
-                n_output_tokens / 1000)
-        total_n_spent_dollars += n_input_spent_dollars + n_output_spent_dollars
-
-        details_text += f"- {model_key}: <b>{n_input_spent_dollars + n_output_spent_dollars:.03f}$</b> / <b>{n_input_tokens + n_output_tokens} tokens</b>\n"
-
-    # image generation
-    image_generation_n_spent_dollars = config.models["info"]["dalle-2"]["price_per_1_image"] * n_generated_images
-    if n_generated_images != 0:
-        details_text += f"- DALL·E 2 (генерация изображений): <b>{image_generation_n_spent_dollars:.03f}$</b> / <b>{n_generated_images} generated images</b>\n"
-
-    total_n_spent_dollars += image_generation_n_spent_dollars
-
-    # voice recognition
-    voice_recognition_n_spent_dollars = config.models["info"]["whisper"]["price_per_1_min"] * (
-            n_transcribed_seconds / 60)
-    if n_transcribed_seconds != 0:
-        details_text += f"- Whisper (распознавание голоса): <b>{voice_recognition_n_spent_dollars:.03f}$</b> / <b>{n_transcribed_seconds:.01f} seconds</b>\n"
-
-    total_n_spent_dollars += voice_recognition_n_spent_dollars
-
-    text = f"Ваш баланс <b>₽{current_rub_balance}</b> \n\n"
-    text += "Вы:\n\n"
-    text += f"Ещё не было первого пополнения 😢\n" if total_topup == 0 else \
-        f"Пополнено <b>{total_topup:.02f}₽</b> ❤️\n" if total_topup < 30 else \
-            f"Пополнено <b>{total_topup:.02f}₽</b>. Рад, что тебе нравится бот! ❤️\n"
-
-    text += f"Пожертвований пока не было.\n\n" if total_donated == 0 else \
-        f"Пожертвовано <b>{total_donated:.02f}₽</b>. Ты легенда! ❤️\n\n" if total_donated < 10 else \
-            f"Пожертвовано <b>{total_donated:.02f}₽</b>. Спасибо за поддержку!! ❤️❤️\n\n"
-
-    text += f"Потрачено ≈ <b>{total_n_spent_dollars:.03f}$</b> 💵\n"
-    text += f"Использовано <b>{total_n_used_tokens}</b> токенов 🪙\n\n"
-    text += details_text
-
-    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
 async def show_balance_handle(update: Update, context: CallbackContext):
@@ -2019,8 +1684,6 @@ async def show_balance_handle(update: Update, context: CallbackContext):
     user_id = update.message.from_user.id
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-    current_token_balance = db.check_token_balance(user_id)  # if you use token balance
-    current_euro_balance = db.get_user_euro_balance(user_id)
     current_rub_balance = db.get_user_rub_balance(user_id)
 
     text = f"Ваш баланс <b>₽{current_rub_balance:.2f}</b> 💶\n\n"
@@ -2034,77 +1697,6 @@ async def show_balance_handle(update: Update, context: CallbackContext):
     await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
 
-async def callback_show_details_old(update: Update, context: CallbackContext):
-    print("Details button pressed")
-    query = update.callback_query
-    await query.answer()
-
-    user_id = query.from_user.id
-    current_euro_balance = db.get_user_euro_balance(user_id)
-    current_rub_balance = db.get_user_rub_balance(user_id)
-
-    # Fetch usage statistics
-    n_used_tokens_dict = db.get_user_attribute(user_id, "n_used_tokens")
-    n_generated_images = db.get_user_attribute(user_id, "n_generated_images")
-    n_transcribed_seconds = db.get_user_attribute(user_id, "n_transcribed_seconds")
-    financials = db.get_user_financials(user_id)
-    total_topup = financials['total_topup']
-    total_donated = financials['total_donated']
-
-    details_text = "🏷️ Детально:\n"
-    total_n_spent_dollars = 0
-    total_n_used_tokens = 0
-
-    for model_key in sorted(n_used_tokens_dict.keys()):
-        n_input_tokens, n_output_tokens = n_used_tokens_dict[model_key]["n_input_tokens"], \
-            n_used_tokens_dict[model_key]["n_output_tokens"]
-        total_n_used_tokens += n_input_tokens + n_output_tokens
-
-        n_input_spent_dollars = config.models["info"][model_key]["price_per_1000_input_tokens"] * (
-                n_input_tokens / 1000)
-        n_output_spent_dollars = config.models["info"][model_key]["price_per_1000_output_tokens"] * (
-                n_output_tokens / 1000)
-        total_n_spent_dollars += n_input_spent_dollars + n_output_spent_dollars
-
-        details_text += f"- {model_key}: <b>{n_input_spent_dollars + n_output_spent_dollars:.03f}$</b> / <b>{n_input_tokens + n_output_tokens} tokens</b>\n"
-
-    # image generation and voice recognition calculations, similar to the initial function
-    image_generation_n_spent_dollars = config.models["info"]["dalle-2"]["price_per_1_image"] * n_generated_images
-    voice_recognition_n_spent_dollars = config.models["info"]["whisper"]["price_per_1_min"] * (
-            n_transcribed_seconds / 60)
-
-    total_n_spent_dollars += image_generation_n_spent_dollars + voice_recognition_n_spent_dollars
-
-    details_text += f"- DALL·E 2 (генерация изображений): <b>{image_generation_n_spent_dollars:.03f}$</b> / <b>{n_generated_images} images</b>\n"
-    details_text += f"- Whisper (распознавание голоса): <b>{voice_recognition_n_spent_dollars:.03f}$</b> / <b>{n_transcribed_seconds:.01f} seconds</b>\n"
-
-    text = f"Ваш баланс <b>₽{current_rub_balance:.3f}</b> 💶\n\n"
-    text += "Ты:\n\n"
-    text += f"   Ещё не сделал(а) первый платёж 😢\n" if total_topup == 0 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}₽</b> ❤️\n" if total_topup < 30 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}₽</b>. Рад, что тебе действительно нравится пользоваться ботом! ❤️\n"
-    text += f"   Ещё не делал(а) донатов.\n\n" if total_donated == 0 else f"   Задонатил(а) <b>{total_donated:.02f}₽</b>. Ты — легенда! ❤️\n\n" if total_donated < 10 else f"   \nЗадонатил(а) <b>{total_donated:.02f}₽</b>! Я очень ценю твою постоянную поддержку!! ❤️❤️\n\n"
-    text += f"   Потратил(а) ≈ <b>{total_n_spent_dollars:.03f}$</b> 💵\n"
-    text += f"   Использовал(а) <b>{total_n_used_tokens}</b> токенов 🪙\n\n"
-    text += details_text
-
-    print("Attempting to edit message")
-    try:
-        await query.edit_message_text(text=text, parse_mode=ParseMode.HTML)
-    except Exception as e:
-        print(f"Failed to edit message: {e}")
-    print("Message edit attempted")
-
-
-# Initialize "total_spent" field for all existing users in the database
-def initialize_total_spent_field():
-    all_users = db.user_collection.find()
-    for user in all_users:
-        if "total_spent" not in user:
-            db.user_collection.update_one(
-                {"_id": user["_id"]},
-                {"$set": {"total_spent": 0}}
-            )
-
-
 async def callback_show_details(update: Update, context: CallbackContext):
     print("Details button pressed")
     query = update.callback_query
@@ -2112,26 +1704,6 @@ async def callback_show_details(update: Update, context: CallbackContext):
 
     user_id = query.from_user.id
 
-    initialize_total_spent_field()
-    # Initialize missing fields for DALL-E 2 and DALL-E 3 tracking
-    default_dalle_2 = {"images": 0, "cost": 0.0}
-    default_dalle_3 = {"images": 0, "cost": 0.0}
-
-    all_users = db.user_collection.find()
-    for user in all_users:
-        if "dalle_2" not in user or user["dalle_2"] is None:
-            db.user_collection.update_one(
-                {"_id": user["_id"]},
-                {"$set": {"dalle_2": default_dalle_2}}
-            )
-        if "dalle_3" not in user or user["dalle_3"] is None:
-            db.user_collection.update_one(
-                {"_id": user["_id"]},
-                {"$set": {"dalle_3": default_dalle_3}}
-            )
-
-    # Fetch current balance and stats after ensuring fields exist
-    current_euro_balance = db.get_user_euro_balance(user_id)
     current_rub_balance = db.get_user_rub_balance(user_id)
     n_used_tokens_dict = db.get_user_attribute(user_id, "n_used_tokens")
     n_generated_images = db.get_user_attribute(user_id, "n_generated_images")
@@ -2141,15 +1713,13 @@ async def callback_show_details(update: Update, context: CallbackContext):
     total_donated = financials['total_donated']
     total_spent = db.get_user_attribute(user_id, "total_spent")
 
-    # Retrieve DALL-E 2 and DALL-E 3 data
-    dalle_2_data = db.get_user_attribute(user_id, "dalle_2") or default_dalle_2
-    dalle_3_data = db.get_user_attribute(user_id, "dalle_3") or default_dalle_3
+    dalle_2_data = db.get_user_attribute(user_id, "dalle_2") or {"images": 0, "cost": 0.0}
+    dalle_3_data = db.get_user_attribute(user_id, "dalle_3") or {"images": 0, "cost": 0.0}
 
     details_text = "🏷️ Детально:\n"
     total_n_spent_dollars = 0
     total_n_used_tokens = 0
 
-    # Calculate the total spent for each model
     for model_key in sorted(n_used_tokens_dict.keys()):
         n_input_tokens, n_output_tokens = n_used_tokens_dict[model_key]["n_input_tokens"], \
             n_used_tokens_dict[model_key]["n_output_tokens"]
@@ -2163,18 +1733,15 @@ async def callback_show_details(update: Update, context: CallbackContext):
 
         details_text += f"- {model_key}: <b>{n_input_spent_dollars + n_output_spent_dollars:.03f}₽</b> / <b>{n_input_tokens + n_output_tokens} tokens</b>\n"
 
-    # Add DALL-E 2 and DALL-E 3 usage to the details
     details_text += f"- DALL·E 2 (генерация изображений): <b>{dalle_2_data['cost']:.03f}₽</b> / <b>{dalle_2_data['images']} images</b>\n"
     details_text += f"- DALL·E 3 (генерация изображений): <b>{dalle_3_data['cost']:.03f}₽</b> / <b>{dalle_3_data['images']} images</b>\n"
 
-    # Add Whisper usage
     voice_recognition_n_spent_dollars = config.models["info"]["whisper"]["price_per_1_min"] * (
             n_transcribed_seconds / 60)
     total_n_spent_dollars += voice_recognition_n_spent_dollars
 
     details_text += f"- Whisper (распознавание голоса): <b>{voice_recognition_n_spent_dollars:.03f}₽</b> / <b>{n_transcribed_seconds:.01f} seconds</b>\n"
 
-    # Summary information
     text = f"Ваш баланс <b>₽{current_rub_balance:.3f}</b> 💶\n\n"
     text += "Ты:\n\n"
     text += f"   Ещё не сделал(а) первый платёж 😢\n" if total_topup == 0 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}₽</b> ❤️\n" if total_topup < 30 else f"   Пополнил(а) баланс на <b>{total_topup:.02f}₽</b>. Рад, что тебе действительно нравится пользоваться ботом! ❤️\n"
@@ -2182,18 +1749,6 @@ async def callback_show_details(update: Update, context: CallbackContext):
     text += f"   Потратил(а) ≈ <b>{total_spent:.03f}₽</b> 💵\n"
     text += f"   Использовал(а) <b>{total_n_used_tokens}</b> токенов 🪙\n\n"
     text += details_text
-
-    subscription_info = db.get_user_subscription_info(user_id)
-    if subscription_info["is_active"]:
-        expires_str = subscription_info["expires_at"].strftime("%d.%m.%Y")
-        text += f"🔔 <b>Подписка:</b> {subscription_info['type'].upper()}\n"
-        text += f"📅 <b>Действует до:</b> {expires_str}\n"
-        if subscription_info["type"] == "pro_lite":
-            text += f"📊 <b>Запросы использовано:</b> {subscription_info['requests_used']}/1000\n"
-            text += f"🎨 <b>Изображения использовано:</b> {subscription_info['images_used']}/20\n"
-        text += "\n"
-    else:
-        text += "🔔 <b>Подписка:</b> Нет активной подписки\n\n"
 
     print("Attempting to edit message")
     try:
@@ -2209,37 +1764,9 @@ async def edited_message_handle(update: Update, context: CallbackContext):
         await update.edited_message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
-# if you want to give the full error to all users, change this to error_handle
-async def error_handle_noadmincheck(update: Update, context: CallbackContext) -> None:
-    logger.error(msg="Exception while handling an update:", exc_info=context.error)
-
-    try:
-        # collect error message
-        tb_list = traceback.format_exception(None, context.error, context.error.__traceback__)
-        tb_string = "".join(tb_list)
-        update_str = update.to_dict() if isinstance(update, Update) else str(update)
-        message = (
-            f"An exception was raised while handling an update\n"
-            f"<pre>update = {html.escape(json.dumps(update_str, indent=2, ensure_ascii=False))}"
-            "</pre>\n\n"
-            f"<pre>{html.escape(tb_string)}</pre>"
-        )
-
-        # split text into multiple messages due to 4096 character limit
-        for message_chunk in split_text_into_chunks(message, 4096):
-            try:
-                await context.bot.send_message(update.effective_chat.id, message_chunk, parse_mode=ParseMode.HTML)
-            except telegram.error.BadRequest:
-                # answer has invalid characters, so we send it without parse_mode
-                await context.bot.send_message(update.effective_chat.id, message_chunk)
-    except:
-        await context.bot.send_message(update.effective_chat.id, "Some error in error handler")
-
-
 async def error_handle(update: Update, context: CallbackContext) -> None:
     logger.error(msg="Exception while handling an update:", exc_info=context.error)
 
-    # Check if the update has an associated user ID
     user_id = None
     if update and update.effective_user:
         user_id = update.effective_user.id
@@ -2249,7 +1776,6 @@ async def error_handle(update: Update, context: CallbackContext) -> None:
     developer = config.developer_username
 
     try:
-        # Collect the error message
         tb_list = traceback.format_exception(None, context.error, context.error.__traceback__)
         tb_string = "".join(tb_list)
         update_str = update.to_dict() if isinstance(update, Update) else str(update)
@@ -2260,14 +1786,11 @@ async def error_handle(update: Update, context: CallbackContext) -> None:
             f"<pre>{html.escape(tb_string)}</pre>"
         )
 
-        # Send a full error message if the user is an admin, otherwise send a generic message
         if is_admin:
-            # Split text into multiple messages due to 4096 character limit
             for message_chunk in split_text_into_chunks(message, 4096):
                 try:
                     await context.bot.send_message(update.effective_chat.id, message_chunk, parse_mode=ParseMode.HTML)
                 except telegram.error.BadRequest:
-                    # Answer has invalid characters, so we send it without parse_mode
                     await context.bot.send_message(update.effective_chat.id, message_chunk)
         else:
             error_for_user = (
@@ -2277,7 +1800,6 @@ async def error_handle(update: Update, context: CallbackContext) -> None:
 
             await context.bot.send_message(
                 update.effective_chat.id,
-                # "An unexpected error occurred. Please try again or contact the developer if the issue persists."
                 error_for_user
             )
     except Exception as handler_error:
@@ -2285,7 +1807,6 @@ async def error_handle(update: Update, context: CallbackContext) -> None:
         await context.bot.send_message(update.effective_chat.id, "Some error in error handler")
 
 
-# set bot commands
 async def post_init(application: Application):
     await application.bot.set_my_commands([
         BotCommand("/new", "Начать новый диалог 🆕"),
@@ -2293,160 +1814,23 @@ async def post_init(application: Application):
         BotCommand("/mode", "Выбрать режим"),
         BotCommand("/balance", "Показать баланс 💰"),
         BotCommand("/topup", "Пополнить баланс 💳"),
+        BotCommand("/subscription", "Управление подписками 🔔"),
+        BotCommand("/my_payments", "Мои платежи 📋"),
         BotCommand("/settings", "Настройки ⚙️"),
         BotCommand("/help", "Помощь ❓"),
         BotCommand("/role", "Моя роль 🎫"),
         BotCommand("/model", "Выбрать модель нейросети 🔍"),
-
     ])
 
 
-# Subscriptions
-async def subscription_handle(update: Update, context: CallbackContext):
-    """Показывает информацию о текущей подписке и доступные варианты"""
-    await register_user_if_not_exists(update, context, update.message.from_user)
-    user_id = update.message.from_user.id
-    db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
-    subscription_info = db.get_user_subscription_info(user_id)
-
-    text = "🔔 <b>Информация о подписке</b>\n\n"
-
-    if subscription_info["is_active"]:
-        expires_str = subscription_info["expires_at"].strftime("%d.%m.%Y")
-        text += f"📋 <b>Текущая подписка:</b> {subscription_info['type'].upper()}\n"
-        text += f"📅 <b>Действует до:</b> {expires_str}\n"
-        if subscription_info["type"] == "pro_lite":
-            text += f"📊 <b>Запросы использовано:</b> {subscription_info['requests_used']}/1000\n"
-            text += f"🎨 <b>Изображения использовано:</b> {subscription_info['images_used']}/20\n"
-        text += "\n"
-    else:
-        text += "❌ <b>Активная подписка отсутствует</b>\n\n"
-        text += "Доступные подписки:\n"
-
-    # Показываем доступные подписки
-    subscriptions = [
-        {
-            "name": "Pro Lite",
-            "type": SubscriptionType.PRO_LITE,
-            "price": 499,
-            "duration": "10 дней",
-            "features": "1000 запросов • 20 генераций изображений • До 4000 символов"
-        },
-        {
-            "name": "Pro Plus",
-            "type": SubscriptionType.PRO_PLUS,
-            "price": 1290,
-            "duration": "1 месяц",
-            "features": "Безлимитные запросы • До 32000 символов"
-        },
-        {
-            "name": "Pro Premium",
-            "type": SubscriptionType.PRO_PREMIUM,
-            "price": 2990,
-            "duration": "3 месяца",
-            "features": "Безлимитные запросы • До 32000 символов"
-        }
-    ]
-
-    keyboard = []
-    for sub in subscriptions:
-        btn_text = f"{sub['name']} - {sub['price']}₽"
-        callback_data = f"subscribe|{sub['type'].value}"
-        keyboard.append([InlineKeyboardButton(btn_text, callback_data=callback_data)])
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    for sub in subscriptions:
-        text += f"<b>{sub['name']}</b> - {sub['price']}₽ / {sub['duration']}\n"
-        text += f"   {sub['features']}\n\n"
-
-    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
-
-
-async def subscription_callback_handle(update: Update, context: CallbackContext):
-    """Обрабатывает выбор подписки"""
-    query = update.callback_query
-    await query.answer()
-
-    data = query.data
-
-    if data.startswith("subscribe|"):
-        _, subscription_type_str = data.split("|")
-        subscription_type = SubscriptionType(subscription_type_str)
-
-        price = SUBSCRIPTION_PRICES[subscription_type]
-        duration = SUBSCRIPTION_DURATIONS[subscription_type]
-
-        # Создаем Stripe сессию для подписки
-        session_url = await create_subscription_stripe_session(
-            query.from_user.id, subscription_type, context
-        )
-
-        text = f"💳 <b>Оформление подписки {subscription_type.name.replace('_', ' ').title()}</b>\n\n"
-        text += f"Стоимость: <b>{price}₽</b>\n"
-        text += f"Период: <b>{duration.days} дней</b>\n\n"
-        text += "Нажмите кнопку ниже для оплаты:"
-
-        keyboard = [
-            [InlineKeyboardButton("💳 Оплатить", url=session_url)],
-            [InlineKeyboardButton("⬅️ Назад", callback_data="subscription_back")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
-
-    elif data == "subscription_back":
-        await subscription_handle(update, context)
-
-
-async def create_subscription_stripe_session(user_id: int, subscription_type: SubscriptionType,
-                                             context: CallbackContext):
-    """Создает платеж в Yookassa для подписки"""
-    price = SUBSCRIPTION_PRICES[subscription_type]
-
-    try:
-        payment = Payment.create({
-            "amount": {
-                "value": f"{price}.00",
-                "currency": "RUB"
-            },
-            "confirmation": {
-                "type": "redirect",
-                "return_url": "https://t.me/gptducksbot"
-            },
-            "capture": True,
-            "description": f"Подписка {subscription_type.name.replace('_', ' ').title()}",
-            "metadata": {
-                "user_id": user_id,
-                "subscription_type": subscription_type.value
-            }
-        })
-
-        db.set_user_attribute(user_id, "last_payment_id", payment.id)
-        return payment.confirmation.confirmation_url
-
-    except Exception as e:
-        logger.error(f"Error creating Yookassa subscription payment: {e}")
-        raise e
-
-
-# Subscriptions
-
-
-bot_instance = None
-
-
 def run_bot() -> None:
+    global bot_instance
+
     # Инициализация Yookassa
     if config.yookassa_shop_id and config.yookassa_secret_key:
         Configuration.account_id = config.yookassa_shop_id
         Configuration.secret_key = config.yookassa_secret_key
 
-    thread = threading.Thread(target=start_asyncio_loop, daemon=True)
-    thread.start()
-
-    global bot_instance
     application = ApplicationBuilder().token(config.telegram_token).build()
     bot_instance = application.bot
 
@@ -2463,6 +1847,10 @@ def run_bot() -> None:
         .post_init(post_init)
         .build()
     )
+
+    # Запускаем задачу проверки платежей в фоне
+    if config.yookassa_shop_id and config.yookassa_secret_key:
+        asyncio.create_task(check_pending_payments())
 
     # add handlers
     user_filter = filters.ALL
@@ -2500,28 +1888,31 @@ def run_bot() -> None:
 
     application.add_handler(CommandHandler("balance", show_balance_handle, filters=user_filter))
     application.add_handler(CallbackQueryHandler(callback_show_details, pattern='^show_details$'))
+
+    # payment commands
+    application.add_handler(CommandHandler("topup", topup_handle, filters=filters.ALL))
+    application.add_handler(CallbackQueryHandler(topup_callback_handle, pattern='^topup\\|'))
+
+    # subscription commands
+    application.add_handler(CommandHandler("subscription", subscription_handle, filters=user_filter))
+    application.add_handler(CallbackQueryHandler(subscription_callback_handle, pattern='^subscribe\\|'))
+    application.add_handler(CallbackQueryHandler(subscription_handle, pattern='^subscription_back$'))
+
+    # payment status command
+    application.add_handler(CommandHandler("my_payments", check_my_payments_handle, filters=user_filter))
+
     # custom commands
     application.add_handler(CommandHandler('role', show_user_role))
     application.add_handler(CommandHandler('model', show_user_model))
     application.add_handler(CommandHandler('token_balance', token_balance_command))
-    application.add_handler(CommandHandler("topup", topup_handle, filters=filters.ALL))
-    application.add_handler(CallbackQueryHandler(topup_callback_handle, pattern='^topup\\|'))
 
-    # admin commands
-    application.add_handler(CommandHandler("admin", admin_command))
-    application.add_handler(CommandHandler('get_user_count', get_user_count))
-    application.add_handler(CommandHandler('list_user_roles', list_user_roles))
-    application.add_handler(CommandHandler('message_id', send_message_to_id))
-    application.add_handler(CommandHandler('message_username', send_message_to_username))
-    application.add_handler(CommandHandler('message_name', send_message_to_name))
-    application.add_handler(CommandHandler('message_role', send_message_to_role))
-    application.add_handler(CommandHandler('message_all', send_message_to_all))
-    application.add_handler(CommandHandler('change_role', change_role))
-    application.add_handler(CallbackQueryHandler(handle_role_change, pattern='^set_role\\|'))
-
-    application.add_handler(CommandHandler("subscription", subscription_handle, filters=user_filter))
-    application.add_handler(CallbackQueryHandler(subscription_callback_handle, pattern='^subscribe\\|'))
-    application.add_handler(CallbackQueryHandler(subscription_handle, pattern='^subscription_back$'))
+    # admin commands (оставлены для совместимости, можно удалить если не нужны)
+    application.add_handler(
+        CommandHandler("admin", lambda update, context: update.message.reply_text("Admin commands disabled")))
+    application.add_handler(
+        CommandHandler('get_user_count', lambda update, context: update.message.reply_text("Admin commands disabled")))
+    application.add_handler(
+        CommandHandler('list_user_roles', lambda update, context: update.message.reply_text("Admin commands disabled")))
 
     application.add_error_handler(error_handle)
 
