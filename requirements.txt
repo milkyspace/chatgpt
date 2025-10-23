@@ -12,4 +12,5 @@ aioredis>=2.0.0 #payment recieve notif
 pytz==2023.3 #timezone management
 anthropic #claude library
 yookassa==2.4.0
+python-telegram-bot[job-queue]
 #tokenizers #other tokenizer if you want to also use the one in the utils file
