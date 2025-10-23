@@ -361,14 +361,14 @@ async def create_subscription_yookassa_payment(user_id: int, subscription_type: 
             "description": label,
             "receipt": {
                 "customer": {
-                    "email": "liliatchesnokova@gmail.com",
+                    "email": "liliatchesnokovatest@gmail.com",
                 },
                 "items": [
                     {
                         "description": label,
                         "quantity": "1.00",
                         "amount": {
-                            "value": price,
+                            "value": 100,
                             "currency": currency
                         },
                         "vat_code": "1",
