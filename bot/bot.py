@@ -233,33 +233,6 @@ async def help_group_chat_handle(update: Update, context: CallbackContext):
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
-async def check_pending_payments():
-    """Проверяет статус pending платежей (одна итерация)"""
-    try:
-        pending_payments = db.get_pending_payments()
-
-        for payment in pending_payments:
-            payment_id = payment["payment_id"]
-            user_id = payment["user_id"]
-
-            try:
-                payment_info = Payment.find_one(payment_id)
-                status = payment_info.status
-
-                db.update_payment_status(payment_id, status)
-
-                if status == 'succeeded':
-                    await process_successful_payment(payment_info, user_id)
-                elif status == 'canceled':
-                    logger.info(f"Payment {payment_id} was canceled")
-
-            except Exception as e:
-                logger.error(f"Error checking payment {payment_id}: {e}")
-
-    except Exception as e:
-        logger.error(f"Error in payment checking: {e}")
-
-
 async def process_successful_payment(payment_info, user_id):
     """Обрабатывает успешный платеж"""
     try:
@@ -1830,6 +1803,7 @@ def run_bot() -> None:
     update_user_roles_from_config(db, config.roles)
     configure_logging()
 
+    # Создаем application с обработчиком post_init для настройки фоновых задач
     application = (
         ApplicationBuilder()
         .token(config.telegram_token)
@@ -1842,14 +1816,6 @@ def run_bot() -> None:
     )
 
     bot_instance = application.bot
-
-    # Добавляем фоновую задачу для проверки платежей через job_queue
-    if config.yookassa_shop_id and config.yookassa_secret_key:
-        application.job_queue.run_repeating(
-            check_pending_payments_wrapper,
-            interval=30,
-            first=10
-        )
 
     # add handlers
     user_filter = filters.ALL
@@ -1919,6 +1885,31 @@ def run_bot() -> None:
     application.run_polling()
 
 
+# Обновленная функция post_init для добавления фоновых задач
+async def post_init(application: Application):
+    await application.bot.set_my_commands([
+        BotCommand("/new", "Начать новый диалог 🆕"),
+        BotCommand("/retry", "Перегенерировать предыдущий запрос 🔁"),
+        BotCommand("/mode", "Выбрать режим"),
+        BotCommand("/balance", "Показать баланс 💰"),
+        BotCommand("/topup", "Пополнить баланс 💳"),
+        BotCommand("/subscription", "Управление подписками 🔔"),
+        BotCommand("/my_payments", "Мои платежи 📋"),
+        BotCommand("/settings", "Настройки ⚙️"),
+        BotCommand("/help", "Помощь ❓"),
+        BotCommand("/role", "Моя роль 🎫"),
+        BotCommand("/model", "Выбрать модель нейросети 🔍"),
+    ])
+
+    # Добавляем фоновую задачу для проверки платежей через job_queue
+    if config.yookassa_shop_id and config.yookassa_secret_key:
+        application.job_queue.run_repeating(
+            check_pending_payments_wrapper,
+            interval=30,
+            first=10
+        )
+
+
 # Обертка для проверки платежей, совместимая с job_queue
 async def check_pending_payments_wrapper(context: CallbackContext):
     """Обертка для проверки платежей, совместимая с job_queue"""
@@ -1927,6 +1918,32 @@ async def check_pending_payments_wrapper(context: CallbackContext):
     except Exception as e:
         logger.error(f"Error in payment checking job: {e}")
 
+
+async def check_pending_payments():
+    """Проверяет статус pending платежей (одна итерация)"""
+    try:
+        pending_payments = db.get_pending_payments()
+
+        for payment in pending_payments:
+            payment_id = payment["payment_id"]
+            user_id = payment["user_id"]
+
+            try:
+                payment_info = Payment.find_one(payment_id)
+                status = payment_info.status
+
+                db.update_payment_status(payment_id, status)
+
+                if status == 'succeeded':
+                    await process_successful_payment(payment_info, user_id)
+                elif status == 'canceled':
+                    logger.info(f"Payment {payment_id} was canceled")
+
+            except Exception as e:
+                logger.error(f"Error checking payment {payment_id}: {e}")
+
+    except Exception as e:
+        logger.error(f"Error in payment checking: {e}")
 
 if __name__ == "__main__":
     run_bot()
