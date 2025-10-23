@@ -75,9 +75,6 @@ class Database:
     def start_new_dialog(self, user_id: int):
         self.check_if_user_exists(user_id, raise_exception=True)
 
-        # ЗАМЕНИТЕ эту строку:
-        # if not self.has_active_subscription(user_id):
-        # НА эту:
         subscription_info = self.get_user_subscription_info(user_id)
         if not subscription_info["is_active"]:
             raise PermissionError("Нет активной подписки")

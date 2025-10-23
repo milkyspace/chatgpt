@@ -16,11 +16,11 @@ RUN pip3 install -U pip && pip3 install -U wheel && pip3 install -U setuptools==
 COPY ./requirements.txt /tmp/requirements.txt
 RUN pip3 install -r /tmp/requirements.txt && rm -r /tmp/requirements.txt
 
+# Добавляем yookassa
+RUN pip3 install yookassa
+
 COPY . /code
 WORKDIR /code
 
-ENV FLASK_APP=flask.py
-CMD ["flask", "run", "--host=0.0.0.0", "--port=5000"]
-
-CMD ["bash"]
-
+# Запускаем supervisord который будет управлять процессами
+CMD ["python3", "bot/bot.py"]

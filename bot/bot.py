@@ -6,7 +6,8 @@ from datetime import datetime, timedelta
 import openai
 from subscription import SubscriptionType, SUBSCRIPTION_PRICES, SUBSCRIPTION_DURATIONS
 
-import stripe
+import yookassa
+from yookassa import Payment, Configuration
 import telegram
 from telegram import (
     Update,
@@ -593,7 +594,7 @@ async def token_balance_command(update: Update, context: CallbackContext):
 async def topup_handle(update: Update, context: CallbackContext, chat_id=None):
     user_id = chat_id if chat_id else update.effective_user.id
 
-    if config.stripe_secret_key is None or config.stripe_secret_key == "":
+    if config.yookassa_shop_id is None or config.yookassa_secret_key is None:
         await context.bot.send_message(
             chat_id=user_id,
             text="Система оплаты недоступна :(",
@@ -601,41 +602,29 @@ async def topup_handle(update: Update, context: CallbackContext, chat_id=None):
         )
         return
 
-    # Define euro amount options for balance top-up
-    euro_amount_options = {
-        "€1.25": 125,  # Pay €1.25 and add €1 to balance
-        "€3": 300,  # Add €3 to balance
-        "€5": 500,  # Add €5 to balance
-        "€10": 1000,  # Add €10 to balance
-        "€20": 2000,  # Add €20 to balance
-        "Other amount...": "custom",  # Custom amount option
-        "Donation ❤️": "donation"
-    }
+    # Варианты пополнения в рублях
     rub_amount_options = {
-        "₽100": 100,
-        "₽300": 300,
-        "₽500": 500,
-        "₽1000": 1000,
-        "₽2000": 2000,
-        "₽5000": 5000,
-        "Другая сумма...": "custom",  # Custom amount option
+        "100 ₽": 100,
+        "300 ₽": 300,
+        "500 ₽": 500,
+        "1000 ₽": 1000,
+        "2000 ₽": 2000,
+        "5000 ₽": 5000,
+        "Другая сумма...": "custom",
         "Пожертвование ❤️": "donation"
     }
 
-    # Generate inline keyboard buttons for each euro amount option
+    # Генерируем inline keyboard
     keyboard = [
         [InlineKeyboardButton(text, callback_data=f"topup|topup_{amount}")]
         for text, amount in rub_amount_options.items()
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await context.bot.send_photo(chat_id=user_id, photo=open(config.payment_banner_photo_path, 'rb'))  # Send the banner
-
-    # Send message with euro amount options
+    # Отправляем сообщение с вариантами
     await context.bot.send_message(
         chat_id=user_id,
-        text="Currently supported payment methods: *Card*, *GooglePay*, *PayPal*, *iDeal*.\n\n For *GPT-4*, *€1* gives you *75,000* words, or *200 A4 pages*!\n\n For *GPT-3.5*, its almost *20 times cheaper*. \n\nPlease select the *amount* you wish to add to your *balance*:\n\n",
-        # topup 1.25 message
+        text="Выберите сумму для пополнения баланса:",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -647,90 +636,64 @@ async def topup_callback_handle(update: Update, context: CallbackContext):
 
     data = query.data
 
-    # context.user_data['is_donation'] = False
-
     if data == "topup|topup_custom" or data == "topup|topup_donation":
-        # custom_type = "donation" if "donation" in data else "custom"
         is_donation = "donation" in data
-        prompt_text = "Thank you for considering *donating*! \n\nPlease enter the *donation* amount in euros(e.g., *5* for *€5*):" if is_donation == "donation" else "Please enter the *custom amount* in euros (e.g., *5* for *€5*):"
-        # Prompt the user to enter a custom amount
-        keyboard = [[InlineKeyboardButton("⬅️", callback_data="topup|back_to_topup_options")]]
+        prompt_text = "Спасибо за желание *пожертвовать*! \n\nВведите сумму в рублях:" if is_donation else "Введите *сумму* в рублях:"
+
         await query.edit_message_text(
             text=prompt_text,
-            reply_markup=InlineKeyboardMarkup([]),  # write keyboard instead of the brackets "[]" if you want the button
+            reply_markup=InlineKeyboardMarkup([]),
             parse_mode='Markdown'
         )
 
-        context.user_data[
-            'awaiting_custom_topup'] = "donation" if is_donation else "custom"  # Store a flag in the user's context to indicate awaiting a custom top-up amount
-        context.user_data[
-            'is_donation'] = is_donation  # store a flag in the user's context to differentiate between donation and others
-
+        context.user_data['awaiting_custom_topup'] = "donation" if is_donation else "custom"
+        context.user_data['is_donation'] = is_donation
         return
 
     elif data == "topup|back_to_topup_options":
-
         context.user_data['awaiting_custom_topup'] = False
         context.user_data.pop('is_donation', None)
-        # Define euro amount options for balance top-up
-        euro_amount_options = {
-            "€1.25": 125,  # Example: Add €10 to balance
-            "€3": 300,  # Example: Add €10 to balance
-            "€5": 500,  # Example: Add €10 to balance
-            "€10": 1000,  # Example: Add €20 to balance
-            "€20": 2000,  # Example: Add €50 to balance
-            "Other amount...": "custom",  # Custom amount option
-            "Donation ❤️": "donation"
-        }
+
         rub_amount_options = {
-            "₽100": 100,
-            "₽300": 300,
-            "₽500": 500,
-            "₽1000": 1000,
-            "₽2000": 2000,
-            "₽5000": 5000,
-            "Другая сумма...": "custom",  # Custom amount option
+            "100 ₽": 100,
+            "300 ₽": 300,
+            "500 ₽": 500,
+            "1000 ₽": 1000,
+            "2000 ₽": 2000,
+            "5000 ₽": 5000,
+            "Другая сумма...": "custom",
             "Пожертвование ❤️": "donation"
         }
 
-        # Generate inline keyboard buttons for each euro amount option
         keyboard = [
             [InlineKeyboardButton(text, callback_data=f"topup|topup_{amount if amount != 'custom' else 'custom'}")]
             for text, amount in rub_amount_options.items()
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        # Replace the existing message with the top-up options message
         await query.edit_message_text(
-            text="Currently supported payment methods: *Card*, *GooglePay*, *PayPal*, *iDeal*.\n\n For *GPT-4*, *€1* gives you *75,000* words, or *200 A4 pages*!\n\n For *GPT-3.5*, its almost *20 times cheaper*. \n\nPlease select the *amount* you wish to add to your *balance*:\n\n",
+            text="Выберите сумму для пополнения баланса:",
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
 
     else:
-
-        await query.edit_message_text("⏳ Generating payment link...")
+        await query.edit_message_text("⏳ Создаем платеж...")
         context.user_data.pop('is_donation', None)
         user_id = update.effective_user.id
         _, amount_str = query.data.split("_")
-        amount_cents = int(amount_str)  # Amount in cents for Stripe
+        amount_rub = int(amount_str)
 
-        session_url = await create_stripe_session(user_id, amount_cents, context)
-
-        # Conditional warning for the €1.25 top-up
-        if amount_cents == 125:  # Check if the amount is 125 cents (€1.25)                                                    
-            warning_message = "\n\n*Note:* Stripe charges a *€0.25 fee* per transaction. Therefore, you'll receive *€1.00* in credit so that I don't end up loosing money. \nFor all other payment options, I'll take care of the tax for you. \n*Thank you* for understanding! ❤️"
-        else:
-            warning_message = ""
+        payment_url, payment_id = await create_yookassa_payment(user_id, amount_rub, context)
 
         payment_text = (
-            f"Tap the button below to complete your *€{amount_cents / 100:.2f}* payment! {warning_message}\n\n"
-            "🔐 The bot uses a *trusted* payment service [Stripe](https://stripe.com/legal/ssa). "
-            "*It does not store your payment data.* \n\nOnce you make a payment, you will receive a *confirmation message*!"
+            f"Для оплаты *{amount_rub} ₽* нажмите на кнопку ниже:\n\n"
+            "🔐 Платежи обрабатываются через <b>ЮKassa</b> - надежную платежную систему.\n"
+            "После успешной оплаты баланс пополнится автоматически!"
         )
         keyboard = [
-            [InlineKeyboardButton("💳Pay", url=session_url)],
-            [InlineKeyboardButton("⬅️", callback_data="topup|back_to_topup_options")]
+            [InlineKeyboardButton("💳 Оплатить", url=payment_url)],
+            [InlineKeyboardButton("⬅️ Назад", callback_data="topup|back_to_topup_options")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -738,54 +701,59 @@ async def topup_callback_handle(update: Update, context: CallbackContext):
                                       disable_web_page_preview=True)
 
 
-async def create_stripe_session(user_id: int, amount_cents: int, context: CallbackContext):
-    stripe.api_key = config.stripe_secret_key
-    is_donation = context.user_data.get('is_donation', False)
-    product_name = "Donation❤️" if is_donation else "Balance Top-up"
-    session = stripe.checkout.Session.create(
-        payment_method_types=['card', 'paypal', 'ideal'],
-        line_items=[{
-            'price_data': {
-                'currency': 'eur',
-                'product_data': {'name': product_name},
-                'unit_amount': amount_cents,
+async def create_yookassa_payment(user_id: int, amount_rub: int, context: CallbackContext):
+    """Создает платеж в Yookassa и возвращает URL для оплаты"""
+    try:
+        # Создаем описание платежа
+        description = "Пополнение баланса"
+        if context.user_data.get('is_donation'):
+            description = "Добровольное пожертвование"
+
+        # Создаем платеж
+        payment = Payment.create({
+            "amount": {
+                "value": f"{amount_rub}.00",
+                "currency": "RUB"
             },
-            'quantity': 1,
-        }],
-        mode='payment',
-        success_url='https://t.me/ChatdudBot',  # Adjust with your success URL
-        cancel_url='https://t.me/ChatdudBot',  # Adjust with your cancel URL
-        metadata={'user_id': user_id, 'is_donation': str(is_donation).lower()},
-        # Metadata to track which user is making the payment
-    )
-    return session.url
+            "confirmation": {
+                "type": "redirect",
+                "return_url": "https://t.me/gptducksbot"  # URL для возврата после оплаты
+            },
+            "capture": True,
+            "description": description,
+            "metadata": {
+                "user_id": user_id,
+                "is_donation": str(context.user_data.get('is_donation', False)).lower()
+            }
+        })
+
+        # Сохраняем payment_id в базе для верификации
+        db.set_user_attribute(user_id, "last_payment_id", payment.id)
+
+        return payment.confirmation.confirmation_url, payment.id
+
+    except Exception as e:
+        logger.error(f"Error creating Yookassa payment: {e}")
+        raise e
 
 
-async def send_confirmation_message_async(user_id, data):
+async def send_confirmation_message_async(user_id, amount_rub, is_donation):
     user = db.user_collection.find_one({"_id": user_id})
-    if not user:
-        return
-
-    chat_id = user["chat_id"]
-
-    if data.get('message_type') == 'subscription':
-        subscription_type = data['subscription_type']
-        duration_days = SUBSCRIPTION_DURATIONS[SubscriptionType(subscription_type)].days
-
-        message = f"🎉 Ваша подписка {subscription_type.replace('_', ' ').title()} успешно активирована!\n"
-        message += f"📅 Действует {duration_days} дней\n"
-        message += "Теперь вы можете пользоваться ботом без ограничений по подписке!"
-    else:
-        # Существующая логика для пополнения баланса
-        euro_amount = data['euro_amount']
-        is_donation = data.get('is_donation', False)
+    if user:
+        chat_id = user["chat_id"]
 
         if is_donation:
-            message = f"Thank you *so much* for your generous donation of *€{euro_amount:.2f}*! Your support is *greatly appreciated*!! ❤️❤️"
+            message = f"Спасибо за ваше пожертвование *{amount_rub} ₽*! Ваша поддержка очень важна для нас! ❤️❤️"
         else:
-            message = f"Your top-up of *€{euro_amount:.2f}* was *successful!*🎉 \n\nYour new balance will be updated shortly."
+            message = f"Пополнение на *{amount_rub} ₽* прошло успешно! 🎉\n\nБаланс обновлен."
+            if user.get("role") == "trial_user":
+                db.user_collection.update_one(
+                    {"_id": user_id},
+                    {"$set": {"role": "regular_user"}}
+                )
+                message += "\n\nВаш статус изменен на *обычного пользователя*! Спасибо за поддержку! ❤️"
 
-    await bot_instance.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
+        await bot_instance.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
 
 
 def start_asyncio_loop():
@@ -798,8 +766,24 @@ def start_asyncio_loop():
     loop.run_forever()
 
 
+async def send_subscription_confirmation_async(user_id, subscription_type):
+    user = db.user_collection.find_one({"_id": user_id})
+    if user:
+        chat_id = user["chat_id"]
+
+        from subscription import SubscriptionType, SUBSCRIPTION_DURATIONS
+        subscription_type_enum = SubscriptionType(subscription_type)
+        duration_days = SUBSCRIPTION_DURATIONS[subscription_type_enum].days
+
+        message = f"🎉 Подписка *{subscription_type.replace('_', ' ').title()}* активирована!\n"
+        message += f"📅 Действует *{duration_days} дней*\n\n"
+        message += "Теперь вы можете пользоваться ботом по подписке!"
+
+        await bot_instance.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
+
+
 async def start_redis_listener():
-    if config.stripe_webhook_secret is None or config.stripe_webhook_secret == "":
+    if config.yookassa_shop_id is None or config.yookassa_secret_key is None:
         return
 
     redis = aioredis.from_url("redis://redis:6379", encoding="utf-8", decode_responses=True)
@@ -811,16 +795,16 @@ async def start_redis_listener():
         async for msg in sub.listen():
             if msg['type'] == 'message':
                 data = json.loads(msg['data'])
+
                 if data.get('message_type') == 'subscription':
-                    await send_confirmation_message_async(data['user_id'], data)
+                    user_id = data['user_id']
+                    subscription_type = data['subscription_type']
+                    await send_subscription_confirmation_async(user_id, subscription_type)
                 else:
                     user_id = data['user_id']
-                    euro_amount = data['euro_amount']
+                    amount_rub = data['amount_rub']
                     is_donation = data.get('is_donation', False)
-                    await send_confirmation_message_async(user_id, {
-                        'euro_amount': euro_amount,
-                        'is_donation': is_donation
-                    })
+                    await send_confirmation_message_async(user_id, amount_rub, is_donation)
 
 
 # admin commands
@@ -1155,6 +1139,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
     user_id = update.message.from_user.id
     chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
 
+    # Use subscription preprocessor instead of euro/rub balance check
     if not await subscription_preprocessor(update, context):
         return
 
@@ -1168,75 +1153,63 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
     current_model = db.get_user_attribute(user_id, "current_model")
 
-    # custom top up
+    # custom top up with Yookassa
     if 'awaiting_custom_topup' in context.user_data and context.user_data['awaiting_custom_topup']:
-        user_input = update.message.text.replace(',', '.')
+        user_input = update.message.text.replace(',', '.').strip()
         try:
-            custom_amount_euros = float(user_input)
+            custom_amount = float(user_input)
+            min_amount = 10  # Минимальная сумма в рублях
+            error_message = f"Минимальная сумма пополнения *{min_amount} ₽*. Введите другую сумму."
 
-            min_amount = 3
-            error_message = "The *minimum* amount for a *custom top-up* is *€3*. Please enter a *valid* amount."
-
-            # Adjust minimum amount and error message for donations
             if context.user_data['awaiting_custom_topup'] == "donation":
                 min_amount = 1
-                error_message = "The *minimum* amount for a *donation* is *€1*. Please enter a *valid* amount."
+                error_message = f"Минимальная сумма пожертвования *{min_amount} ₽*. Введите другую сумму."
 
-            if custom_amount_euros < min_amount:  # mininum ammount custom
-                keyboard = [[InlineKeyboardButton("⬅️", callback_data="topup|back_to_topup_options")]]
+            if custom_amount < min_amount:
+                keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="topup|back_to_topup_options")]]
                 await context.bot.send_message(
                     chat_id=update.effective_user.id,
-                    text=f"{error_message}\n\n Press the *back button* to return to *top-up options*",
+                    text=f"{error_message}\n\nНажмите кнопку *назад* чтобы вернуться к выбору суммы",
                     reply_markup=InlineKeyboardMarkup(keyboard),
                     parse_mode='Markdown'
                 )
-                return  # Stop further processing to prevent sending a payment link
+                return
 
-            placeholder_message = await update.message.reply_text("⏳ Generating payment *link*...",
-                                                                  parse_mode='Markdown')
-            placeholder_message_id = placeholder_message.message_id
+            await update.message.reply_text("⏳ Создаем платеж...", parse_mode='Markdown')
 
-            custom_amount_cents = int(custom_amount_euros * 100)
+            payment_url, payment_id = await create_yookassa_payment(
+                update.effective_user.id, int(custom_amount), context
+            )
 
-            # Now create a Stripe session for this custom amount
-            payment_url = await create_stripe_session(update.effective_user.id, custom_amount_cents, context)
+            thank_you_message = "\n\nСпасибо за вашу поддержку! ❤️" if context.user_data['awaiting_custom_topup'] == "donation" else ""
 
-            thank_you_message = "\n\nThank you so much for your *donation*! ❤️" if context.user_data[
-                                                                                       'awaiting_custom_topup'] == "donation" else ""
-
-            # Send the Stripe payment link to the user
             payment_text = (
-                f"Tap the button below to complete your *€{custom_amount_euros:.2f}* payment!{thank_you_message}\n\n"
-                "🔐The bot uses a *trusted* payment service [Stripe](https://stripe.com/legal/ssa). "
-                "*It does not store your payment data.* \n\nOnce you make a payment, you will receive a confirmation message!"
+                f"Для оплаты *{custom_amount:.0f} ₽* нажмите на кнопку ниже:{thank_you_message}\n\n"
+                "🔐 Платежи обрабатываются через <b>ЮKassa</b>.\n"
+                "После успешной оплаты баланс пополнится автоматически!"
             )
             keyboard = [
-                [InlineKeyboardButton("💳Pay", url=payment_url)],
-                [InlineKeyboardButton("⬅️", callback_data="topup|back_to_topup_options")]
+                [InlineKeyboardButton("💳 Оплатить", url=payment_url)],
+                [InlineKeyboardButton("⬅️ Назад", callback_data="topup|back_to_topup_options")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
-            # Update the message with payment information
-            await context.bot.edit_message_text(
+            await context.bot.send_message(
                 chat_id=update.effective_user.id,
-                message_id=placeholder_message_id,
                 text=payment_text,
                 parse_mode='Markdown',
                 reply_markup=reply_markup,
                 disable_web_page_preview=True
             )
 
-            # Reset the flag
             context.user_data['awaiting_custom_topup'] = False
-
             return
 
         except ValueError:
-            # In case of invalid input, prompt again or handle as needed
-            keyboard = [[InlineKeyboardButton("⬅️", callback_data="topup|back_to_topup_options")]]
+            keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="topup|back_to_topup_options")]]
             await context.bot.send_message(
                 chat_id=update.effective_user.id,
-                text="*Invalid amount* entered. Please enter a *numeric* value in *euros* (e.g., 5 for €5). \n\n Press the *back button* to return to *top-up options*",
+                text="*Неверная сумма*. Введите числовое значение в рублях.\n\nНажмите кнопку *назад* чтобы вернуться к выбору суммы",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode='Markdown'
             )
@@ -1249,7 +1222,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
         if use_new_dialog_timeout:
             if (datetime.now() - db.get_user_attribute(user_id,
                                                        "last_interaction")).seconds > config.new_dialog_timeout and len(
-                db.get_dialog_messages(user_id)) > 0:
+                    db.get_dialog_messages(user_id)) > 0:
                 db.start_new_dialog(user_id)
                 await update.message.reply_text(
                     f"Запуск нового диалога(<b>{config.chat_modes[chat_mode]['name']}</b>) ✅",
@@ -1286,14 +1259,11 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
             else:
                 answer, (
-                    n_input_tokens,
-                    n_output_tokens), n_first_dialog_messages_removed = await chatgpt_instance.send_message(
+                n_input_tokens, n_output_tokens), n_first_dialog_messages_removed = await chatgpt_instance.send_message(
                     _message,
                     dialog_messages=dialog_messages,
                     chat_mode=chat_mode
                 )
-
-                # await context.bot.send_message(chat_id=update.effective_chat.id, text=answer, parse_mode=parse_mode, disable_web_page_preview=True) #repo commit
 
                 async def fake_gen():
                     yield "finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
@@ -1305,7 +1275,6 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
             async for gen_item in gen:
                 status, answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed = gen_item
 
-                #                answer = current_model + " " + answer #repo commit
                 answer = answer[:4096]  # telegram message limit
 
                 # update only when 100 new symbols are ready
@@ -1330,10 +1299,8 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
                 prev_answer = answer
 
             # update user data
-            # new_dialog_message = {"user": _message, "bot": answer, "date": datetime.now()} #this still works
             new_dialog_message = {"user": [{"type": "text", "text": _message}], "bot": answer,
-                                  "date": datetime.now()}  # repo commit
-            # HERE IS THE ISSUE
+                                  "date": datetime.now()}
 
             db.set_dialog_messages(
                 user_id,
@@ -1341,7 +1308,8 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
                 dialog_id=None
             )
 
-            action_type = db.get_user_attribute(user_id, "current_model")  # repo commit #maybe comment this out
+            # Update subscription usage or deduct from balance
+            action_type = db.get_user_attribute(user_id, "current_model")
             db.deduct_cost_for_action(user_id=user_id, action_type=action_type,
                                       action_params={'n_input_tokens': n_input_tokens,
                                                      'n_output_tokens': n_output_tokens})
@@ -1351,10 +1319,8 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
         except asyncio.CancelledError:
             # note: intermediate token updates only work when enable_message_streaming=True (config.yml)
             db.update_n_used_tokens(user_id, current_model, n_input_tokens, n_output_tokens)
-            # db.deduct_tokens_based_on_role(user_id, n_input_tokens, n_output_tokens)
 
-            action_type = db.get_user_attribute(user_id,
-                                                "current_model")  # This assumes the action type can be determined by the model #maybe comment this out
+            action_type = db.get_user_attribute(user_id, "current_model")
             db.deduct_cost_for_action(user_id=user_id, action_type=action_type,
                                       action_params={'n_input_tokens': n_input_tokens,
                                                      'n_output_tokens': n_output_tokens})
@@ -1362,7 +1328,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
             raise
 
         except Exception as e:
-            error_text = f"Something went wrong during completion 2. Reason: {e}"  # edit, SECOND_ISSUE
+            error_text = f"Something went wrong during completion 2. Reason: {e}"
             logger.error(error_text)
             await update.message.reply_text(error_text)
             return
@@ -1376,16 +1342,12 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
             await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
     async with user_semaphores[user_id]:
-        # task = asyncio.create_task(message_handle_fn())
-        # user_tasks[user_id] = task
-
         if current_model == "gpt-4-vision-preview" or update.message.photo is not None and len(
                 update.message.photo) > 0:
             logger.error('gpt-4-vision-preview')
             if current_model != "gpt-4-vision-preview":
                 current_model = "gpt-4-vision-preview"
-                db.set_user_attribute(user_id, "current_model",
-                                      "gpt-4-vision-preview")  # this lets you send images to any model and it changes it to vision
+                db.set_user_attribute(user_id, "current_model", "gpt-4-vision-preview")
             task = asyncio.create_task(
                 _vision_message_handle_fn(update, context, use_new_dialog_timeout=use_new_dialog_timeout)
             )
@@ -2440,28 +2402,33 @@ async def subscription_callback_handle(update: Update, context: CallbackContext)
 
 async def create_subscription_stripe_session(user_id: int, subscription_type: SubscriptionType,
                                              context: CallbackContext):
-    stripe.api_key = config.stripe_secret_key
+    """Создает платеж в Yookassa для подписки"""
     price = SUBSCRIPTION_PRICES[subscription_type]
 
-    session = stripe.checkout.Session.create(
-        payment_method_types=['card', 'paypal', 'ideal'],
-        line_items=[{
-            'price_data': {
-                'currency': 'rub',
-                'product_data': {'name': f"Подписка {subscription_type.name.replace('_', ' ').title()}"},
-                'unit_amount': price * 100,  # в копейках
+    try:
+        payment = Payment.create({
+            "amount": {
+                "value": f"{price}.00",
+                "currency": "RUB"
             },
-            'quantity': 1,
-        }],
-        mode='payment',
-        success_url='https://t.me/ChatdudBot',
-        cancel_url='https://t.me/ChatdudBot',
-        metadata={
-            'user_id': user_id,
-            'subscription_type': subscription_type.value
-        },
-    )
-    return session.url
+            "confirmation": {
+                "type": "redirect",
+                "return_url": "https://t.me/gptducksbot"
+            },
+            "capture": True,
+            "description": f"Подписка {subscription_type.name.replace('_', ' ').title()}",
+            "metadata": {
+                "user_id": user_id,
+                "subscription_type": subscription_type.value
+            }
+        })
+
+        db.set_user_attribute(user_id, "last_payment_id", payment.id)
+        return payment.confirmation.confirmation_url
+
+    except Exception as e:
+        logger.error(f"Error creating Yookassa subscription payment: {e}")
+        raise e
 
 
 # Subscriptions
@@ -2471,6 +2438,11 @@ bot_instance = None
 
 
 def run_bot() -> None:
+    # Инициализация Yookassa
+    if config.yookassa_shop_id and config.yookassa_secret_key:
+        Configuration.account_id = config.yookassa_shop_id
+        Configuration.secret_key = config.yookassa_secret_key
+
     thread = threading.Thread(target=start_asyncio_loop, daemon=True)
     thread.start()
 
