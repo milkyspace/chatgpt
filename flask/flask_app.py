@@ -12,6 +12,7 @@ import config
 from database import Database
 import redis
 import json
+import subscription
 
 db = Database()
 app = Flask(__name__)
@@ -19,6 +20,7 @@ bot = Bot(token=config.telegram_token)
 
 stripe.api_key = config.stripe_secret_key
 STRIPE_WEBHOOK_SECRET = config.stripe_webhook_secret
+
 
 @app.route('/stripe-webhook', methods=['POST'])
 def stripe_webhook():
@@ -38,30 +40,51 @@ def stripe_webhook():
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
         user_id = int(session['metadata']['user_id'])
-        is_donation = session['metadata'].get('is_donation', 'false') == 'true'
 
-        total_amount_paid_cents = session['amount_total']  # Total amount paid by the user in cents
-        total_amount_paid_euros = total_amount_paid_cents / 100.0  # Convert to euros
+        # Проверяем, это подписка или пополнение баланса
+        if 'subscription_type' in session['metadata']:
+            # Это платеж за подписку
+            subscription_type_str = session['metadata']['subscription_type']
+            subscription_type = subscription.SubscriptionType(subscription_type_str)
 
-        net_euro_amount = total_amount_paid_euros
+            # Добавляем подписку пользователю
+            duration_days = subscription.SUBSCRIPTION_DURATIONS[subscription_type].days
+            db.add_subscription(user_id, subscription_type, duration_days)
 
-        if not is_donation:
-
-            if total_amount_paid_cents == 125:  # User chose the 1 euro (and 25 cent option)
-                net_euro_amount = 1.0  # User gets 1 euro added to their balance, absorbing the 25 cent tax
-            else:
-            # For all other options, absorb the Stripe tax completely
-                net_euro_amount = total_amount_paid_euros
-
-            db.update_euro_balance(user_id, net_euro_amount)
-            db.update_total_topup(user_id, total_amount_paid_euros)
+            # Отправляем подтверждение
+            send_subscription_confirmation(user_id, subscription_type)
         else:
+            # Это пополнение баланса (существующая логика)
+            is_donation = session['metadata'].get('is_donation', 'false') == 'true'
+            total_amount_paid_cents = session['amount_total']
+            total_amount_paid_euros = total_amount_paid_cents / 100.0
             net_euro_amount = total_amount_paid_euros
-            db.update_total_donated(user_id, net_euro_amount)
 
-        send_confirmation_message(user_id, net_euro_amount, is_donation)
+            if not is_donation:
+                if total_amount_paid_cents == 125:
+                    net_euro_amount = 1.0
+                else:
+                    net_euro_amount = total_amount_paid_euros
+
+                db.update_euro_balance(user_id, net_euro_amount)
+                db.update_total_topup(user_id, total_amount_paid_euros)
+            else:
+                net_euro_amount = total_amount_paid_euros
+                db.update_total_donated(user_id, net_euro_amount)
+
+            send_confirmation_message(user_id, net_euro_amount, is_donation)
+
     return jsonify({'status': 'success'}), 200
 
+
+def send_subscription_confirmation(user_id, subscription_type):
+    redis_client = redis.Redis(host='redis', port=6379, db=0)
+    data = {
+        'user_id': user_id,
+        'subscription_type': subscription_type.value,
+        'message_type': 'subscription'
+    }
+    redis_client.publish('payment_notifications', json.dumps(data))
 
 def send_confirmation_message(user_id, euro_amount, is_donation):
 

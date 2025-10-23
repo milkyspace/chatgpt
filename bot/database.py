@@ -2,9 +2,10 @@ from typing import Optional, Any
 
 import pymongo
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import config
+from subscription import SubscriptionType, SUBSCRIPTION_PRICES, SUBSCRIPTION_DURATIONS
 
 
 class Database:
@@ -13,6 +14,7 @@ class Database:
         self.db = self.client["chatgpt_telegram_bot"]
 
         self.user_collection = self.db["user"]
+        self.subscription_collection = self.db["subscriptions"]
         self.dialog_collection = self.db["dialog"]
 
     def check_if_user_exists(self, user_id: int, raise_exception: bool = False):
@@ -25,12 +27,12 @@ class Database:
                 return False
 
     def add_new_user(
-        self,
-        user_id: int,
-        chat_id: int,
-        username: str = "",
-        first_name: str = "",
-        last_name: str = "",
+            self,
+            user_id: int,
+            chat_id: int,
+            username: str = "",
+            first_name: str = "",
+            last_name: str = "",
     ):
         user_dict = {
             "_id": user_id,
@@ -72,6 +74,9 @@ class Database:
 
     def start_new_dialog(self, user_id: int):
         self.check_if_user_exists(user_id, raise_exception=True)
+
+        if not self.has_active_subscription(user_id):
+            raise PermissionError("Нет активной подписки")
 
         dialog_id = str(uuid.uuid4())
         dialog_dict = {
@@ -140,12 +145,11 @@ class Database:
             {"_id": dialog_id, "user_id": user_id},
             {"$set": {"messages": dialog_messages}}
         )
-    
+
     def check_token_balance(self, user_id: int) -> int:
         """Check the user's current token balance."""
         user = self.user_collection.find_one({"_id": user_id})
         return user.get("token_balance", 0)
-
 
     def deduct_tokens_based_on_role(self, user_id: int, n_input_tokens: int, n_output_tokens: int):
         user = self.user_collection.find_one({"_id": user_id})
@@ -169,14 +173,14 @@ class Database:
         user = self.user_collection.find_one({"_id": user_id})
         if user and "current_model" in user:
             return user["current_model"]
-        return "Some form of GPT I guess, there was an error accesing the database"  
+        return "Some form of GPT I guess, there was an error accesing the database"
 
     def get_user_last_interaction(self, user_id: int) -> str:
         """Determine the model of a user based on their user ID."""
         user = self.user_collection.find_one({"_id": user_id})
         if user and "last_interaction" in user:
             return user["last_interaction"]
-        return "Not found" 
+        return "Not found"
 
     def get_user_count(self):
         return self.user_collection.count_documents({})
@@ -189,12 +193,12 @@ class Database:
 
     def get_user_by_id(self, user_id: int):
         return self.user_collection.find_one({"_id": user_id})
-    
+
     def get_users_and_roles(self):
-    # Fetch all users and project only the first_name and role
-        users_cursor = self.user_collection.find({}, {"username": 1,"first_name": 1, "role": 1, "last_interaction": 1})
+        # Fetch all users and project only the first_name and role
+        users_cursor = self.user_collection.find({}, {"username": 1, "first_name": 1, "role": 1, "last_interaction": 1})
         return list(users_cursor)
-    
+
     def find_users_by_role(self, role: str):
         return list(self.user_collection.find({"role": role}))
 
@@ -202,7 +206,7 @@ class Database:
         return self.user_collection.find_one({"username": username})
 
     def find_users_by_first_name(self, first_name: str):
-        return list(self.user_collection.find({"first_name": first_name}))    
+        return list(self.user_collection.find({"first_name": first_name}))
 
     def update_euro_balance(self, user_id: int, euro_amount: float):
         self.check_if_user_exists(user_id, raise_exception=True)
@@ -230,9 +234,8 @@ class Database:
             {"$inc": {"total_donated": amount}}
         )
 
-
     def get_user_euro_balance(self, user_id: int) -> float:
-    
+
         user = self.user_collection.find_one({"_id": user_id})
         return user.get("euro_balance", 0.0)
 
@@ -252,7 +255,7 @@ class Database:
 
     def deduct_euro_balance(self, user_id: int, euro_amount: float):
         self.check_if_user_exists(user_id, raise_exception=True)
-    # Ensure the deduction amount is not negative to avoid accidental balance increase
+        # Ensure the deduction amount is not negative to avoid accidental balance increase
         if euro_amount < 0:
             raise ValueError("Deduction amount must be positive")
         self.user_collection.update_one(
@@ -262,7 +265,7 @@ class Database:
 
     def deduct_rub_balance(self, user_id: int, rub_amount: float):
         self.check_if_user_exists(user_id, raise_exception=True)
-    # Ensure the deduction amount is not negative to avoid accidental balance increase
+        # Ensure the deduction amount is not negative to avoid accidental balance increase
         if rub_amount < 0:
             raise ValueError("Deduction amount must be positive")
         self.user_collection.update_one(
@@ -283,15 +286,19 @@ class Database:
         cost_in_euros = 0
 
         # Handle text models (per 1000 tokens)
-        if action_type in ['gpt-3.5-turbo', 'gpt-3.5-turbo-16k', 'gpt-4', 'gpt-4-1106-preview', 'gpt-4-vision-preview', 'text-davinci-003', 'gpt-4-turbo-2024-04-09', "gpt-4o", "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"]:
+        if action_type in ['gpt-3.5-turbo', 'gpt-3.5-turbo-16k', 'gpt-4', 'gpt-4-1106-preview', 'gpt-4-vision-preview',
+                           'text-davinci-003', 'gpt-4-turbo-2024-04-09', "gpt-4o", "claude-3-opus-20240229",
+                           "claude-3-sonnet-20240229", "claude-3-haiku-20240307"]:
 
             # Retrieve the input/output pricing from `config.models`
             price_per_1000_input = model_info.get('price_per_1000_input_tokens', 0)
             price_per_1000_output = model_info.get('price_per_1000_output_tokens', 0)
 
             # Calculate the cost based on input and output tokens
-            cost_in_euros = ((action_params.get('n_input_tokens', 0) / 1000) * price_per_1000_input + (action_params.get('n_output_tokens', 0) / 1000) * price_per_1000_output) * deduction_rate
-            cost_in_rubs = ((action_params.get('n_input_tokens', 0) / 1000) * price_per_1000_input + (action_params.get('n_output_tokens', 0) / 1000) * price_per_1000_output) * deduction_rate
+            cost_in_euros = ((action_params.get('n_input_tokens', 0) / 1000) * price_per_1000_input + (
+                    action_params.get('n_output_tokens', 0) / 1000) * price_per_1000_output) * deduction_rate
+            cost_in_rubs = ((action_params.get('n_input_tokens', 0) / 1000) * price_per_1000_input + (
+                    action_params.get('n_output_tokens', 0) / 1000) * price_per_1000_output) * deduction_rate
 
         # Handle DALLE-2 (per image)
         elif action_type == 'dalle-2':
@@ -344,4 +351,63 @@ class Database:
 
         # Deduct the calculated cost from the user's balance
         self.deduct_rub_balance(user_id, cost_in_rubs)
-        
+
+    def add_subscription(self, user_id: int, subscription_type: SubscriptionType,
+                         duration_days: int) -> None:
+        """Добавляет новую подписку пользователю"""
+        purchased_at = datetime.now()
+        expires_at = purchased_at + timedelta(days=duration_days)
+
+        subscription_data = {
+            "user_id": user_id,
+            "type": subscription_type.value,
+            "purchased_at": purchased_at,
+            "expires_at": expires_at,
+            "requests_used": 0,
+            "images_used": 0
+        }
+
+        self.subscription_collection.insert_one(subscription_data)
+
+    def get_active_subscription(self, user_id: int) -> dict:
+        """Возвращает активную подписку пользователя"""
+        return self.subscription_collection.find_one({
+            "user_id": user_id,
+            "expires_at": {"$gt": datetime.now()}
+        }, sort=[("purchased_at", -1)])
+
+    def update_subscription_usage(self, user_id: int, request_used: bool = False,
+                                  image_used: bool = False) -> None:
+        """Обновляет счетчики использования подписки"""
+        update_data = {}
+        if request_used:
+            update_data["$inc"] = {"requests_used": 1}
+        if image_used:
+            if "$inc" not in update_data:
+                update_data["$inc"] = {}
+            update_data["$inc"]["images_used"] = 1
+
+        if update_data:
+            self.subscription_collection.update_one(
+                {"user_id": user_id, "expires_at": {"$gt": datetime.now()}},
+                update_data
+            )
+
+    def get_user_subscription_info(self, user_id: int) -> dict:
+        """Возвращает информацию о подписке пользователя"""
+        subscription = self.get_active_subscription(user_id)
+        if subscription:
+            return {
+                "type": subscription["type"],
+                "expires_at": subscription["expires_at"],
+                "requests_used": subscription.get("requests_used", 0),
+                "images_used": subscription.get("images_used", 0),
+                "is_active": True
+            }
+        else:
+            return {
+                "type": "free",
+                "is_active": False,
+                "requests_used": 0,
+                "images_used": 0
+            }
