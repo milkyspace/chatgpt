@@ -75,7 +75,11 @@ class Database:
     def start_new_dialog(self, user_id: int):
         self.check_if_user_exists(user_id, raise_exception=True)
 
-        if not self.has_active_subscription(user_id):
+        # ЗАМЕНИТЕ эту строку:
+        # if not self.has_active_subscription(user_id):
+        # НА эту:
+        subscription_info = self.get_user_subscription_info(user_id)
+        if not subscription_info["is_active"]:
             raise PermissionError("Нет активной подписки")
 
         dialog_id = str(uuid.uuid4())
@@ -444,8 +448,3 @@ class Database:
                 "requests_used": 0,
                 "images_used": 0
             }
-
-    def has_active_subscription(self, user_id: int) -> bool:
-        """Проверяет, есть ли у пользователя активная подписка"""
-        subscription_info = self.get_user_subscription_info(user_id)
-        return subscription_info["is_active"]

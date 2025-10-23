@@ -192,7 +192,23 @@ async def start_handle(update: Update, context: CallbackContext):
     user_id = update.message.from_user.id
 
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
-    db.start_new_dialog(user_id)
+
+    # Пробуем начать новый диалог, но обрабатываем возможную ошибку отсутствия подписки
+    try:
+        db.start_new_dialog(user_id)
+    except PermissionError as e:
+        # Если нет активной подписки, показываем сообщение с предложением приобрести
+        reply_text = "👋 Привет! Мы <b>Ducks GPT</b>\n"
+        reply_text += "Компактный чат-бот на базе <b>ChatGPT</b>\n"
+        reply_text += "Рады знакомству!\n\n"
+        reply_text += "❌ <b>Для использования бота требуется активная подписка</b>\n\n"
+        reply_text += "🎁 <b>100 ₽ за наш счёт при регистрации!</b>\n\n"
+        reply_text += "Используйте команду /subscription чтобы посмотреть доступные подписки\n"
+        reply_text += "Или /topup чтобы пополнить баланс\n\n"
+        reply_text += HELP_MESSAGE
+
+        await update.message.reply_text(reply_text, parse_mode=ParseMode.HTML)
+        return
 
     reply_text = "👋 Привет! Мы <b>Ducks GPT</b>\n"
     reply_text += "Компактный чат-бот на базе <b>ChatGPT</b>\n"
@@ -203,7 +219,6 @@ async def start_handle(update: Update, context: CallbackContext):
     reply_text += HELP_MESSAGE
 
     await update.message.reply_text(reply_text, parse_mode=ParseMode.HTML)
-    # await show_chat_modes_handle(update, context)
 
 
 async def help_handle(update: Update, context: CallbackContext):
