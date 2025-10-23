@@ -350,7 +350,7 @@ async def create_subscription_yookassa_payment(user_id: int, subscription_type: 
         label = f"Подписка {subscription_type.name.replace('_', ' ').title()}"
         payment = Payment.create({
             "amount": {
-                "value": f"{price}.00",
+                "value": price,
                 "currency": currency
             },
             "confirmation": {
