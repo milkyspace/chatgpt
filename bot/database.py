@@ -274,6 +274,37 @@ class Database:
         )
 
     def deduct_cost_for_action(self, user_id: int, action_type: str, action_params: dict):
+        # Получаем информацию о подписке пользователя
+        subscription_info = self.get_user_subscription_info(user_id)
+
+        # Если у пользователя активная подписка, используем её лимиты
+        if subscription_info["is_active"]:
+            # Проверяем лимиты подписки для разных типов действий
+            if action_type in ['gpt-3.5-turbo', 'gpt-3.5-turbo-16k', 'gpt-4', 'gpt-4-1106-preview',
+                               'gpt-4-vision-preview', 'text-davinci-003', 'gpt-4-turbo-2024-04-09',
+                               "gpt-4o", "claude-3-opus-20240229", "claude-3-sonnet-20240229",
+                               "claude-3-haiku-20240307", 'whisper']:
+
+                # Для Pro Lite проверяем лимит запросов
+                if subscription_info["type"] == "pro_lite" and subscription_info["requests_used"] >= 1000:
+                    # Лимит исчерпан, списываем с баланса
+                    pass  # Переходим к списанию с баланса
+                else:
+                    # Обновляем использование подписки
+                    self.update_subscription_usage(user_id, request_used=True)
+                    return  # Не списываем средства с баланса
+
+            elif action_type in ['dalle-2', 'dalle-3']:
+                # Для Pro Lite проверяем лимит изображений
+                if subscription_info["type"] == "pro_lite" and subscription_info["images_used"] >= 20:
+                    # Лимит исчерпан, списываем с баланса
+                    pass  # Переходим к списанию с баланса
+                else:
+                    # Обновляем использование подписки
+                    self.update_subscription_usage(user_id, image_used=True)
+                    return  # Не списываем средства с баланса
+
+        # Если подписки нет или лимиты исчерпаны, списываем с баланса
         user_role = self.get_user_role(user_id)
         deduction_rate = config.role_deduction_rates.get(user_role, 1)
 
@@ -284,21 +315,22 @@ class Database:
 
         # Initialize the cost variable
         cost_in_euros = 0
+        cost_in_rubs = 0
 
         # Handle text models (per 1000 tokens)
-        if action_type in ['gpt-3.5-turbo', 'gpt-3.5-turbo-16k', 'gpt-4', 'gpt-4-1106-preview', 'gpt-4-vision-preview',
-                           'text-davinci-003', 'gpt-4-turbo-2024-04-09', "gpt-4o", "claude-3-opus-20240229",
-                           "claude-3-sonnet-20240229", "claude-3-haiku-20240307"]:
+        if action_type in ['gpt-3.5-turbo', 'gpt-3.5-turbo-16k', 'gpt-4', 'gpt-4-1106-preview',
+                           'gpt-4-vision-preview', 'text-davinci-003', 'gpt-4-turbo-2024-04-09',
+                           "gpt-4o", "claude-3-opus-20240229", "claude-3-sonnet-20240229",
+                           "claude-3-haiku-20240307"]:
 
             # Retrieve the input/output pricing from `config.models`
             price_per_1000_input = model_info.get('price_per_1000_input_tokens', 0)
             price_per_1000_output = model_info.get('price_per_1000_output_tokens', 0)
 
             # Calculate the cost based on input and output tokens
-            cost_in_euros = ((action_params.get('n_input_tokens', 0) / 1000) * price_per_1000_input + (
-                    action_params.get('n_output_tokens', 0) / 1000) * price_per_1000_output) * deduction_rate
-            cost_in_rubs = ((action_params.get('n_input_tokens', 0) / 1000) * price_per_1000_input + (
-                    action_params.get('n_output_tokens', 0) / 1000) * price_per_1000_output) * deduction_rate
+            cost_in_euros = ((action_params.get('n_input_tokens', 0) / 1000) * price_per_1000_input +
+                             (action_params.get('n_output_tokens', 0) / 1000) * price_per_1000_output) * deduction_rate
+            cost_in_rubs = cost_in_euros  # Конвертируем в рубли (в данном случае 1:1)
 
         # Handle DALLE-2 (per image)
         elif action_type == 'dalle-2':
@@ -310,7 +342,7 @@ class Database:
             price_per_image = dalle2_resolutions.get(resolution, {}).get('price_per_1_image', 0.020)
 
             cost_in_euros = n_images * price_per_image * deduction_rate
-            cost_in_rubs = n_images * price_per_image * deduction_rate
+            cost_in_rubs = cost_in_euros  # Конвертируем в рубли
 
             # Update DALL-E 2 tracking in the user database
             self.user_collection.update_one(
@@ -330,7 +362,7 @@ class Database:
             price_per_image = resolution_info.get('price_per_1_image', 0.040)
 
             cost_in_euros = n_images * price_per_image * deduction_rate
-            cost_in_rubs = n_images * price_per_image * deduction_rate
+            cost_in_rubs = cost_in_euros  # Конвертируем в рубли
 
             # Update DALL-E 3 tracking in the user database
             self.user_collection.update_one(
@@ -344,13 +376,14 @@ class Database:
             price_per_minute = model_info.get('price_per_1_min', 0.006)
 
             cost_in_euros = audio_duration_minutes * price_per_minute * deduction_rate
-            cost_in_rubs = audio_duration_minutes * price_per_minute * deduction_rate
+            cost_in_rubs = cost_in_euros  # Конвертируем в рубли
 
         else:
             raise ValueError(f"Unknown action type: {action_type}")
 
-        # Deduct the calculated cost from the user's balance
-        self.deduct_rub_balance(user_id, cost_in_rubs)
+        # Deduct the calculated cost from the user's balance (только если не использована подписка)
+        if cost_in_rubs > 0:
+            self.deduct_rub_balance(user_id, cost_in_rubs)
 
     def add_subscription(self, user_id: int, subscription_type: SubscriptionType,
                          duration_days: int) -> None:
@@ -411,3 +444,8 @@ class Database:
                 "requests_used": 0,
                 "images_used": 0
             }
+
+    def has_active_subscription(self, user_id: int) -> bool:
+        """Проверяет, есть ли у пользователя активная подписка"""
+        subscription_info = self.get_user_subscription_info(user_id)
+        return subscription_info["is_active"]
