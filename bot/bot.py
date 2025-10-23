@@ -234,34 +234,30 @@ async def help_group_chat_handle(update: Update, context: CallbackContext):
 
 
 async def check_pending_payments():
-    """Проверяет статус pending платежей"""
-    while True:
-        try:
-            pending_payments = db.get_pending_payments()
+    """Проверяет статус pending платежей (одна итерация)"""
+    try:
+        pending_payments = db.get_pending_payments()
 
-            for payment in pending_payments:
-                payment_id = payment["payment_id"]
-                user_id = payment["user_id"]
+        for payment in pending_payments:
+            payment_id = payment["payment_id"]
+            user_id = payment["user_id"]
 
-                try:
-                    payment_info = Payment.find_one(payment_id)
-                    status = payment_info.status
+            try:
+                payment_info = Payment.find_one(payment_id)
+                status = payment_info.status
 
-                    db.update_payment_status(payment_id, status)
+                db.update_payment_status(payment_id, status)
 
-                    if status == 'succeeded':
-                        await process_successful_payment(payment_info, user_id)
-                    elif status == 'canceled':
-                        logger.info(f"Payment {payment_id} was canceled")
+                if status == 'succeeded':
+                    await process_successful_payment(payment_info, user_id)
+                elif status == 'canceled':
+                    logger.info(f"Payment {payment_id} was canceled")
 
-                except Exception as e:
-                    logger.error(f"Error checking payment {payment_id}: {e}")
+            except Exception as e:
+                logger.error(f"Error checking payment {payment_id}: {e}")
 
-            await asyncio.sleep(30)
-
-        except Exception as e:
-            logger.error(f"Error in payment checking loop: {e}")
-            await asyncio.sleep(60)
+    except Exception as e:
+        logger.error(f"Error in payment checking: {e}")
 
 
 async def process_successful_payment(payment_info, user_id):
@@ -1831,9 +1827,6 @@ def run_bot() -> None:
         Configuration.account_id = config.yookassa_shop_id
         Configuration.secret_key = config.yookassa_secret_key
 
-    application = ApplicationBuilder().token(config.telegram_token).build()
-    bot_instance = application.bot
-
     update_user_roles_from_config(db, config.roles)
     configure_logging()
 
@@ -1848,9 +1841,15 @@ def run_bot() -> None:
         .build()
     )
 
-    # Запускаем задачу проверки платежей в фоне
+    bot_instance = application.bot
+
+    # Добавляем фоновую задачу для проверки платежей через job_queue
     if config.yookassa_shop_id and config.yookassa_secret_key:
-        asyncio.create_task(check_pending_payments())
+        application.job_queue.run_repeating(
+            check_pending_payments_wrapper,
+            interval=30,
+            first=10
+        )
 
     # add handlers
     user_filter = filters.ALL
@@ -1918,6 +1917,15 @@ def run_bot() -> None:
 
     # start the bot
     application.run_polling()
+
+
+# Обертка для проверки платежей, совместимая с job_queue
+async def check_pending_payments_wrapper(context: CallbackContext):
+    """Обертка для проверки платежей, совместимая с job_queue"""
+    try:
+        await check_pending_payments()
+    except Exception as e:
+        logger.error(f"Error in payment checking job: {e}")
 
 
 if __name__ == "__main__":
