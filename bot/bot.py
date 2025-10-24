@@ -784,73 +784,100 @@ async def topup_callback_handle(update: Update, context: CallbackContext):
 
 async def subscription_handle(update: Update, context: CallbackContext):
     """Показывает доступные подписки"""
-    # Получаем пользователя в зависимости от типа update
-    if update.message is not None:
-        user = update.message.from_user
-        chat_id = update.message.chat_id
-    else:
-        user = update.callback_query.from_user
-        chat_id = update.callback_query.message.chat_id
+    try:
+        # Получаем пользователя в зависимости от типа update
+        if update.message is not None:
+            user = update.message.from_user
+            chat_id = update.message.chat_id
+        else:
+            user = update.callback_query.from_user
+            chat_id = update.callback_query.message.chat_id
 
-    await register_user_if_not_exists(update, context, user)
-    user_id = user.id
-    db.set_user_attribute(user_id, "last_interaction", datetime.now())
+        await register_user_if_not_exists(update, context, user)
+        user_id = user.id
+        db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-    subscription_info = db.get_user_subscription_info(user_id)
+        subscription_info = db.get_user_subscription_info(user_id)
 
-    text = "🔔 <b>Доступные подписки</b>\n\n"
+        text = "🔔 <b>Доступные подписки</b>\n\n"
 
-    if subscription_info["is_active"]:
-        expires_str = subscription_info["expires_at"].strftime("%d.%m.%Y")
-        text += f"📋 <b>Текущая подписка:</b> {subscription_info['type'].upper()}\n"
-        text += f"📅 <b>Действует до:</b> {expires_str}\n"
-        if subscription_info["type"] == "pro_lite":
-            text += f"📊 <b>Запросы использовано:</b> {subscription_info['requests_used']}/1000\n"
-            text += f"🎨 <b>Изображения использовано:</b> {subscription_info['images_used']}/20\n"
-        text += "\n"
+        if subscription_info["is_active"]:
+            expires_str = subscription_info["expires_at"].strftime("%d.%m.%Y")
+            text += f"📋 <b>Текущая подписка:</b> {subscription_info['type'].upper()}\n"
+            text += f"📅 <b>Действует до:</b> {expires_str}\n"
+            if subscription_info["type"] == "pro_lite":
+                text += f"📊 <b>Запросы использовано:</b> {subscription_info['requests_used']}/1000\n"
+                text += f"🎨 <b>Изображения использовано:</b> {subscription_info['images_used']}/20\n"
+            text += "\n"
 
-    subscriptions = [
-        {
-            "name": "Pro Lite",
-            "type": SubscriptionType.PRO_LITE,
-            "price": 499,
-            "duration": "10 дней",
-            "features": "1000 запросов • 20 генераций изображений • До 4000 символов"
-        },
-        {
-            "name": "Pro Plus",
-            "type": SubscriptionType.PRO_PLUS,
-            "price": 1290,
-            "duration": "1 месяц",
-            "features": "Безлимитные запросы • До 32000 символов"
-        },
-        {
-            "name": "Pro Premium",
-            "type": SubscriptionType.PRO_PREMIUM,
-            "price": 2990,
-            "duration": "3 месяца",
-            "features": "Безлимитные запросы • До 32000 символов"
-        }
-    ]
+        subscriptions = [
+            {
+                "name": "Pro Lite",
+                "type": SubscriptionType.PRO_LITE,
+                "price": 499,
+                "duration": "10 дней",
+                "features": "1000 запросов • 20 генераций изображений • До 4000 символов"
+            },
+            {
+                "name": "Pro Plus",
+                "type": SubscriptionType.PRO_PLUS,
+                "price": 1290,
+                "duration": "1 месяц",
+                "features": "Безлимитные запросы • До 32000 символов"
+            },
+            {
+                "name": "Pro Premium",
+                "type": SubscriptionType.PRO_PREMIUM,
+                "price": 2990,
+                "duration": "3 месяца",
+                "features": "Безлимитные запросы • До 32000 символов"
+            }
+        ]
 
-    keyboard = []
-    for sub in subscriptions:
-        btn_text = f"{sub['name']} - {sub['price']}₽"
-        callback_data = f"subscribe|{sub['type'].value}"
-        keyboard.append([InlineKeyboardButton(btn_text, callback_data=callback_data)])
+        keyboard = []
+        for sub in subscriptions:
+            btn_text = f"{sub['name']} - {sub['price']}₽"
+            callback_data = f"subscribe|{sub['type'].value}"
+            keyboard.append([InlineKeyboardButton(btn_text, callback_data=callback_data)])
 
-    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="subscription_back")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="subscription_back")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
 
-    for sub in subscriptions:
-        text += f"<b>{sub['name']}</b> - {sub['price']}₽ / {sub['duration']}\n"
-        text += f"   {sub['features']}\n\n"
+        for sub in subscriptions:
+            text += f"<b>{sub['name']}</b> - {sub['price']}₽ / {sub['duration']}\n"
+            text += f"   {sub['features']}\n\n"
 
-    # Отправляем сообщение в зависимости от типа update
-    if update.message is not None:
-        await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
-    else:
-        await update.callback_query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+        # Отправляем сообщение в зависимости от типа update
+        if update.message is not None:
+            await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+        else:
+            # Используем более безопасный подход для редактирования сообщения
+            try:
+                await update.callback_query.edit_message_text(
+                    text,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=reply_markup
+                )
+            except telegram.error.BadRequest as e:
+                if "Message is not modified" in str(e):
+                    # Сообщение не изменилось, это нормально
+                    pass
+                else:
+                    # Другая ошибка - переотправляем сообщение
+                    await update.callback_query.message.reply_text(
+                        text,
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=reply_markup
+                    )
+
+    except Exception as e:
+        logger.error(f"Error in subscription_handle: {e}")
+        # Отправляем сообщение об ошибке
+        if update.callback_query:
+            await update.callback_query.message.reply_text(
+                "❌ Произошла ошибка при загрузке подписок. Пожалуйста, попробуйте снова.",
+                parse_mode=ParseMode.HTML
+            )
 
 
 async def subscription_callback_handle(update: Update, context: CallbackContext):
@@ -861,34 +888,60 @@ async def subscription_callback_handle(update: Update, context: CallbackContext)
     data = query.data
 
     if data == "subscription_back":
-        # Возвращаемся в главное меню
-        reply_text = "Возврат в главное меню...\n\n" + HELP_MESSAGE
-        await query.edit_message_text(reply_text, parse_mode=ParseMode.HTML)
+        try:
+            # Возвращаемся в главное меню
+            reply_text = "Возврат в главное меню...\n\n" + HELP_MESSAGE
+
+            # Пытаемся отредактировать сообщение
+            await query.edit_message_text(
+                reply_text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True
+            )
+        except telegram.error.BadRequest as e:
+            if "Message is not modified" in str(e):
+                # Сообщение не изменилось - игнорируем
+                pass
+            else:
+                # Другая ошибка - отправляем новое сообщение
+                await query.message.reply_text(
+                    "Возврат в главное меню...\n\n" + HELP_MESSAGE,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True
+                )
         return
 
     if data.startswith("subscribe|"):
-        _, subscription_type_str = data.split("|")
-        subscription_type = SubscriptionType(subscription_type_str)
+        try:
+            _, subscription_type_str = data.split("|")
+            subscription_type = SubscriptionType(subscription_type_str)
 
-        price = SUBSCRIPTION_PRICES[subscription_type]
-        duration = SUBSCRIPTION_DURATIONS[subscription_type]
+            price = SUBSCRIPTION_PRICES[subscription_type]
+            duration = SUBSCRIPTION_DURATIONS[subscription_type]
 
-        payment_url = await create_subscription_yookassa_payment(
-            query.from_user.id, subscription_type, context
-        )
+            payment_url = await create_subscription_yookassa_payment(
+                query.from_user.id, subscription_type, context
+            )
 
-        text = f"💳 <b>Оформление подписки {subscription_type.name.replace('_', ' ').title()}</b>\n\n"
-        text += f"Стоимость: <b>{price}₽</b>\n"
-        text += f"Период: <b>{duration.days} дней</b>\n\n"
-        text += "Нажмите кнопку ниже для оплаты. После успешной оплаты подписка активируется автоматически в течение 1-2 минут!"
+            text = f"💳 <b>Оформление подписки {subscription_type.name.replace('_', ' ').title()}</b>\n\n"
+            text += f"Стоимость: <b>{price}₽</b>\n"
+            text += f"Период: <b>{duration.days} дней</b>\n\n"
+            text += "Нажмите кнопку ниже для оплаты. После успешной оплаты подписка активируется автоматически в течение 1-2 минут!"
 
-        keyboard = [
-            [InlineKeyboardButton("💳 Оплатить", url=payment_url)],
-            [InlineKeyboardButton("⬅️ Назад", callback_data="subscription_back")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+            keyboard = [
+                [InlineKeyboardButton("💳 Оплатить", url=payment_url)],
+                [InlineKeyboardButton("⬅️ Назад", callback_data="subscription_back")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+            await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+
+        except Exception as e:
+            logger.error(f"Error in subscription payment: {e}")
+            await query.edit_message_text(
+                "❌ Произошла ошибка при создании платежа. Пожалуйста, попробуйте позже.",
+                parse_mode=ParseMode.HTML
+            )
 
 
 async def check_my_payments_handle(update: Update, context: CallbackContext):
