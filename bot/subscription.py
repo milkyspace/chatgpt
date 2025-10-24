@@ -58,9 +58,9 @@ class Subscription:
 
 
 SUBSCRIPTION_PRICES = {
-    SubscriptionType.PRO_LITE: 499,
-    SubscriptionType.PRO_PLUS: 1290,
-    SubscriptionType.PRO_PREMIUM: 2990
+    SubscriptionType.PRO_LITE: 10,
+    SubscriptionType.PRO_PLUS: 10,
+    SubscriptionType.PRO_PREMIUM: 10
 }
 
 SUBSCRIPTION_DURATIONS = {
