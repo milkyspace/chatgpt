@@ -816,21 +816,21 @@ async def subscription_handle(update: Update, context: CallbackContext):
             {
                 "name": "Pro Lite",
                 "type": SubscriptionType.PRO_LITE,
-                "price": 499,
+                "price": 10,
                 "duration": "10 дней",
                 "features": "1000 запросов • 20 генераций изображений • До 4000 символов"
             },
             {
                 "name": "Pro Plus",
                 "type": SubscriptionType.PRO_PLUS,
-                "price": 1290,
+                "price": 10,
                 "duration": "1 месяц",
                 "features": "Безлимитные запросы • До 32000 символов"
             },
             {
                 "name": "Pro Premium",
                 "type": SubscriptionType.PRO_PREMIUM,
-                "price": 2990,
+                "price": 10,
                 "duration": "3 месяца",
                 "features": "Безлимитные запросы • До 32000 символов"
             }
