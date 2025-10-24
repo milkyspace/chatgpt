@@ -234,6 +234,8 @@ async def help_group_chat_handle(update: Update, context: CallbackContext):
 
 
 async def process_successful_payment(payment_info, user_id):
+    print('process_successful_payment')
+
     """Обрабатывает успешный платеж"""
     try:
         amount = float(payment_info.amount.value)
