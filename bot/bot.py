@@ -840,7 +840,6 @@ async def subscription_handle(update: Update, context: CallbackContext):
             callback_data = f"subscribe|{sub['type'].value}"
             keyboard.append([InlineKeyboardButton(btn_text, callback_data=callback_data)])
 
-        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="subscription_back")])
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         for sub in subscriptions:
