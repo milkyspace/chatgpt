@@ -784,8 +784,16 @@ async def topup_callback_handle(update: Update, context: CallbackContext):
 
 async def subscription_handle(update: Update, context: CallbackContext):
     """Показывает доступные подписки"""
-    await register_user_if_not_exists(update, context, update.message.from_user)
-    user_id = update.message.from_user.id
+    # Получаем пользователя в зависимости от типа update
+    if update.message is not None:
+        user = update.message.from_user
+        chat_id = update.message.chat_id
+    else:
+        user = update.callback_query.from_user
+        chat_id = update.callback_query.message.chat_id
+
+    await register_user_if_not_exists(update, context, user)
+    user_id = user.id
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
     subscription_info = db.get_user_subscription_info(user_id)
@@ -838,7 +846,11 @@ async def subscription_handle(update: Update, context: CallbackContext):
         text += f"<b>{sub['name']}</b> - {sub['price']}₽ / {sub['duration']}\n"
         text += f"   {sub['features']}\n\n"
 
-    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+    # Отправляем сообщение в зависимости от типа update
+    if update.message is not None:
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+    else:
+        await update.callback_query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
 
 async def subscription_callback_handle(update: Update, context: CallbackContext):
@@ -849,7 +861,9 @@ async def subscription_callback_handle(update: Update, context: CallbackContext)
     data = query.data
 
     if data == "subscription_back":
-        await query.edit_message_text("Возврат в главное меню...")
+        # Возвращаемся в главное меню
+        reply_text = "Возврат в главное меню...\n\n" + HELP_MESSAGE
+        await query.edit_message_text(reply_text, parse_mode=ParseMode.HTML)
         return
 
     if data.startswith("subscribe|"):
