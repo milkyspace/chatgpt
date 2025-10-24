@@ -2028,7 +2028,7 @@ async def check_pending_payments():
     """Проверяет статус pending платежей (одна итерация)"""
     try:
         pending_payments = db.get_pending_payments()
-
+        print(pending_payments)
         for payment in pending_payments:
             payment_id = payment["payment_id"]
             user_id = payment["user_id"]
