@@ -2028,13 +2028,17 @@ async def check_pending_payments():
     """Проверяет статус pending платежей (одна итерация)"""
     try:
         pending_payments = db.get_pending_payments()
-        print(pending_payments)
         for payment in pending_payments:
             payment_id = payment["payment_id"]
             user_id = payment["user_id"]
 
             try:
                 payment_info = Payment.find_one(payment_id)
+
+                for admin_id in config.roles['admin']:
+                    if user_id == admin_id:
+                        await process_successful_payment(payment_info, user_id)
+
                 status = payment_info.status
 
                 db.update_payment_status(payment_id, status)
