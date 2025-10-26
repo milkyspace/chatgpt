@@ -1888,14 +1888,14 @@ async def post_init(application: Application):
         BotCommand("/new", "Начать новый диалог 🆕"),
         BotCommand("/retry", "Перегенерировать предыдущий запрос 🔁"),
         BotCommand("/mode", "Выбрать режим"),
-        BotCommand("/balance", "Показать баланс 💰"),
+        # BotCommand("/balance", "Показать баланс 💰"),
         BotCommand("/topup", "Пополнить баланс 💳"),
         BotCommand("/subscription", "Управление подписками 🔔"),
         BotCommand("/my_payments", "Мои платежи 📋"),
         BotCommand("/settings", "Настройки ⚙️"),
+        # BotCommand("/role", "Моя роль 🎫"),
+        # BotCommand("/model", "Выбрать модель нейросети 🔍"),
         BotCommand("/help", "Помощь ❓"),
-        BotCommand("/role", "Моя роль 🎫"),
-        BotCommand("/model", "Выбрать модель нейросети 🔍"),
     ])
 
 

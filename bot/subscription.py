@@ -64,6 +64,7 @@ SUBSCRIPTION_PRICES = {
 }
 
 SUBSCRIPTION_DURATIONS = {
+    SubscriptionType.FREE: timedelta(days=10),
     SubscriptionType.PRO_LITE: timedelta(days=10),
     SubscriptionType.PRO_PLUS: timedelta(days=30),
     SubscriptionType.PRO_PREMIUM: timedelta(days=90)
