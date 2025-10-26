@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 import openai
 from subscription import SubscriptionType, SUBSCRIPTION_PRICES, SUBSCRIPTION_DURATIONS
 
-import yookassa
 from yookassa import Payment, Configuration
 import telegram
 from telegram import (
