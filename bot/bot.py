@@ -1910,25 +1910,19 @@ async def handle_main_menu_buttons(update: Update, context: CallbackContext):
         context.user_data['is_donation'] = True
         context.user_data['awaiting_custom_topup'] = "donation"
 
-        # Создаем клавиатуру с кнопкой "Назад"
-        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="topup|back_to_topup_options")]]
-
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
         # Сразу отправляем сообщение с запросом суммы
         await update.message.reply_text(
             "Спасибо! \n\nВведите сумму в рублях:",
-            reply_markup=reply_markup,
             parse_mode='Markdown'
         )
 
-    elif text == emoji.emojize("Почему мы? :star:"):
+    elif "Почему мы?" in text:
         await update.message.reply_text(
             "🤔 <b>Почему выбирают нас?</b>\n\n"
             "✅ <b>Работаем в РФ</b> - полная доступность\n"
             "✅ <b>Стабильная работа</b> - минимум сбоев\n"
             "✅ <b>Поддержка 24/7</b> - всегда на связи\n"
-            "✅ <b>Лучшие модели</b> - GPT-4, Claude и другие\n"
+            "✅ <b>Лучшие модели</b> - GPT-5 и другие\n"
             "✅ <b>Голосовые сообщения</b> - удобный ввод\n"
             "✅ <b>Генерация изображений</b> - DALL-E 2 и 3\n\n"
             "Присоединяйтесь к тысячам довольных пользователей!",
