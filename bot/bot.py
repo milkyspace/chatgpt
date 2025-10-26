@@ -1918,15 +1918,83 @@ def run_bot() -> None:
         user_filter = filters.User(username=usernames) | filters.User(user_id=user_ids) | filters.Chat(
             chat_id=group_ids)
 
+    # Основные команды
     application.add_handler(CommandHandler("start", start_handle, filters=user_filter))
     application.add_handler(CommandHandler("help", help_handle, filters=user_filter))
     application.add_handler(CommandHandler("help_group_chat", help_group_chat_handle, filters=user_filter))
 
+    # Обработчики кнопок главного меню
+    application.add_handler(MessageHandler(
+        filters.TEXT &
+        filters.Regex(emoji.emojize("Продлить подписку :money_bag:")) &
+        user_filter,
+        handle_main_menu_buttons
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT &
+        filters.Regex(emoji.emojize("Как подключить :gear:")) &
+        user_filter,
+        handle_main_menu_buttons
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT &
+        filters.Regex(emoji.emojize("Подарить подписку :wrapped_gift:")) &
+        user_filter,
+        handle_main_menu_buttons
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT &
+        filters.Regex(emoji.emojize("Поддержать проект :red_heart:")) &
+        user_filter,
+        handle_main_menu_buttons
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT &
+        filters.Regex(emoji.emojize("Почему мы? :star:")) &
+        user_filter,
+        handle_main_menu_buttons
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT &
+        filters.Regex(emoji.emojize("Пригласить :woman_and_man_holding_hands:")) &
+        user_filter,
+        handle_main_menu_buttons
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT &
+        filters.Regex(emoji.emojize("Помощь :heart_hands:")) &
+        user_filter,
+        handle_main_menu_buttons
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT &
+        filters.Regex(emoji.emojize("Админ-панель :smiling_face_with_sunglasses:")) &
+        user_filter,
+        handle_main_menu_buttons
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT &
+        filters.Regex(emoji.emojize("Назад :right_arrow_curving_left:")) &
+        user_filter,
+        handle_back_button
+    ))
+
+    # Обработчик для кнопки статуса подписки (зеленый/красный круг)
+    application.add_handler(MessageHandler(
+        filters.TEXT &
+        (filters.Regex(emoji.emojize(":green_circle:")) | filters.Regex(emoji.emojize(":red_circle:"))) &
+        user_filter,
+        handle_main_menu_buttons
+    ))
+
+    # Обработчики сообщений (должны быть после обработчиков кнопок)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & user_filter, message_handle))
     application.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND & user_filter, message_handle))
     application.add_handler(MessageHandler(filters.VIDEO & ~filters.COMMAND & user_filter, unsupport_message_handle))
     application.add_handler(
         MessageHandler(filters.Document.ALL & ~filters.COMMAND & user_filter, unsupport_message_handle))
+
+    # Остальные обработчики остаются без изменений...
     application.add_handler(CommandHandler("retry", retry_handle, filters=user_filter))
     application.add_handler(CommandHandler("new", new_dialog_handle, filters=user_filter))
     application.add_handler(CommandHandler("cancel", cancel_handle, filters=user_filter))
@@ -1962,7 +2030,7 @@ def run_bot() -> None:
     application.add_handler(CommandHandler('model', show_user_model))
     application.add_handler(CommandHandler('token_balance', token_balance_command))
 
-    # admin commands (оставлены для совместимости, можно удалить если не нужны)
+    # admin commands
     application.add_handler(
         CommandHandler("admin", lambda update, context: update.message.reply_text("Admin commands disabled")))
     application.add_handler(
