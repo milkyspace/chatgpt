@@ -208,8 +208,8 @@ async def start_handle(update: Update, context: CallbackContext):
     reply_text += "Компактный чат-бот на базе <b>ChatGPT</b>\n"
     reply_text += "Рады знакомству!\n\n"
     reply_text += "Доступны в <b>РФ</b>🇷🇺\n"
-    reply_text += "<b>Дарим подписку на 7 дней</b>\n\n"
-    reply_text += "- 15 запросов\n\n"
+    reply_text += "<b>Дарим подписку на 7 дней:</b>\n"
+    reply_text += "- 15 запросов\n"
     reply_text += "- 3 генерации изображения\n\n"
     reply_text += HELP_MESSAGE
 
