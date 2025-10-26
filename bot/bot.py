@@ -14,7 +14,10 @@ from telegram import (
     User,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    BotCommand
+    BotCommand,
+    BotCommandScopeAllPrivateChats,
+    BotCommandScopeAllChatAdministrators,
+    BotCommandScopeAllGroupChats
 )
 from telegram.ext import (
     Application,
@@ -1978,7 +1981,7 @@ def run_bot() -> None:
 
 # Обновленная функция post_init для добавления фоновых задач
 async def post_init(application: Application):
-    await application.bot.set_my_commands([
+    commands = [
         BotCommand("/new", "Начать новый диалог 🆕"),
         BotCommand("/retry", "Перегенерировать предыдущий запрос 🔁"),
         BotCommand("/mode", "Выбрать режим"),
@@ -1990,7 +1993,10 @@ async def post_init(application: Application):
         BotCommand("/help", "Помощь ❓"),
         # BotCommand("/role", "Моя роль 🎫"),
         # BotCommand("/model", "Выбрать модель нейросети 🔍"),
-    ])
+    ]
+    await application.bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
+    await application.bot.set_my_commands(commands, scope=BotCommandScopeAllChatAdministrators())
+    await application.bot.set_my_commands(commands, scope=BotCommandScopeAllGroupChats())
 
     # Добавляем фоновую задачу для проверки платежей через job_queue
     if config.yookassa_shop_id and config.yookassa_secret_key:
