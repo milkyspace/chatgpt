@@ -1903,9 +1903,24 @@ async def handle_main_menu_buttons(update: Update, context: CallbackContext):
     if text == emoji.emojize("Продлить подписку :money_bag:"):
         await subscription_handle(update, context)
 
+
+
     elif text == emoji.emojize("Поддержать проект :red_heart:"):
+        # Устанавливаем флаги для пожертвования
         context.user_data['is_donation'] = True
-        await topup_callback_handle(update, context)
+        context.user_data['awaiting_custom_topup'] = "donation"
+
+        # Создаем клавиатуру с кнопкой "Назад"
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="topup|back_to_topup_options")]]
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        # Сразу отправляем сообщение с запросом суммы
+        await update.message.reply_text(
+            "Спасибо! \n\nВведите сумму в рублях:",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
 
     elif text == emoji.emojize("Почему мы? :star:"):
         await update.message.reply_text(
