@@ -1937,7 +1937,7 @@ async def handle_main_menu_buttons(update: Update, context: CallbackContext):
 
     elif emoji.emojize(":green_circle:") in text or emoji.emojize(":red_circle:") in text:
         # Нажата кнопка статуса подписки - показываем детальную информацию
-        await show_balance_handle(update, context)
+        await subscription_handle(update, context)
 
     else:
         # Если сообщение не соответствует ни одной кнопке, обрабатываем как обычное сообщение
