@@ -8,7 +8,7 @@ import time
 from telegram import ReplyKeyboardMarkup, KeyboardButton
 import database
 import config
-from bot.subscription import SubscriptionType
+from subscription import SubscriptionType
 
 
 class BotKeyboards:
