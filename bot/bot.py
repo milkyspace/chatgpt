@@ -727,7 +727,7 @@ async def topup_callback_handle(update: Update, context: CallbackContext):
 
     if data == "topup|topup_custom" or data == "topup|topup_donation":
         is_donation = "donation" in data
-        prompt_text = "Спасибо за желание *пожертвовать*! \n\nВведите сумму в рублях:" if is_donation else "Введите *сумму* в рублях:"
+        prompt_text = "Спасибо! \n\nВведите сумму в рублях:" if is_donation else "Введите *сумму* в рублях:"
 
         await query.edit_message_text(
             text=prompt_text,
@@ -1903,18 +1903,9 @@ async def handle_main_menu_buttons(update: Update, context: CallbackContext):
     if text == emoji.emojize("Продлить подписку :money_bag:"):
         await subscription_handle(update, context)
 
-    elif text == emoji.emojize("Как подключить :gear:"):
-        await help_group_chat_handle(update, context)
-
-    elif text == emoji.emojize("Подарить подписку :wrapped_gift:"):
-        await update.message.reply_text(
-            "Функция 'Подарить подписку' в разработке. Скоро будет доступна!",
-            parse_mode=ParseMode.HTML
-        )
-
     elif text == emoji.emojize("Поддержать проект :red_heart:"):
         context.user_data['is_donation'] = True
-        await topup_handle(update, context)
+        await topup_callback_handle(update, context)
 
     elif text == emoji.emojize("Почему мы? :star:"):
         await update.message.reply_text(
@@ -2026,18 +2017,6 @@ def run_bot() -> None:
     application.add_handler(MessageHandler(
         filters.TEXT &
         filters.Regex(emoji.emojize("Продлить подписку :money_bag:")) &
-        user_filter,
-        handle_main_menu_buttons
-    ))
-    application.add_handler(MessageHandler(
-        filters.TEXT &
-        filters.Regex(emoji.emojize("Как подключить :gear:")) &
-        user_filter,
-        handle_main_menu_buttons
-    ))
-    application.add_handler(MessageHandler(
-        filters.TEXT &
-        filters.Regex(emoji.emojize("Подарить подписку :wrapped_gift:")) &
         user_filter,
         handle_main_menu_buttons
     ))

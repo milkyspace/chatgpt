@@ -4,7 +4,6 @@
 
 import emoji
 from datetime import datetime
-import time
 from telegram import ReplyKeyboardMarkup, KeyboardButton
 import database
 import config
@@ -63,10 +62,8 @@ class BotKeyboards:
         keyboard.extend([
             [
                 KeyboardButton(emoji.emojize("Продлить подписку :money_bag:")),
-                KeyboardButton(emoji.emojize("Как подключить :gear:"))
             ],
             [
-                KeyboardButton(emoji.emojize("Подарить подписку :wrapped_gift:")),
                 KeyboardButton(emoji.emojize("Поддержать проект :red_heart:"))
             ],
             [
