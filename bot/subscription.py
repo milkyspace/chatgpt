@@ -28,7 +28,7 @@ class Subscription:
             return False
 
         limits = {
-            SubscriptionType.FREE: 10,
+            SubscriptionType.FREE: 15,
             SubscriptionType.PRO_LITE: 1000,
             SubscriptionType.PRO_PLUS: float('inf'),
             SubscriptionType.PRO_PREMIUM: float('inf')

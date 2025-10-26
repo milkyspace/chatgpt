@@ -212,9 +212,8 @@ async def start_handle(update: Update, context: CallbackContext):
     reply_text = "👋 Привет! Мы <b>Ducks GPT</b>\n"
     reply_text += "Компактный чат-бот на базе <b>ChatGPT</b>\n"
     reply_text += "Рады знакомству!\n\n"
-    reply_text += "- Доступны в <b>РФ</b>🇷🇺\n"
-    reply_text += "- <b>Без месячной подписки</b> — платишь только за использование\n\n"
-    reply_text += "🎁 <b>100 ₽ за наш счёт!</b>\n\n"
+    reply_text += "Доступны в <b>РФ</b>🇷🇺\n"
+    reply_text += "🎁 <b>Дарим подписку на 7 дней (15 запросов и 3 генерации изображения)</b>\n\n"
     reply_text += HELP_MESSAGE
 
     await update.message.reply_text(reply_text, parse_mode=ParseMode.HTML)
@@ -1986,7 +1985,7 @@ async def post_init(application: Application):
         BotCommand("/retry", "Перегенерировать предыдущий запрос 🔁"),
         BotCommand("/mode", "Выбрать режим"),
         # BotCommand("/balance", "Показать баланс 💰"),
-        BotCommand("/topup", "Пополнить баланс 💳"),
+        # BotCommand("/topup", "Пополнить баланс 💳"),
         BotCommand("/subscription", "Управление подписками 🔔"),
         BotCommand("/my_payments", "Мои платежи 📋"),
         BotCommand("/settings", "Настройки ⚙️"),
