@@ -1883,22 +1883,6 @@ async def error_handle(update: Update, context: CallbackContext) -> None:
         await context.bot.send_message(update.effective_chat.id, "Some error in error handler")
 
 
-async def post_init(application: Application):
-    await application.bot.set_my_commands([
-        BotCommand("/new", "Начать новый диалог 🆕"),
-        BotCommand("/retry", "Перегенерировать предыдущий запрос 🔁"),
-        BotCommand("/mode", "Выбрать режим"),
-        # BotCommand("/balance", "Показать баланс 💰"),
-        BotCommand("/topup", "Пополнить баланс 💳"),
-        BotCommand("/subscription", "Управление подписками 🔔"),
-        BotCommand("/my_payments", "Мои платежи 📋"),
-        BotCommand("/settings", "Настройки ⚙️"),
-        # BotCommand("/role", "Моя роль 🎫"),
-        # BotCommand("/model", "Выбрать модель нейросети 🔍"),
-        BotCommand("/help", "Помощь ❓"),
-    ])
-
-
 def run_bot() -> None:
     global bot_instance
 
@@ -1998,14 +1982,14 @@ async def post_init(application: Application):
         BotCommand("/new", "Начать новый диалог 🆕"),
         BotCommand("/retry", "Перегенерировать предыдущий запрос 🔁"),
         BotCommand("/mode", "Выбрать режим"),
-        BotCommand("/balance", "Показать баланс 💰"),
+        # BotCommand("/balance", "Показать баланс 💰"),
         BotCommand("/topup", "Пополнить баланс 💳"),
         BotCommand("/subscription", "Управление подписками 🔔"),
         BotCommand("/my_payments", "Мои платежи 📋"),
         BotCommand("/settings", "Настройки ⚙️"),
         BotCommand("/help", "Помощь ❓"),
-        BotCommand("/role", "Моя роль 🎫"),
-        BotCommand("/model", "Выбрать модель нейросети 🔍"),
+        # BotCommand("/role", "Моя роль 🎫"),
+        # BotCommand("/model", "Выбрать модель нейросети 🔍"),
     ])
 
     # Добавляем фоновую задачу для проверки платежей через job_queue
