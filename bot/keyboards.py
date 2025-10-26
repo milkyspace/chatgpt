@@ -8,6 +8,7 @@ import time
 from telegram import ReplyKeyboardMarkup, KeyboardButton
 import database
 import config
+from bot.subscription import SubscriptionType
 
 
 class BotKeyboards:
@@ -40,7 +41,14 @@ class BotKeyboards:
             if expires_at > datetime(2100, 1, 1):
                 status_text = emoji.emojize(":green_circle: Подписка активна навсегда")
             else:
-                status_text = emoji.emojize(f":green_circle: Подписка активна до: {dateto} МСК")
+                subName = 'Тестовая подписка'
+                if subscription_info["type"] == SubscriptionType.PRO_LITE:
+                    subName = 'Подписка Pro Lite'
+                elif subscription_info["type"] == SubscriptionType.PRO_PLUS:
+                    subName = 'Подписка Pro Plus'
+                elif subscription_info["type"] == SubscriptionType.PRO_PREMIUM:
+                    subName = 'Подписка Pro Premium'
+                status_text = emoji.emojize(f":green_circle: {subName} активна до: {dateto} МСК")
         else:
             # Если подписка была, но истекла
             if "expires_at" in subscription_info and subscription_info["expires_at"]:
