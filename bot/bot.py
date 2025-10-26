@@ -1905,7 +1905,6 @@ async def handle_main_menu_buttons(update: Update, context: CallbackContext):
         await subscription_handle(update, context)
 
 
-
     elif text == emoji.emojize("Поддержать проект :red_heart:"):
         # Устанавливаем флаги для пожертвования
         context.user_data['is_donation'] = True
@@ -1916,6 +1915,9 @@ async def handle_main_menu_buttons(update: Update, context: CallbackContext):
             "Спасибо! \n\nВведите сумму в рублях:",
             parse_mode='Markdown'
         )
+
+    elif text == emoji.emojize("Выбрать режим :red_heart:"):
+        await show_chat_modes_handle(update, context)
 
     elif text == emoji.emojize("Пригласить :woman_and_man_holding_hands:"):
         await update.message.reply_text(
@@ -2014,6 +2016,12 @@ def run_bot() -> None:
     application.add_handler(MessageHandler(
         filters.TEXT &
         filters.Regex(emoji.emojize("Продлить подписку :money_bag:")) &
+        user_filter,
+        handle_main_menu_buttons
+    ))
+    application.add_handler(MessageHandler(
+        filters.TEXT &
+        filters.Regex(emoji.emojize("Выбрать режим :red_heart:")) &
         user_filter,
         handle_main_menu_buttons
     ))
