@@ -67,7 +67,6 @@ class BotKeyboards:
                 KeyboardButton(emoji.emojize("Поддержать проект :red_heart:"))
             ],
             [
-                KeyboardButton(emoji.emojize("Почему мы? :star:")),
                 KeyboardButton(emoji.emojize("Пригласить :woman_and_man_holding_hands:")),
                 KeyboardButton(emoji.emojize("Помощь :heart_hands:"))
             ]

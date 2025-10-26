@@ -1916,19 +1916,6 @@ async def handle_main_menu_buttons(update: Update, context: CallbackContext):
             parse_mode='Markdown'
         )
 
-    elif "Почему мы?" in text:
-        await update.message.reply_text(
-            "🤔 <b>Почему выбирают нас?</b>\n\n"
-            "✅ <b>Работаем в РФ</b> - полная доступность\n"
-            "✅ <b>Стабильная работа</b> - минимум сбоев\n"
-            "✅ <b>Поддержка 24/7</b> - всегда на связи\n"
-            "✅ <b>Лучшие модели</b> - GPT-5 и другие\n"
-            "✅ <b>Голосовые сообщения</b> - удобный ввод\n"
-            "✅ <b>Генерация изображений</b> - DALL-E 2 и 3\n\n"
-            "Присоединяйтесь к тысячам довольных пользователей!",
-            parse_mode=ParseMode.HTML
-        )
-
     elif text == emoji.emojize("Пригласить :woman_and_man_holding_hands:"):
         await update.message.reply_text(
             "👥 <b>Пригласите друзей!</b>\n\n"
@@ -2032,12 +2019,6 @@ def run_bot() -> None:
     application.add_handler(MessageHandler(
         filters.TEXT &
         filters.Regex(emoji.emojize("Поддержать проект :red_heart:")) &
-        user_filter,
-        handle_main_menu_buttons
-    ))
-    application.add_handler(MessageHandler(
-        filters.TEXT &
-        filters.Regex(emoji.emojize("Почему мы? :star:")) &
         user_filter,
         handle_main_menu_buttons
     ))
