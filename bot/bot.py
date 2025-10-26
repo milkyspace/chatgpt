@@ -805,18 +805,6 @@ async def subscription_handle(update: Update, context: CallbackContext):
         user_id = user.id
         db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        subscription_info = db.get_user_subscription_info(user_id)
-
-        text = ""
-        if subscription_info["is_active"]:
-            expires_str = subscription_info["expires_at"].strftime("%d.%m.%Y")
-            text += f"📋 <b>Текущая подписка:</b> {subscription_info['type'].upper()}\n"
-            text += f"📅 <b>Действует до:</b> {expires_str}\n"
-            if subscription_info["type"] == "pro_lite":
-                text += f"📊 <b>Запросы использовано:</b> {subscription_info['requests_used']}/1000\n"
-                text += f"🎨 <b>Изображения использовано:</b> {subscription_info['images_used']}/20\n"
-            text += "\n"
-
         subscriptions = [
             {
                 "name": "Pro Lite",
@@ -840,6 +828,24 @@ async def subscription_handle(update: Update, context: CallbackContext):
                 "features": "Безлимитные запросы • До 32000 символов"
             }
         ]
+
+        subscription_info = db.get_user_subscription_info(user_id)
+
+        text = ""
+        if subscription_info["is_active"]:
+            expires_str = subscription_info["expires_at"].strftime("%d.%m.%Y")
+            text += f"📋 <b>Текущая подписка:</b> {subscription_info['type'].upper()}\n"
+            text += f"📅 <b>Действует до:</b> {expires_str}\n"
+            if subscription_info["type"] == "pro_lite":
+                text += f"📊 <b>Запросы использовано:</b> {subscription_info['requests_used']}/15\n"
+                text += f"🎨 <b>Изображения использовано:</b> {subscription_info['images_used']}/3\n"
+            elif subscription_info["type"] == "pro_plus":
+                text += f"📊 <b>Запросы использовано:</b> {subscription_info['requests_used']}/1000\n"
+                text += f"🎨 <b>Изображения использовано:</b> {subscription_info['images_used']}/20\n"
+            elif subscription_info["type"] == "pro_premium":
+                text += f"📊 <b>Запросы использовано:</b> {subscription_info['requests_used']}/1000\n"
+                text += f"🎨 <b>Изображения использовано:</b> {subscription_info['images_used']}/20\n"
+            text += "\n"
 
         text += "🔔 <b>Доступные подписки</b>\n\n"
 

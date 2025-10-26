@@ -286,12 +286,12 @@ class Database:
                                "claude-3-haiku-20240307", 'whisper']:
 
                 # Для Pro Lite проверяем лимит запросов
-                if subscription_info["type"] == SubscriptionType.FREE and subscription_info["requests_used"] >= 1000:
+                if subscription_info["type"] == SubscriptionType.FREE and subscription_info["requests_used"] >= 10:
                     # Лимит исчерпан, списываем с баланса
-                    pass  # Переходим к списанию с баланса
-                elif subscription_info["type"] == SubscriptionType.PRO_LITE and subscription_info["requests_used"] >= 10:
+                    return  # Переходим к списанию с баланса
+                elif subscription_info["type"] == SubscriptionType.PRO_LITE and subscription_info["requests_used"] >= 1000:
                     # Лимит исчерпан, списываем с баланса
-                    pass  # Переходим к списанию с баланса
+                    return  # Переходим к списанию с баланса
                 else:
                     # Обновляем использование подписки
                     self.update_subscription_usage(user_id, request_used=True)
