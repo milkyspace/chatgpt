@@ -66,7 +66,7 @@ HELP_MESSAGE = """<b>Команды:</b>
 /settings – Настройки ⚙️
 /help – Помощь ❓
 
-🎤 Вы можете отправлять <b>голосовые Сообщения</b> вместо текста
+🎤 Вы можете отправлять <b>голосовые сообщения</b> вместо текста
 
 <blockquote>
 1. Чат помнит контекст и предыдущие сообщения 10 минут. Чтобы начать заново — /new
@@ -807,8 +807,7 @@ async def subscription_handle(update: Update, context: CallbackContext):
 
         subscription_info = db.get_user_subscription_info(user_id)
 
-        text = "🔔 <b>Доступные подписки</b>\n\n"
-
+        text = ""
         if subscription_info["is_active"]:
             expires_str = subscription_info["expires_at"].strftime("%d.%m.%Y")
             text += f"📋 <b>Текущая подписка:</b> {subscription_info['type'].upper()}\n"
@@ -841,6 +840,8 @@ async def subscription_handle(update: Update, context: CallbackContext):
                 "features": "Безлимитные запросы • До 32000 символов"
             }
         ]
+
+        text += "🔔 <b>Доступные подписки</b>\n\n"
 
         keyboard = []
         for sub in subscriptions:

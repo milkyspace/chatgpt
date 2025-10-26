@@ -62,8 +62,6 @@ class BotKeyboards:
         keyboard.extend([
             [
                 KeyboardButton(emoji.emojize("Продлить подписку :money_bag:")),
-            ],
-            [
                 KeyboardButton(emoji.emojize("Поддержать проект :red_heart:"))
             ],
             [
