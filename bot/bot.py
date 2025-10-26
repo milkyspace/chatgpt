@@ -39,6 +39,8 @@ import json
 from json import JSONEncoder
 import io
 import requests
+import emoji
+from keyboards import BotKeyboards
 from telegram import InputFile
 import pytz
 
@@ -202,7 +204,9 @@ async def start_handle(update: Update, context: CallbackContext):
         reply_text += "Или /topup чтобы пополнить баланс\n\n"
         reply_text += HELP_MESSAGE
 
-        await update.message.reply_text(reply_text, parse_mode=ParseMode.HTML)
+        # Отправляем клавиатуру даже если нет подписки
+        reply_markup = await BotKeyboards.get_main_keyboard(user_id)
+        await update.message.reply_text(reply_text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
         return
 
     reply_text = "👋 Привет! Мы <b>Ducks GPT</b>\n"
@@ -214,7 +218,9 @@ async def start_handle(update: Update, context: CallbackContext):
     reply_text += "- 3 генерации изображения\n\n"
     reply_text += HELP_MESSAGE
 
-    await update.message.reply_text(reply_text, parse_mode=ParseMode.HTML)
+    # Отправляем сообщение с клавиатурой
+    reply_markup = await BotKeyboards.get_main_keyboard(user_id)
+    await update.message.reply_text(reply_text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
 
 async def help_handle(update: Update, context: CallbackContext):
@@ -1882,6 +1888,99 @@ async def error_handle(update: Update, context: CallbackContext) -> None:
         logger.error("Error in error handler: %s", handler_error)
         await context.bot.send_message(update.effective_chat.id, "Some error in error handler")
 
+
+# Добавляем обработчики текстовых сообщений для кнопок
+async def handle_main_menu_buttons(update: Update, context: CallbackContext):
+    """
+    Обрабатывает нажатия на кнопки главного меню
+    """
+    await register_user_if_not_exists(update, context, update.message.from_user)
+    user_id = update.message.from_user.id
+    db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+    text = update.message.text
+
+    if text == emoji.emojize("Продлить подписку :money_bag:"):
+        await subscription_handle(update, context)
+
+    elif text == emoji.emojize("Как подключить :gear:"):
+        await help_group_chat_handle(update, context)
+
+    elif text == emoji.emojize("Подарить подписку :wrapped_gift:"):
+        await update.message.reply_text(
+            "Функция 'Подарить подписку' в разработке. Скоро будет доступна!",
+            parse_mode=ParseMode.HTML
+        )
+
+    elif text == emoji.emojize("Поддержать проект :red_heart:"):
+        context.user_data['is_donation'] = True
+        await topup_handle(update, context)
+
+    elif text == emoji.emojize("Почему мы? :star:"):
+        await update.message.reply_text(
+            "🤔 <b>Почему выбирают нас?</b>\n\n"
+            "✅ <b>Работаем в РФ</b> - полная доступность\n"
+            "✅ <b>Стабильная работа</b> - минимум сбоев\n"
+            "✅ <b>Поддержка 24/7</b> - всегда на связи\n"
+            "✅ <b>Лучшие модели</b> - GPT-4, Claude и другие\n"
+            "✅ <b>Голосовые сообщения</b> - удобный ввод\n"
+            "✅ <b>Генерация изображений</b> - DALL-E 2 и 3\n\n"
+            "Присоединяйтесь к тысячам довольных пользователей!",
+            parse_mode=ParseMode.HTML
+        )
+
+    elif text == emoji.emojize("Пригласить :woman_and_man_holding_hands:"):
+        await update.message.reply_text(
+            "👥 <b>Пригласите друзей!</b>\n\n"
+            "Поделитесь ссылкой на бота с друзьями:\n"
+            f"https://t.me/{context.bot.username}\n\n"
+            "Чем больше друзей - тем лучше!",
+            parse_mode=ParseMode.HTML
+        )
+
+    elif text == emoji.emojize("Помощь :heart_hands:"):
+        await help_handle(update, context)
+
+    elif text == emoji.emojize("Админ-панель :smiling_face_with_sunglasses:"):
+        if user_id in config.roles.get('admin', []):
+            await show_admin_panel(update, context)
+        else:
+            await update.message.reply_text("У вас нет доступа к админ-панели.")
+
+    elif emoji.emojize(":green_circle:") in text or emoji.emojize(":red_circle:") in text:
+        # Нажата кнопка статуса подписки - показываем детальную информацию
+        await show_balance_handle(update, context)
+
+    else:
+        # Если сообщение не соответствует ни одной кнопке, обрабатываем как обычное сообщение
+        await message_handle(update, context)
+
+
+# Добавляем функцию для отображения админ-панели
+async def show_admin_panel(update: Update, context: CallbackContext):
+    """
+    Показывает админ-панель
+    """
+    text = "🛠️ <b>Админ-панель</b>\n\nВыберите действие:"
+    reply_markup = BotKeyboards.get_admin_keyboard()
+    await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+
+# Добавляем обработчик для кнопки "Назад"
+async def handle_back_button(update: Update, context: CallbackContext):
+    """
+    Обрабатывает кнопку "Назад" - возвращает в главное меню
+    """
+    await register_user_if_not_exists(update, context, update.message.from_user)
+    user_id = update.message.from_user.id
+    db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+    reply_markup = await BotKeyboards.get_main_keyboard(user_id)
+    await update.message.reply_text(
+        "Возврат в главное меню...",
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML
+    )
 
 def run_bot() -> None:
     global bot_instance
