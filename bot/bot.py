@@ -1271,11 +1271,30 @@ async def create_subscription_yookassa_payment(user_id: int, subscription_type: 
     price = SUBSCRIPTION_PRICES[subscription_type]
 
     try:
+        description = f"Подписка {subscription_type.name.replace('_', ' ').title()}"
         payment = Payment.create({
             "amount": {"value": price, "currency": "RUB"},
             "confirmation": {"type": "redirect", "return_url": "https://t.me/gptducksbot"},
             "capture": True,
-            "description": f"Подписка {subscription_type.name.replace('_', ' ').title()}",
+            "description": description,
+            "receipt": {
+                "customer": {
+                    "email": "liliatchesnokova@gmail.com",
+                },
+                "items": [
+                    {
+                        "description": description,
+                        "quantity": "1.00",
+                        "amount": {
+                            "value": price,
+                            "currency": "RUB"
+                        },
+                        "vat_code": "1",
+                        "payment_mode": "full_payment",
+                        "payment_subject": "commodity",
+                    },
+                ]
+            },
             "metadata": {"user_id": user_id, "subscription_type": subscription_type.value}
         })
 
