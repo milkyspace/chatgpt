@@ -1256,7 +1256,7 @@ class SubscriptionHandlers(BotHandlers):
             usage_text = self._format_usage_info(subscription_info)
             text += usage_text + "\n"
 
-        text += "🔔 <b>Доступные подписки</b>\n\n"
+        text += "\n🔔 <b>Доступные подписки</b>\n"
         text += self._format_available_subscriptions()
 
         return text
