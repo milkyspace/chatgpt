@@ -766,7 +766,7 @@ class MessageHandlers(BotHandlers):
             await update.message.reply_text(error_text)
 
     async def voice_message_handle(self, update: Update, context: CallbackContext, message: Optional[str] = None) -> \
-    Optional[str]:
+            Optional[str]:
         """Обрабатывает голосовые сообщения."""
         if not await self.is_bot_mentioned(update, context):
             return
@@ -945,6 +945,273 @@ class ChatModeHandlers(BotHandlers):
             f"{config.chat_modes[chat_mode]['welcome_message']}",
             parse_mode=ParseMode.HTML
         )
+
+
+class SettingsHandlers(BotHandlers):
+    """Класс для обработки настроек."""
+
+    def get_settings_menu(self, user_id: int):
+        """
+        Создает меню настроек.
+        """
+        text = "⚙️ Настройки:"
+
+        keyboard = [
+            [InlineKeyboardButton("🧠 Модель нейросети", callback_data='model-ai_model')],
+            [InlineKeyboardButton("🎨 Модель художника", callback_data='model-artist_model')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        return text, reply_markup
+
+    async def settings_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает команду /settings."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        if await self.is_previous_message_not_answered_yet(update, context):
+            return
+
+        user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        text, reply_markup = self.get_settings_menu(user_id)
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+    async def set_settings_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает выбор настроек."""
+        await self.register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
+        user_id = update.callback_query.from_user.id
+
+        query = update.callback_query
+        await query.answer()
+
+        _, model_key = query.data.split("|")
+        self.db.set_user_attribute(user_id, "current_model", model_key)
+
+        await self.display_model_info(query, user_id, context)
+
+    async def display_model_info(self, query, user_id, context):
+        """Отображает информацию о модели."""
+        current_model = self.db.get_user_attribute(user_id, "current_model")
+        model_info = config.models["info"][current_model]
+        description = model_info["description"]
+        scores = model_info["scores"]
+
+        details_text = f"{description}\n\n"
+        for score_key, score_value in scores.items():
+            details_text += f"{'🟢' * score_value}{'⚪️' * (5 - score_value)} – {score_key}\n"
+
+        details_text += "\nВыберите <b>модель</b>:"
+
+        buttons = []
+        claude_buttons = []
+        other_buttons = []
+
+        for model_key in config.models["available_text_models"]:
+            title = config.models["info"][model_key]["name"]
+            if model_key == current_model:
+                title = "✅ " + title
+
+            if "claude" in model_key.lower():
+                callback_data = f"claude-model-set_settings|{model_key}"
+                claude_buttons.append(InlineKeyboardButton(title, callback_data=callback_data))
+            else:
+                callback_data = f"model-set_settings|{model_key}"
+                other_buttons.append(InlineKeyboardButton(title, callback_data=callback_data))
+
+        half_size = len(other_buttons) // 2
+        first_row = other_buttons[:half_size]
+        second_row = other_buttons[half_size:]
+        back_button = [InlineKeyboardButton("⬅️", callback_data='model-back_to_settings')]
+
+        reply_markup = InlineKeyboardMarkup([first_row, second_row, claude_buttons, back_button])
+
+        try:
+            await query.edit_message_text(text=details_text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+        except telegram.error.BadRequest as e:
+            if "Message is not modified" in str(e):
+                pass
+
+    async def model_settings_handler(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает настройки моделей."""
+        query = update.callback_query
+        await query.answer()
+
+        data = query.data
+        user_id = query.from_user.id
+
+        if data == 'model-ai_model':
+            current_model = self.db.get_user_attribute(user_id, "current_model")
+            text = f"{config.models['info'][current_model]['description']}\n\n"
+
+            score_dict = config.models["info"][current_model]["scores"]
+            for score_key, score_value in score_dict.items():
+                text += f"{'🟢' * score_value}{'⚪️' * (5 - score_value)} – {score_key}\n"
+
+            text += "\nSelect <b>model</b>:\n"
+
+            buttons = []
+            claude_buttons = []
+            other_buttons = []
+
+            for model_key in config.models["available_text_models"]:
+                title = config.models["info"][model_key]["name"]
+                if model_key == current_model:
+                    title = "✅ " + title
+
+                if "claude" in model_key.lower():
+                    callback_data = f"claude-model-set_settings|{model_key}"
+                    claude_buttons.append(InlineKeyboardButton(title, callback_data=callback_data))
+                else:
+                    callback_data = f"model-set_settings|{model_key}"
+                    other_buttons.append(InlineKeyboardButton(title, callback_data=callback_data))
+
+            half_size = len(other_buttons) // 2
+            first_row = other_buttons[:half_size]
+            second_row = other_buttons[half_size:]
+            back_button = [InlineKeyboardButton("⬅️", callback_data='model-back_to_settings')]
+
+            reply_markup = InlineKeyboardMarkup([first_row, second_row, claude_buttons, back_button])
+
+            await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+
+        elif data.startswith('claude-model-set_settings|'):
+            if config.anthropic_api_key is None or config.anthropic_api_key == "":
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text="This bot does not have the Anthropic models available :(",
+                    parse_mode='Markdown'
+                )
+                return
+            _, model_key = data.split("|")
+            self.db.set_user_attribute(user_id, "current_model", model_key)
+            await self.display_model_info(query, user_id, context)
+
+        elif data.startswith('model-set_settings|'):
+            _, model_key = data.split("|")
+            if "claude" in model_key.lower() and (config.anthropic_api_key is None or config.anthropic_api_key == ""):
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text="This bot does not have the Anthropic models available :(",
+                    parse_mode='Markdown'
+                )
+                return
+            self.db.set_user_attribute(user_id, "current_model", model_key)
+            await self.display_model_info(query, user_id, context)
+
+        elif data.startswith('model-artist-set_model|'):
+            _, model_key = data.split("|")
+            await self.switch_between_artist_handler(query, user_id, model_key)
+
+        elif data == 'model-artist_model':
+            await self.artist_model_settings_handler(query, user_id)
+
+        elif data.startswith('model-artist-set_model|'):
+            _, model_key = data.split("|")
+            preferences = self.db.get_user_attribute(user_id, "image_preferences")
+            preferences["model"] = model_key
+            self.db.set_user_attribute(user_id, "image_preferences", preferences)
+            await self.artist_model_settings_handler(query, user_id)
+
+        elif data.startswith("model-artist-set_images|"):
+            _, n_images = data.split("|")
+            preferences = self.db.get_user_attribute(user_id, "image_preferences")
+            preferences["n_images"] = int(n_images)
+            self.db.set_user_attribute(user_id, "image_preferences", preferences)
+            await self.artist_model_settings_handler(query, user_id)
+
+        elif data.startswith("model-artist-set_resolution|"):
+            _, resolution = data.split("|")
+            preferences = self.db.get_user_attribute(user_id, "image_preferences")
+            preferences["resolution"] = resolution
+            self.db.set_user_attribute(user_id, "image_preferences", preferences)
+            await self.artist_model_settings_handler(query, user_id)
+
+        elif data.startswith("model-artist-set_quality|"):
+            _, quality = data.split("|")
+            preferences = self.db.get_user_attribute(user_id, "image_preferences")
+            preferences["quality"] = quality
+            self.db.set_user_attribute(user_id, "image_preferences", preferences)
+            await self.artist_model_settings_handler(query, user_id)
+
+        elif data == 'model-back_to_settings':
+            text, reply_markup = self.get_settings_menu(user_id)
+            await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+
+    async def artist_model_settings_handler(self, query, user_id):
+        """Обрабатывает настройки модели художника."""
+        current_preferences = self.db.get_user_attribute(user_id, "image_preferences")
+        current_model = current_preferences.get("model", "dalle-2")
+
+        model_info = config.models["info"][current_model]
+        description = model_info["description"]
+        scores = model_info["scores"]
+
+        details_text = f"{description}\n\n"
+        for score_key, score_value in scores.items():
+            details_text += f"{'🟢' * score_value}{'⚪️' * (5 - score_value)} – {score_key}\n"
+
+        buttons = []
+        for model_key in config.models["available_image_models"]:
+            title = config.models["info"][model_key]["name"]
+            if model_key == current_model:
+                title = "✅ " + title
+            buttons.append(InlineKeyboardButton(title, callback_data=f"model-artist-set_model|{model_key}"))
+
+        if current_model == "dalle-2":
+            details_text += "\nFor this model, choose the number of images to generate and the resolution:"
+            n_images = current_preferences.get("n_images", 1)
+            images_buttons = [
+                InlineKeyboardButton(
+                    f"✅ {i} image" if i == n_images and i == 1 else f"✅ {i} images" if i == n_images else f"{i} image" if i == 1 else f"{i} images",
+                    callback_data=f"model-artist-set_images|{i}")
+                for i in range(1, 4)
+            ]
+            current_resolution = current_preferences.get("resolution", "1024x1024")
+            resolution_buttons = [
+                InlineKeyboardButton(f"✅ {res_key}" if res_key == current_resolution else f"{res_key}",
+                                     callback_data=f"model-artist-set_resolution|{res_key}")
+                for res_key in config.models["info"]["dalle-2"]["resolutions"].keys()
+            ]
+            keyboard = [buttons] + [images_buttons] + [resolution_buttons]
+
+        elif current_model == "dalle-3":
+            details_text += "\nFor this model, choose the quality of the images and the resolution:"
+            current_quality = current_preferences.get("quality", "standard")
+            quality_buttons = [
+                InlineKeyboardButton(f"✅ {quality_key}" if quality_key == current_quality else f"{quality_key}",
+                                     callback_data=f"model-artist-set_quality|{quality_key}")
+                for quality_key in config.models["info"]["dalle-3"]["qualities"].keys()
+            ]
+            current_resolution = current_preferences.get("resolution", "1024x1024")
+            resolution_buttons = [
+                InlineKeyboardButton(f"✅ {res_key}" if res_key == current_resolution else f"{res_key}",
+                                     callback_data=f"model-artist-set_resolution|{res_key}")
+                for res_key in config.models["info"]["dalle-3"]["qualities"][current_quality]["resolutions"].keys()
+            ]
+            keyboard = [buttons] + [quality_buttons] + [resolution_buttons]
+        else:
+            keyboard = [buttons]
+
+        keyboard.append([InlineKeyboardButton("⬅️", callback_data='model-back_to_settings')])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        try:
+            await query.edit_message_text(text=details_text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+        except telegram.error.BadRequest as e:
+            if "Message is not modified" in str(e):
+                pass
+
+    async def switch_between_artist_handler(self, query, user_id, model_key):
+        """Переключает между моделями художника."""
+        preferences = self.db.get_user_attribute(user_id, "image_preferences")
+        preferences["model"] = model_key
+        if model_key == "dalle-2":
+            preferences["quality"] = "standard"
+        elif model_key == "dalle-3":
+            preferences["n_images"] = 1
+        preferences["resolution"] = "1024x1024"
+        self.db.set_user_attribute(user_id, "image_preferences", preferences)
+        await self.artist_model_settings_handler(query, user_id)
 
 
 class SubscriptionHandlers(BotHandlers):
@@ -1148,6 +1415,44 @@ class SubscriptionHandlers(BotHandlers):
             [InlineKeyboardButton("⬅️ Назад", callback_data="subscription_back")]
         ]
         return InlineKeyboardMarkup(keyboard)
+
+    async def my_payments_handle(self, update: Update, context: CallbackContext) -> None:
+        """Показывает статус pending платежей пользователя"""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        pending_payments = self.db.get_user_pending_payments(user_id)
+
+        if not pending_payments:
+            await update.message.reply_text(
+                "У вас нет ожидающих платежей.",
+                parse_mode=ParseMode.HTML
+            )
+            return
+
+        text = "📋 <b>Ваши ожидающие платежи:</b>\n\n"
+
+        for payment in pending_payments:
+            amount = payment["amount"]
+            payment_id = payment["payment_id"]
+            status = payment["status"]
+            created_at = payment["created_at"].strftime("%d.%m.%Y %H:%M")
+
+            status_emoji = {
+                "pending": "⏳",
+                "waiting_for_capture": "🔄",
+                "succeeded": "✅",
+                "canceled": "❌"
+            }.get(status, "❓")
+
+            text += f"{status_emoji} <b>{amount} ₽</b> - {status}\n"
+            text += f"   ID: <code>{payment_id}</code>\n"
+            text += f"   Создан: {created_at}\n\n"
+
+        text += "Платежи проверяются автоматически каждые 30 секунд."
+
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
 class ImageHandlers(BotHandlers):
@@ -1476,6 +1781,7 @@ def run_bot() -> None:
     subscription_handlers = SubscriptionHandlers(db)
     image_handlers = ImageHandlers(db)
     chat_mode_handlers = ChatModeHandlers(db)
+    settings_handlers = SettingsHandlers(db)
     message_handlers = MessageHandlers(db, subscription_handlers, chat_mode_handlers)
 
     # Настраиваем фильтр пользователей
@@ -1486,38 +1792,43 @@ def run_bot() -> None:
         user_ids = [x for x in any_ids if x > 0]
         group_ids = [x for x in any_ids if x < 0]
         user_filter = (filters.User(username=usernames) |
-                       filters.User(user_id=user_ids) |
-                       filters.Chat(chat_id=group_ids))
+                      filters.User(user_id=user_ids) |
+                      filters.Chat(chat_id=group_ids))
 
     # Добавляем обработчики команд
     application.add_handler(CommandHandler("start", message_handlers.start_handle, filters=user_filter))
     application.add_handler(CommandHandler("help", message_handlers.help_handle, filters=user_filter))
-    application.add_handler(
-        CommandHandler("help_group_chat", message_handlers.help_group_chat_handle, filters=user_filter))
+    application.add_handler(CommandHandler("help_group_chat", message_handlers.help_group_chat_handle, filters=user_filter))
     application.add_handler(CommandHandler("retry", message_handlers.retry_handle, filters=user_filter))
     application.add_handler(CommandHandler("new", message_handlers.new_dialog_handle, filters=user_filter))
     application.add_handler(CommandHandler("cancel", message_handlers.cancel_handle, filters=user_filter))
     application.add_handler(CommandHandler("mode", chat_mode_handlers.show_chat_modes_handle, filters=user_filter))
+    application.add_handler(CommandHandler("settings", settings_handlers.settings_handle, filters=user_filter))
+    application.add_handler(CommandHandler("my_payments", subscription_handlers.my_payments_handle, filters=user_filter))
 
     # Добавляем обработчики сообщений
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & user_filter,
-                                           message_handlers.message_handle))
+                                         message_handlers.message_handle))
     application.add_handler(MessageHandler(filters.VOICE & user_filter,
-                                           message_handlers.voice_message_handle))
+                                         message_handlers.voice_message_handle))
 
     # Добавляем обработчики подписок
-    application.add_handler(
-        CommandHandler("subscription", subscription_handlers.subscription_handle, filters=user_filter))
+    application.add_handler(CommandHandler("subscription", subscription_handlers.subscription_handle, filters=user_filter))
     application.add_handler(CallbackQueryHandler(subscription_handlers.subscription_callback_handle,
-                                                 pattern='^subscribe\\|'))
+                                               pattern='^subscribe\\|'))
     application.add_handler(CallbackQueryHandler(subscription_handlers.subscription_handle,
-                                                 pattern='^subscription_back$'))
+                                               pattern='^subscription_back$'))
 
     # Добавляем обработчики режимов чата
     application.add_handler(CallbackQueryHandler(chat_mode_handlers.show_chat_modes_callback_handle,
-                                                 pattern="^show_chat_modes"))
+                                               pattern="^show_chat_modes"))
     application.add_handler(CallbackQueryHandler(chat_mode_handlers.set_chat_mode_handle,
-                                                 pattern="^set_chat_mode"))
+                                               pattern="^set_chat_mode"))
+
+    # Добавляем обработчики настроек
+    application.add_handler(CallbackQueryHandler(settings_handlers.set_settings_handle, pattern="^set_settings"))
+    application.add_handler(CallbackQueryHandler(settings_handlers.model_settings_handler, pattern='^model-'))
+    application.add_handler(CallbackQueryHandler(settings_handlers.model_settings_handler, pattern='^claude-model-'))
 
     # Добавляем обработчик ошибок
     application.add_error_handler(error_handle)
