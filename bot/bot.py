@@ -592,6 +592,43 @@ class MessageHandlers(BotHandlers):
             text = "🥲 Unfortunately, message <b>editing</b> is not supported"
             await update.edited_message.reply_text(text, parse_mode=ParseMode.HTML)
 
+    async def new_dialog_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает команду /new для начала нового диалога."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        # Сбрасываем модель с vision на текстовую по умолчанию
+        current_model = self.db.get_user_attribute(user_id, "current_model")
+        if current_model == "gpt-4-vision-preview":
+            self.db.set_user_attribute(user_id, "current_model", "gpt-4-turbo-2024-04-09")
+
+        try:
+            self.db.start_new_dialog(user_id)
+            await update.message.reply_text("Начинаем новый диалог ✅")
+
+            # Отправляем приветственное сообщение для текущего режима чата
+            chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
+            await update.message.reply_text(
+                f"{config.chat_modes[chat_mode]['welcome_message']}",
+                parse_mode=ParseMode.HTML
+            )
+        except PermissionError:
+            await update.message.reply_text(
+                "❌ <b>Для начала нового диалога требуется активная подписка</b>\n\n"
+                "Используйте /subscription для управления подписками",
+                parse_mode=ParseMode.HTML
+            )
+
+    async def help_group_chat_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает команду /help_group_chat."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        text = HELP_GROUP_CHAT_MESSAGE.format(bot_username="@" + context.bot.username)
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
     async def cancel_handle(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает команду /cancel."""
         await self.register_user_if_not_exists(update, context, update.message.from_user)
@@ -919,6 +956,109 @@ class ImageHandlers(BotHandlers):
         await update.message.reply_text(error_text, parse_mode=ParseMode.HTML)
 
 
+class ChatModeHandlers(BotHandlers):
+    """Класс для обработки режимов чата."""
+
+    def get_chat_mode_menu(self, page_index: int) -> tuple[str, InlineKeyboardMarkup]:
+        """
+        Создает меню выбора режима чата.
+
+        Args:
+            page_index: Индекс страницы
+
+        Returns:
+            tuple: Текст сообщения и клавиатура
+        """
+        n_chat_modes_per_page = config.n_chat_modes_per_page
+        text = f"Выберите <b>режим чата</b> (Доступно {len(config.chat_modes)} режимов):"
+
+        chat_mode_keys = list(config.chat_modes.keys())
+        page_chat_mode_keys = chat_mode_keys[
+                              page_index * n_chat_modes_per_page:(page_index + 1) * n_chat_modes_per_page
+                              ]
+
+        keyboard = []
+        row = []
+        for chat_mode_key in page_chat_mode_keys:
+            name = config.chat_modes[chat_mode_key]["name"]
+            row.append(InlineKeyboardButton(name, callback_data=f"set_chat_mode|{chat_mode_key}"))
+            if len(row) == 2:
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
+
+        # Добавляем пагинацию если нужно
+        if len(chat_mode_keys) > n_chat_modes_per_page:
+            is_first_page = (page_index == 0)
+            is_last_page = ((page_index + 1) * n_chat_modes_per_page >= len(chat_mode_keys))
+
+            pagination_row = []
+            if not is_first_page:
+                pagination_row.append(InlineKeyboardButton("«", callback_data=f"show_chat_modes|{page_index - 1}"))
+            if not is_last_page:
+                pagination_row.append(InlineKeyboardButton("»", callback_data=f"show_chat_modes|{page_index + 1}"))
+            if pagination_row:
+                keyboard.append(pagination_row)
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        return text, reply_markup
+
+    async def show_chat_modes_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает команду /mode."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        if await self.is_previous_message_not_answered_yet(update, context):
+            return
+
+        user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        text, reply_markup = self.get_chat_mode_menu(0)
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+    async def show_chat_modes_callback_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает callback пагинации режимов чата."""
+        await self.register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
+        if await self.is_previous_message_not_answered_yet(update.callback_query, context):
+            return
+
+        user_id = update.callback_query.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        query = update.callback_query
+        await query.answer()
+
+        page_index = int(query.data.split("|")[1])
+        if page_index < 0:
+            return
+
+        text, reply_markup = self.get_chat_mode_menu(page_index)
+        try:
+            await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+        except telegram.error.BadRequest as e:
+            if not str(e).startswith("Message is not modified"):
+                raise
+
+    async def set_chat_mode_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает выбор режима чата."""
+        await self.register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
+        user_id = update.callback_query.from_user.id
+
+        query = update.callback_query
+        await query.answer()
+
+        chat_mode = query.data.split("|")[1]
+
+        self.db.set_user_attribute(user_id, "current_chat_mode", chat_mode)
+        self.db.start_new_dialog(user_id)
+
+        await context.bot.send_message(
+            update.callback_query.message.chat.id,
+            f"{config.chat_modes[chat_mode]['welcome_message']}",
+            parse_mode=ParseMode.HTML
+        )
+
+
 # Функции для работы с платежами
 async def create_subscription_yookassa_payment(user_id: int, subscription_type: SubscriptionType,
                                                context: CallbackContext) -> str:
@@ -1147,6 +1287,7 @@ def run_bot() -> None:
     message_handlers = MessageHandlers(db)
     subscription_handlers = SubscriptionHandlers(db)
     image_handlers = ImageHandlers(db)
+    chat_mode_handlers = ChatModeHandlers(db)
 
     # Настраиваем фильтр пользователей
     user_filter = filters.ALL
@@ -1156,8 +1297,8 @@ def run_bot() -> None:
         user_ids = [x for x in any_ids if x > 0]
         group_ids = [x for x in any_ids if x < 0]
         user_filter = (filters.User(username=usernames) |
-                       filters.User(user_id=user_ids) |
-                       filters.Chat(chat_id=group_ids))
+                      filters.User(user_id=user_ids) |
+                      filters.Chat(chat_id=group_ids))
 
     # Добавляем обработчики команд
     application.add_handler(CommandHandler("start", message_handlers.start_handle, filters=user_filter))
@@ -1165,18 +1306,27 @@ def run_bot() -> None:
     application.add_handler(CommandHandler("retry", message_handlers.retry_handle, filters=user_filter))
     application.add_handler(CommandHandler("new", message_handlers.new_dialog_handle, filters=user_filter))
     application.add_handler(CommandHandler("cancel", message_handlers.cancel_handle, filters=user_filter))
+    application.add_handler(CommandHandler("mode", chat_mode_handlers.show_chat_modes_handle, filters=user_filter))
 
     # Добавляем обработчики сообщений
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & user_filter,
-                                           message_handlers.message_handle))
+                                         message_handlers.message_handle))
     application.add_handler(MessageHandler(filters.VOICE & user_filter,
-                                           message_handlers.voice_message_handle))
+                                         message_handlers.voice_message_handle))
 
     # Добавляем обработчики подписок
-    application.add_handler(
-        CommandHandler("subscription", subscription_handlers.subscription_handle, filters=user_filter))
+    application.add_handler(CommandHandler("subscription", subscription_handlers.subscription_handle, filters=user_filter))
     application.add_handler(CallbackQueryHandler(subscription_handlers.subscription_callback_handle,
-                                                 pattern='^subscribe\\|'))
+                                               pattern='^subscribe\\|'))
+
+    # Добавляем обработчики режимов чата
+    application.add_handler(CallbackQueryHandler(chat_mode_handlers.show_chat_modes_callback_handle,
+                                               pattern="^show_chat_modes"))
+    application.add_handler(CallbackQueryHandler(chat_mode_handlers.set_chat_mode_handle,
+                                               pattern="^set_chat_mode"))
+
+    application.add_handler(
+        CommandHandler("help_group_chat", message_handlers.help_group_chat_handle, filters=user_filter))
 
     # Добавляем обработчик ошибок
     application.add_error_handler(error_handle)
