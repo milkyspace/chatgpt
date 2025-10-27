@@ -151,6 +151,7 @@ class ChatGPT:
         n_dialog_messages_before = len(dialog_messages)
         answer = None
         n_input_tokens, n_output_tokens, n_first_dialog_messages_removed = 0, 0, 0
+
         while answer is None:
             try:
                 if self.is_claude_model:
@@ -181,29 +182,48 @@ class ChatGPT:
                     if not answer.strip():
                         raise ValueError("Received empty response from Claude API.")
 
+
                 else:
 
-                    if self.model in {"gpt-3.5-turbo-16k", "gpt-3.5-turbo", "gpt-4", "gpt-4-1106-preview", "gpt-4-turbo-2024-04-09", "gpt-4o"}:
+                    if self.model in {"gpt-3.5-turbo-16k", "gpt-3.5-turbo", "gpt-4", "gpt-4-1106-preview",
+                                      "gpt-4-turbo-2024-04-09", "gpt-4o"}:
+
                         messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
-                        
+
                         r_gen = await openai.ChatCompletion.acreate(
+
                             model=self.model,
+
                             messages=messages,
+
                             stream=True,
+
                             **OPENAI_COMPLETION_OPTIONS
+
                         )
 
                         answer = ""
+
                         async for r_item in r_gen:
+
                             delta = r_item.choices[0].delta
 
                             if "content" in delta:
                                 answer += delta.content
-                                n_input_tokens, n_output_tokens = self._count_tokens_from_messages(messages, answer, model=self.model)
-                                n_first_dialog_messages_removed = 0  #n_dialog_messages_before - len(dialog_messages) #repo commit
 
-                                yield "not_finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
-                                
+                                n_input_tokens, n_output_tokens = self._count_tokens_from_messages(messages, answer,
+                                                                                                   model=self.model)
+
+                                n_first_dialog_messages_removed = n_dialog_messages_before - len(dialog_messages)
+
+                                yield "not_finished", answer, (
+                                n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
+
+                        # Финальный yield с полным ответом
+
+                        yield "finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
+
+
                     elif self.model == "text-davinci-003":
                         prompt = self._generate_prompt(message, dialog_messages, chat_mode)
                         r_gen = await openai.Completion.acreate(
@@ -222,12 +242,16 @@ class ChatGPT:
 
                 answer = self._postprocess_answer(answer)
 
+
             except openai.error.InvalidRequestError as e:  # too many tokens
+
                 if len(dialog_messages) == 0:
                     raise e
 
                 # forget first message in dialog_messages
+
                 dialog_messages = dialog_messages[1:]
+
                 n_first_dialog_messages_removed = n_dialog_messages_before - len(dialog_messages)
 
         yield "finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed  # sending final answer

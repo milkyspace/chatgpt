@@ -513,19 +513,287 @@ class MessageHandlers(BotHandlers):
                 await update.message.chat.send_action(action="typing")
 
                 dialog_messages = self.db.get_dialog_messages(user_id, dialog_id=None)
-                answer, n_input_tokens, n_output_tokens = await self._get_chatgpt_response(
-                    message, dialog_messages, chat_mode, user_id
-                )
+                parse_mode = {
+                    "html": ParseMode.HTML,
+                    "markdown": ParseMode.MARKDOWN
+                }[config.chat_modes[chat_mode]["parse_mode"]]
 
-                # Обновляем диалог и токены
-                new_dialog_message = {"user": [{"type": "text", "text": message}], "bot": answer,
-                                      "date": datetime.now()}
-                self._update_dialog_and_tokens(user_id, new_dialog_message, n_input_tokens, n_output_tokens)
+                current_model = self.db.get_user_attribute(user_id, "current_model")
+                chatgpt_instance = openai_utils.ChatGPT(model=current_model)
 
-                await self._edit_message_with_retry(context, placeholder_message, answer, chat_mode)
+                if config.enable_message_streaming:
+                    # Потоковый режим - отправляем части ответа по мере поступления
+                    await self._handle_streaming_response(
+                        update, context, message, dialog_messages, chat_mode,
+                        chatgpt_instance, placeholder_message, parse_mode, user_id
+                    )
+                else:
+                    # Непотоковый режим - получаем весь ответ сразу
+                    answer, n_input_tokens, n_output_tokens = await self._get_non_streaming_response(
+                        chatgpt_instance, message, dialog_messages, chat_mode
+                    )
+
+                    # Отправляем полный ответ
+                    await self._edit_message_with_retry(context, placeholder_message, answer, chat_mode)
+
+                    # Сохраняем диалог и токены
+                    new_dialog_message = {"user": [{"type": "text", "text": message}], "bot": answer,
+                                          "date": datetime.now()}
+                    self._update_dialog_and_tokens(user_id, new_dialog_message, n_input_tokens, n_output_tokens)
 
         except Exception as e:
             await self._handle_message_error(update, e)
+
+    async def _handle_streaming_response(self, update: Update, context: CallbackContext, message: str,
+                                         dialog_messages: List[Dict], chat_mode: str,
+                                         chatgpt_instance: openai_utils.ChatGPT,
+                                         placeholder_message: telegram.Message,
+                                         parse_mode: str, user_id: int) -> None:
+        """Обрабатывает потоковый ответ от ChatGPT."""
+        gen = chatgpt_instance.send_message_stream(message, dialog_messages=dialog_messages, chat_mode=chat_mode)
+
+        full_answer = ""
+        n_input_tokens, n_output_tokens = 0, 0
+        prev_answer = ""
+        last_update_time = datetime.now()
+
+        async for gen_item in gen:
+            status, answer, (chunk_n_input_tokens, chunk_n_output_tokens), n_first_dialog_messages_removed = gen_item
+
+            # Обновляем полный ответ
+            full_answer = answer
+            n_input_tokens, n_output_tokens = chunk_n_input_tokens, chunk_n_output_tokens
+
+            # Проверяем, нужно ли обновлять сообщение
+            current_time = datetime.now()
+            time_diff = (current_time - last_update_time).total_seconds()
+
+            # Обновляем сообщение если:
+            # 1. Прошло больше 0.5 секунд с последнего обновления ИЛИ
+            # 2. Ответ значительно изменился ИЛИ
+            # 3. Это финальный статус
+            should_update = (
+                    time_diff > 0.5 or
+                    abs(len(answer) - len(prev_answer)) > 50 or
+                    status == "finished"
+            )
+
+            if should_update and answer.strip():
+                try:
+                    await context.bot.edit_message_text(
+                        answer[:4096],
+                        chat_id=placeholder_message.chat_id,
+                        message_id=placeholder_message.message_id,
+                        parse_mode=parse_mode,
+                        disable_web_page_preview=True
+                    )
+                    prev_answer = answer
+                    last_update_time = current_time
+                except telegram.error.BadRequest as e:
+                    if not str(e).startswith("Message is not modified"):
+                        # Если ошибка не связана с неизмененным сообщением, пытаемся отправить без форматирования
+                        try:
+                            await context.bot.edit_message_text(
+                                answer[:4096],
+                                chat_id=placeholder_message.chat_id,
+                                message_id=placeholder_message.message_id,
+                                disable_web_page_preview=True
+                            )
+                            prev_answer = answer
+                            last_update_time = current_time
+                        except Exception:
+                            pass
+
+            # Небольшая задержка для плавности
+            await asyncio.sleep(0.01)
+
+        # Сохраняем финальный ответ в диалог
+        new_dialog_message = {"user": [{"type": "text", "text": message}], "bot": full_answer, "date": datetime.now()}
+        self._update_dialog_and_tokens(user_id, new_dialog_message, n_input_tokens, n_output_tokens)
+
+        # Уведомление если были удалены сообщения из контекста
+        if n_first_dialog_messages_removed > 0:
+            if n_first_dialog_messages_removed == 1:
+                text = "✍️ <i>Note:</i> Your current dialog is too long, so your <b>first message</b> was removed from the context.\n Send /new command to start new dialog"
+            else:
+                text = f"✍️ <i>Note:</i> Your current dialog is too long, so <b>{n_first_dialog_messages_removed} first messages</b> were removed from the context.\n Send /new command to start new dialog"
+            await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
+    async def _get_non_streaming_response(self, chatgpt_instance: openai_utils.ChatGPT, message: str,
+                                          dialog_messages: List[Dict], chat_mode: str) -> Tuple[str, int, int]:
+        """Получает непотоковый ответ от ChatGPT."""
+        answer, (n_input_tokens, n_output_tokens), _ = await chatgpt_instance.send_message(
+            message, dialog_messages=dialog_messages, chat_mode=chat_mode
+        )
+        return answer, n_input_tokens, n_output_tokens
+
+    async def _vision_message_handle_fn(self, update: Update, context: CallbackContext,
+                                        use_new_dialog_timeout: bool = True) -> None:
+        """Обрабатывает сообщения с изображениями для GPT-4 Vision."""
+        logger.info('_vision_message_handle_fn')
+        user_id = update.message.from_user.id
+        current_model = self.db.get_user_attribute(user_id, "current_model")
+
+        if current_model != "gpt-4-vision-preview":
+            await update.message.reply_text(
+                "🥲 Images processing is only available for the <b>GPT-4 Vision</b> model. Please change your settings in /settings",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
+
+        if use_new_dialog_timeout:
+            last_interaction = self.db.get_user_attribute(user_id, "last_interaction")
+            dialog_messages = self.db.get_dialog_messages(user_id)
+
+            if (datetime.now() - last_interaction).seconds > config.new_dialog_timeout and len(dialog_messages) > 0:
+                self.db.start_new_dialog(user_id)
+                await update.message.reply_text(
+                    f"Запуск нового диалога (<b>{config.chat_modes[chat_mode]['name']}</b>) ✅",
+                    parse_mode=ParseMode.HTML
+                )
+
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        transcribed_text = ''
+        buf = None
+
+        # Обработка голосового сообщения
+        if update.message.voice:
+            voice = update.message.voice
+            voice_file = await context.bot.get_file(voice.file_id)
+
+            buf = io.BytesIO()
+            await voice_file.download_to_memory(buf)
+            buf.name = "voice.oga"
+            buf.seek(0)
+
+            transcribed_text = await openai_utils.transcribe_audio(buf)
+            transcribed_text = transcribed_text.strip()
+
+        # Обработка изображения
+        if update.message.photo:
+            photo = update.message.photo[-1]
+            photo_file = await context.bot.get_file(photo.file_id)
+
+            buf = io.BytesIO()
+            await photo_file.download_to_memory(buf)
+            buf.name = "image.jpg"
+            buf.seek(0)
+
+        n_input_tokens, n_output_tokens = 0, 0
+
+        try:
+            placeholder_message = await update.message.reply_text("<i>Думаю...</i>", parse_mode=ParseMode.HTML)
+            message_text = update.message.caption or update.message.text or transcribed_text or ''
+
+            await update.message.chat.send_action(action="typing")
+
+            dialog_messages = self.db.get_dialog_messages(user_id, dialog_id=None)
+            parse_mode = {
+                "html": ParseMode.HTML,
+                "markdown": ParseMode.MARKDOWN
+            }[config.chat_modes[chat_mode]["parse_mode"]]
+
+            chatgpt_instance = openai_utils.ChatGPT(model=current_model)
+
+            if config.enable_message_streaming:
+                # Потоковый режим для vision
+                gen = chatgpt_instance.send_vision_message_stream(
+                    message_text,
+                    dialog_messages=dialog_messages,
+                    image_buffer=buf,
+                    chat_mode=chat_mode,
+                )
+
+                full_answer = ""
+                prev_answer = ""
+                last_update_time = datetime.now()
+
+                async for gen_item in gen:
+                    status, answer, (
+                    chunk_n_input_tokens, chunk_n_output_tokens), n_first_dialog_messages_removed = gen_item
+
+                    full_answer = answer
+                    n_input_tokens, n_output_tokens = chunk_n_input_tokens, chunk_n_output_tokens
+
+                    # Проверяем, нужно ли обновлять сообщение
+                    current_time = datetime.now()
+                    time_diff = (current_time - last_update_time).total_seconds()
+
+                    should_update = (
+                            time_diff > 0.5 or
+                            abs(len(answer) - len(prev_answer)) > 50 or
+                            status == "finished"
+                    )
+
+                    if should_update and answer.strip():
+                        try:
+                            await context.bot.edit_message_text(
+                                answer[:4096],
+                                chat_id=placeholder_message.chat_id,
+                                message_id=placeholder_message.message_id,
+                                parse_mode=parse_mode,
+                            )
+                            prev_answer = answer
+                            last_update_time = current_time
+                        except telegram.error.BadRequest as e:
+                            if not str(e).startswith("Message is not modified"):
+                                try:
+                                    await context.bot.edit_message_text(
+                                        answer[:4096],
+                                        chat_id=placeholder_message.chat_id,
+                                        message_id=placeholder_message.message_id,
+                                    )
+                                    prev_answer = answer
+                                    last_update_time = current_time
+                                except Exception:
+                                    pass
+
+                    await asyncio.sleep(0.01)
+
+            else:
+                # Непотоковый режим для vision
+                answer, (n_input_tokens, n_output_tokens), _ = await chatgpt_instance.send_vision_message(
+                    message_text,
+                    dialog_messages=dialog_messages,
+                    image_buffer=buf,
+                    chat_mode=chat_mode,
+                )
+
+                await context.bot.edit_message_text(
+                    answer[:4096],
+                    chat_id=placeholder_message.chat_id,
+                    message_id=placeholder_message.message_id,
+                    parse_mode=parse_mode,
+                )
+                full_answer = answer
+
+            # Сохраняем диалог
+            if buf is not None:
+                base_image = base64.b64encode(buf.getvalue()).decode("utf-8")
+                new_dialog_message = {
+                    "user": [
+                        {"type": "text", "text": message_text},
+                        {"type": "image", "image": base_image}
+                    ],
+                    "bot": full_answer,
+                    "date": datetime.now()
+                }
+            else:
+                new_dialog_message = {"user": message_text, "bot": full_answer, "date": datetime.now()}
+
+            self._update_dialog_and_tokens(user_id, new_dialog_message, n_input_tokens, n_output_tokens)
+
+        except asyncio.CancelledError:
+            self.db.update_n_used_tokens(user_id, current_model, n_input_tokens, n_output_tokens)
+            raise
+        except Exception as e:
+            error_text = f"Something went wrong during completion_1. Reason: {e}"
+            logger.error(error_text)
+            await update.message.reply_text(error_text)
+
 
     async def _get_chatgpt_response(self, message: str, dialog_messages: List[Dict],
                                     chat_mode: str, user_id: str) -> Tuple[str, int, int]:
