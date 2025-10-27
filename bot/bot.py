@@ -228,6 +228,11 @@ class BotHandlers:
 class MessageHandlers(BotHandlers):
     """Класс для обработки сообщений."""
 
+    def __init__(self, database: database.Database, subscription_handlers: Any, chat_mode_handlers: Any):
+        super().__init__(database)
+        self.subscription_handlers = subscription_handlers
+        self.chat_mode_handlers = chat_mode_handlers
+
     async def start_handle(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает команду /start."""
         await self.register_user_if_not_exists(update, context, update.message.from_user)
@@ -344,6 +349,11 @@ class MessageHandlers(BotHandlers):
             await self.edited_message_handle(update, context)
             return
 
+        # Проверяем, не является ли сообщение кнопкой главного меню
+        if await self._is_main_menu_button(update.message.text):
+            await self.handle_main_menu_buttons(update, context)
+            return
+
         processed_message = self._process_message_text(update, context, message)
         await self.register_user_if_not_exists(update, context, update.message.from_user)
 
@@ -366,6 +376,78 @@ class MessageHandlers(BotHandlers):
             return
 
         await self._handle_text_message(update, context, processed_message, use_new_dialog_timeout)
+
+    async def _is_main_menu_button(self, text: str) -> bool:
+        """Проверяет, является ли текст кнопкой главного меню."""
+        main_menu_buttons = [
+            emoji.emojize("Продлить подписку :money_bag:"),
+            emoji.emojize("Выбрать режим :red_heart:"),
+            emoji.emojize("Пригласить :woman_and_man_holding_hands:"),
+            emoji.emojize("Помощь :heart_hands:"),
+            emoji.emojize("Админ-панель :smiling_face_with_sunglasses:"),
+            emoji.emojize("Назад :right_arrow_curving_left:"),
+        ]
+        return text in main_menu_buttons
+
+    async def handle_main_menu_buttons(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает нажатия кнопок главного меню."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        text = update.message.text
+
+        if text == emoji.emojize("Продлить подписку :money_bag:"):
+            await self.subscription_handlers.subscription_handle(update, context)
+        elif text == emoji.emojize("Выбрать режим :red_heart:"):
+            await self.chat_mode_handlers.show_chat_modes_handle(update, context)
+        elif text == emoji.emojize("Пригласить :woman_and_man_holding_hands:"):
+            await self._handle_invite(update, context)
+        elif text == emoji.emojize("Помощь :heart_hands:"):
+            await self.help_handle(update, context)
+        elif text == emoji.emojize("Админ-панель :smiling_face_with_sunglasses:"):
+            await self._handle_admin_panel(update, context)
+        elif text == emoji.emojize("Назад :right_arrow_curving_left:"):
+            await self._handle_back(update, context)
+        elif emoji.emojize(":green_circle:") in text or emoji.emojize(":red_circle:") in text:
+            await self.subscription_handlers.subscription_handle(update, context)
+
+    async def _handle_invite(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает кнопку приглашения друзей."""
+        await update.message.reply_text(
+            "👥 <b>Пригласите друзей!</b>\n\n"
+            "Поделитесь ссылкой на бота с друзьями:\n"
+            f"https://t.me/{context.bot.username}\n\n"
+            "Чем больше друзей - тем лучше!",
+            parse_mode=ParseMode.HTML
+        )
+
+    async def _handle_admin_panel(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает кнопку админ-панели."""
+        user_id = update.message.from_user.id
+        if user_id in config.roles.get('admin', []):
+            await self._show_admin_panel(update, context)
+        else:
+            await update.message.reply_text("У вас нет доступа к админ-панели.")
+
+    async def _show_admin_panel(self, update: Update, context: CallbackContext) -> None:
+        """Показывает админ-панель."""
+        text = "🛠️ <b>Админ-панель</b>\n\nВыберите действие:"
+        reply_markup = BotKeyboards.get_admin_keyboard()
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+    async def _handle_back(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает кнопку 'Назад'."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        reply_markup = await BotKeyboards.get_main_keyboard(user_id)
+        await update.message.reply_text(
+            "Возврат в главное меню...",
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.HTML
+        )
 
     def _process_message_text(self, update: Update, context: CallbackContext, message: Optional[str]) -> str:
         """Обрабатывает текст сообщения."""
@@ -468,7 +550,10 @@ class MessageHandlers(BotHandlers):
 
         async for gen_item in gen:
             status, chunk_answer, (chunk_n_input_tokens, chunk_n_output_tokens), _ = gen_item
-            answer += chunk_answer
+
+            # Исправление: не конкатенируем, а заменяем ответ
+            # В потоковом режиме каждый чанк содержит полный ответ на данный момент
+            answer = chunk_answer
             n_input_tokens, n_output_tokens = chunk_n_input_tokens, chunk_n_output_tokens
 
             if status == "finished":
@@ -1369,10 +1454,10 @@ def run_bot() -> None:
     bot_instance = application.bot
 
     # Создаем обработчики
-    message_handlers = MessageHandlers(db)
     subscription_handlers = SubscriptionHandlers(db)
     image_handlers = ImageHandlers(db)
     chat_mode_handlers = ChatModeHandlers(db)
+    message_handlers = MessageHandlers(db, subscription_handlers, chat_mode_handlers)
 
     # Настраиваем фильтр пользователей
     user_filter = filters.ALL
