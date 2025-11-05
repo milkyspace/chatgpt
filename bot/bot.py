@@ -2118,24 +2118,40 @@ class AdminHandlers(BotHandlers):
 
     async def get_user_data_command(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает команду /user_data."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
-        user_id = update.message.from_user.id
-
-        if str(user_id) not in config.roles.get('admin', []):
-            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
-            return
-
-        if not context.args:
-            await update.message.reply_text(
-                "❌ Неправильный формат команды.\n"
-                "Используйте: /user_data USER_ID\n"
-                "Пример: /user_data 123456789"
-            )
-            return
-
-        user_identifier = context.args[0]
-
         try:
+            # Получаем пользователя из update
+            if update.message:
+                user = update.message.from_user
+            elif update.callback_query:
+                user = update.callback_query.from_user
+            else:
+                logger.error("Cannot get user from update")
+                return
+
+            await self.register_user_if_not_exists(update, context, user)
+            user_id = user.id
+
+            if user_id not in config.roles.get('admin', []):
+                if update.message:
+                    await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+                elif update.callback_query:
+                    await update.callback_query.message.reply_text("❌ У вас нет доступа к этой команде.")
+                return
+
+            if not context.args:
+                error_text = (
+                    "❌ Неправильный формат команды.\n"
+                    "Используйте: /user_data USER_ID\n"
+                    "Пример: /user_data 123456789"
+                )
+                if update.message:
+                    await update.message.reply_text(error_text)
+                elif update.callback_query:
+                    await update.callback_query.message.reply_text(error_text)
+                return
+
+            user_identifier = context.args[0]
+
             # Пытаемся найти пользователя по ID или username
             target_user = None
 
@@ -2143,25 +2159,40 @@ class AdminHandlers(BotHandlers):
                 # Поиск по username
                 username = user_identifier[1:]  # Убираем @
                 target_user = self.db.find_user_by_username(username)
+                if not target_user:
+                    await self._send_reply(update, f"❌ Пользователь с username @{username} не найден.")
+                    return
             else:
                 # Поиск по ID
-                target_user_id = int(user_identifier)
-                target_user = self.db.get_user_by_id(target_user_id)
-
-            if not target_user:
-                await update.message.reply_text(f"❌ Пользователь '{user_identifier}' не найден.")
-                return
+                try:
+                    target_user_id = int(user_identifier)
+                    target_user = self.db.get_user_by_id(target_user_id)
+                    if not target_user:
+                        await self._send_reply(update, f"❌ Пользователь с ID {user_identifier} не найден.")
+                        return
+                except ValueError:
+                    await self._send_reply(update, "❌ ID пользователя должен быть числом.")
+                    return
 
             # Формируем подробную информацию о пользователе
             user_info = await self._format_user_details(target_user)
 
-            await update.message.reply_text(user_info, parse_mode=ParseMode.HTML)
+            await self._send_reply(update, user_info)
 
-        except ValueError:
-            await update.message.reply_text("❌ ID пользователя должен быть числом.")
         except Exception as e:
             logger.error(f"Error getting user data: {e}")
-            await update.message.reply_text("❌ Произошла ошибка при получении данных пользователя.")
+            error_text = "❌ Произошла ошибка при получении данных пользователя."
+            await self._send_reply(update, error_text)
+
+    async def _send_reply(self, update: Update, text: str, parse_mode: str = ParseMode.HTML) -> None:
+        """Вспомогательный метод для отправки ответа."""
+        try:
+            if update.message:
+                await update.message.reply_text(text, parse_mode=parse_mode)
+            elif update.callback_query:
+                await update.callback_query.message.reply_text(text, parse_mode=parse_mode)
+        except Exception as e:
+            logger.error(f"Error sending reply: {e}")
 
     async def _format_user_details(self, user_data: Dict[str, Any]) -> str:
         """Форматирует подробную информацию о пользователе."""
