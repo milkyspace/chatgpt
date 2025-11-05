@@ -7,6 +7,7 @@ from datetime import datetime
 from telegram import ReplyKeyboardMarkup, KeyboardButton
 import database
 import config
+from bot.openai_utils import logger
 from subscription import SubscriptionType
 
 
@@ -71,6 +72,11 @@ class BotKeyboards:
         ])
 
         # Кнопка админ-панели для администраторов
+        logger.warning("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        logger.warning(user_id)
+        logger.warning(config.roles.get('admin', []))
+        logger.warning("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+
         if user_id in config.roles.get('admin', []):
             keyboard.append([KeyboardButton(emoji.emojize("Админ-панель :smiling_face_with_sunglasses:"))])
 
