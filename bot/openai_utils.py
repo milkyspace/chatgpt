@@ -600,6 +600,7 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
     """
     max_retries = 10
     retry_delay = 5  # увеличиваем задержку между попытками
+    exponential_backoff = 1
 
     for attempt in range(max_retries):
         try:
@@ -665,7 +666,7 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
                 if attempt < max_retries - 1:
                     logger.info(f"Retrying in {retry_delay} seconds...")
                     await asyncio.sleep(retry_delay)
-                    retry_delay *= 2  # exponential backoff
+                    retry_delay *= exponential_backoff  # exponential backoff
                     continue
                 else:
                     raise Exception(f"OpenAI server error after {max_retries} attempts: {response.status_code}")
