@@ -2,17 +2,12 @@ from PIL import Image  # Добавляем импорт для работы с 
 from io import BytesIO
 from typing import Optional, List  # Добавляем импорты типов
 import config
-import logging
 import imghdr
-
-import tempfile
-import os
-
+import aiohttp
 import tiktoken
 import openai
 import anthropic
 import logging
-
 import base64
 
 import json #logging error
