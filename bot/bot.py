@@ -387,6 +387,11 @@ class MessageHandlers(BotHandlers):
             emoji.emojize("Помощь :heart_hands:"),
             emoji.emojize("Админ-панель :smiling_face_with_sunglasses:"),
             emoji.emojize("Назад :right_arrow_curving_left:"),
+            emoji.emojize("Вывести пользователей"),
+            emoji.emojize("Редактировать пользователя"),
+            emoji.emojize("Отправить рассылку"),
+            emoji.emojize("Назад в админ-панель"),
+            emoji.emojize("Главное меню")
         ]
         return text in main_menu_buttons
 
@@ -710,7 +715,7 @@ class MessageHandlers(BotHandlers):
 
                 async for gen_item in gen:
                     status, answer, (
-                    chunk_n_input_tokens, chunk_n_output_tokens), n_first_dialog_messages_removed = gen_item
+                        chunk_n_input_tokens, chunk_n_output_tokens), n_first_dialog_messages_removed = gen_item
 
                     full_answer = answer
                     n_input_tokens, n_output_tokens = chunk_n_input_tokens, chunk_n_output_tokens
@@ -790,7 +795,6 @@ class MessageHandlers(BotHandlers):
             error_text = f"Something went wrong during completion_1. Reason: {e}"
             logger.error(error_text)
             await update.message.reply_text(error_text)
-
 
     async def _get_chatgpt_response(self, message: str, dialog_messages: List[Dict],
                                     chat_mode: str, user_id: str) -> Tuple[str, int, int]:
