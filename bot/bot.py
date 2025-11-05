@@ -2032,60 +2032,59 @@ class AdminHandlers(BotHandlers):
 
         await update.message.reply_text(confirmation_text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
+    async def broadcast_confirmation_handler(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает подтверждение рассылки."""
+        query = update.callback_query
+        await query.answer()
 
-async def broadcast_confirmation_handler(self, update: Update, context: CallbackContext) -> None:
-    """Обрабатывает подтверждение рассылки."""
-    query = update.callback_query
-    await query.answer()
+        user_id = query.from_user.id
+        if user_id not in config.roles.get('admin', []):
+            await query.edit_message_text("❌ У вас нет доступа к этой команде.")
+            return
 
-    user_id = query.from_user.id
-    if user_id not in config.roles.get('admin', []):
-        await query.edit_message_text("❌ У вас нет доступа к этой команде.")
-        return
+        data = query.data
 
-    data = query.data
+        if data == "cancel_broadcast":
+            await query.edit_message_text("❌ Рассылка отменена.")
+            return
 
-    if data == "cancel_broadcast":
-        await query.edit_message_text("❌ Рассылка отменена.")
-        return
+        if data.startswith("confirm_broadcast|"):
+            message_text = data.split("|", 1)[1]
 
-    if data.startswith("confirm_broadcast|"):
-        message_text = data.split("|", 1)[1]
+            await query.edit_message_text("🔄 Начинаю рассылку...")
 
-        await query.edit_message_text("🔄 Начинаю рассылку...")
+            # Получаем всех пользователей
+            all_user_ids = self.db.get_all_user_ids()
+            success_count = 0
+            fail_count = 0
 
-        # Получаем всех пользователей
-        all_user_ids = self.db.get_all_user_ids()
-        success_count = 0
-        fail_count = 0
-
-        for target_user_id in all_user_ids:
-            try:
-                user_data = self.db.get_user_by_id(target_user_id)
-                if user_data and 'chat_id' in user_data:
-                    await context.bot.send_message(
-                        chat_id=user_data['chat_id'],
-                        text=f"📢 <b>Рассылка от администратора:</b>\n\n{message_text}",
-                        parse_mode=ParseMode.HTML
-                    )
-                    success_count += 1
-                else:
+            for target_user_id in all_user_ids:
+                try:
+                    user_data = self.db.get_user_by_id(target_user_id)
+                    if user_data and 'chat_id' in user_data:
+                        await context.bot.send_message(
+                            chat_id=user_data['chat_id'],
+                            text=f"📢 <b>Рассылка от администратора:</b>\n\n{message_text}",
+                            parse_mode=ParseMode.HTML
+                        )
+                        success_count += 1
+                    else:
+                        fail_count += 1
+                except Exception as e:
+                    logger.error(f"Error sending broadcast to {target_user_id}: {e}")
                     fail_count += 1
-            except Exception as e:
-                logger.error(f"Error sending broadcast to {target_user_id}: {e}")
-                fail_count += 1
 
-            # Небольшая задержка чтобы не превысить лимиты Telegram
-            await asyncio.sleep(0.1)
+                # Небольшая задержка чтобы не превысить лимиты Telegram
+                await asyncio.sleep(0.1)
 
-        result_text = (
-            f"✅ <b>Рассылка завершена</b>\n\n"
-            f"✅ Успешно: {success_count}\n"
-            f"❌ Не удалось: {fail_count}\n"
-            f"📊 Всего: {len(all_user_ids)}"
-        )
+            result_text = (
+                f"✅ <b>Рассылка завершена</b>\n\n"
+                f"✅ Успешно: {success_count}\n"
+                f"❌ Не удалось: {fail_count}\n"
+                f"📊 Всего: {len(all_user_ids)}"
+            )
 
-        await query.edit_message_text(result_text, parse_mode=ParseMode.HTML)
+            await query.edit_message_text(result_text, parse_mode=ParseMode.HTML)
 
 
 # Функции для работы с платежами
