@@ -227,10 +227,12 @@ class BotHandlers:
 class MessageHandlers(BotHandlers):
     """Класс для обработки сообщений."""
 
-    def __init__(self, database: database.Database, subscription_handlers: Any, chat_mode_handlers: Any):
+    def __init__(self, database: database.Database, subscription_handlers: Any,
+                 chat_mode_handlers: Any, admin_handlers: Any):  # Добавляем admin_handlers
         super().__init__(database)
         self.subscription_handlers = subscription_handlers
         self.chat_mode_handlers = chat_mode_handlers
+        self.admin_handlers = admin_handlers  # Сохраняем обработчик админ-панели
 
     async def start_handle(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает команду /start."""
@@ -405,9 +407,19 @@ class MessageHandlers(BotHandlers):
         elif text == emoji.emojize("Помощь :heart_hands:"):
             await self.help_handle(update, context)
         elif text == emoji.emojize("Админ-панель :smiling_face_with_sunglasses:"):
-            await self._handle_admin_panel(update, context)
+            await self.admin_handlers.admin_panel_handle(update, context)  # Используем admin_handlers
         elif text == emoji.emojize("Назад :right_arrow_curving_left:"):
             await self._handle_back(update, context)
+        elif text == emoji.emojize("👥 Вывести пользователей"):
+            await self.admin_handlers.show_users_handle(update, context)
+        elif text == emoji.emojize("✏️ Редактировать пользователя"):
+            await self.admin_handlers.edit_user_handle(update, context)
+        elif text == emoji.emojize("📢 Отправить рассылку"):
+            await self.admin_handlers.broadcast_handle(update, context)
+        elif text == emoji.emojize("⬅️ Назад в админ-панель"):
+            await self.admin_handlers.handle_admin_panel_back(update, context)
+        elif text == emoji.emojize("Главное меню :right_arrow_curving_left:"):
+            await self.admin_handlers.handle_main_menu_back(update, context)
         elif emoji.emojize(":green_circle:") in text or emoji.emojize(":red_circle:") in text:
             await self.subscription_handlers.subscription_handle(update, context)
 
@@ -1817,6 +1829,139 @@ class ImageHandlers(BotHandlers):
                 error_text = f"⚠️ There was an issue with your request. Please try again.\n\n<b>Reason</b>: {str(error)}"
 
         await update.message.reply_text(error_text, parse_mode=ParseMode.HTML)
+
+
+class AdminHandlers(BotHandlers):
+    """Класс для обработки админ-панели."""
+
+    async def admin_panel_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает команду админ-панели."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        # Проверяем права администратора
+        if user_id not in config.roles.get('admin', []):
+            await update.message.reply_text("❌ У вас нет доступа к админ-панели.")
+            return
+
+        await self._show_admin_panel(update, context)
+
+    async def _show_admin_panel(self, update: Update, context: CallbackContext) -> None:
+        """Показывает админ-панель."""
+        text = "🛠️ <b>Админ-панель</b>\n\nВыберите действие:"
+        reply_markup = BotKeyboards.get_admin_keyboard()
+
+        if update.message:
+            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+        else:
+            await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+    async def show_users_handle(self, update: Update, context: CallbackContext) -> None:
+        """Показывает список пользователей."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        if user_id not in config.roles.get('admin', []):
+            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+            return
+
+        users = self.db.get_users_and_roles()
+
+        if not users:
+            await update.message.reply_text("📝 Пользователей не найдено.")
+            return
+
+        text = "👥 <b>Список пользователей:</b>\n\n"
+        for i, user in enumerate(users[:50], 1):  # Ограничиваем вывод первыми 50 пользователями
+            username = user.get('username', 'Нет username')
+            first_name = user.get('first_name', 'Нет имени')
+            role = user.get('role', 'Не указана')
+            last_interaction = user.get('last_interaction', 'Неизвестно')
+
+            if isinstance(last_interaction, datetime):
+                last_interaction = last_interaction.strftime("%d.%m.%Y %H:%M")
+
+            text += f"{i}. ID: {user['_id']}\n"
+            text += f"   👤: {first_name} (@{username})\n"
+            text += f"   🏷️: {role}\n"
+            text += f"   ⏰: {last_interaction}\n\n"
+
+        if len(users) > 50:
+            text += f"\n... и еще {len(users) - 50} пользователей"
+
+        # Добавляем кнопку возврата
+        reply_markup = BotKeyboards.get_back_to_admin_keyboard()
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+
+    async def edit_user_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает запрос на редактирование пользователя."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        if user_id not in config.roles.get('admin', []):
+            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+            return
+
+        text = (
+            "✏️ <b>Редактирование пользователя</b>\n\n"
+            "Для редактирования пользователя отправьте команду в формате:\n"
+            "<code>/edit_user USER_ID ROLE</code>\n\n"
+            "Пример:\n"
+            "<code>/edit_user 123456789 admin</code>\n\n"
+            "Доступные роли: admin, beta_tester, friend, regular_user, trial_user"
+        )
+
+        reply_markup = BotKeyboards.get_back_to_admin_keyboard()
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+
+    async def broadcast_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает запрос на рассылку."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        if user_id not in config.roles.get('admin', []):
+            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+            return
+
+        text = (
+            "📢 <b>Рассылка сообщений</b>\n\n"
+            "Для отправки рассылки отправьте команду в формате:\n"
+            "<code>/broadcast ТЕКСТ_СООБЩЕНИЯ</code>\n\n"
+            "Пример:\n"
+            "<code>/broadcast Всем привет! Это тестовая рассылка.</code>"
+        )
+
+        reply_markup = BotKeyboards.get_back_to_admin_keyboard()
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+
+    async def handle_main_menu_back(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает возврат в главное меню из админ-панели."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        reply_markup = await BotKeyboards.get_main_keyboard(user_id)
+        await update.message.reply_text(
+            "Возврат в главное меню...",
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.HTML
+        )
+
+    async def handle_admin_panel_back(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает возврат в админ-панель."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        if user_id not in config.roles.get('admin', []):
+            await update.message.reply_text("❌ У вас нет доступа к админ-панели.")
+            return
+
+        await self._show_admin_panel(update, context)
 
 
 # Функции для работы с платежами

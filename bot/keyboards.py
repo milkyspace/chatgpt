@@ -96,23 +96,6 @@ class BotKeyboards:
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     @staticmethod
-    def get_admin_keyboard() -> ReplyKeyboardMarkup:
-        """
-        Создает клавиатуру админ-панели
-
-        Returns:
-            ReplyKeyboardMarkup: Клавиатура админ-панели
-        """
-        keyboard = [
-            [KeyboardButton(emoji.emojize("Вывести пользователей :bust_in_silhouette:"))],
-            [KeyboardButton(emoji.emojize("Редактировать пользователя по id"))],
-            [KeyboardButton(emoji.emojize("Отправить рассылку :pencil:"))],
-            [KeyboardButton(emoji.emojize("Главное меню :right_arrow_curving_left:"))]
-        ]
-
-        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-
-    @staticmethod
     def get_back_keyboard() -> ReplyKeyboardMarkup:
         """
         Создает клавиатуру с кнопкой "Назад"
@@ -122,6 +105,38 @@ class BotKeyboards:
         """
         keyboard = [
             [KeyboardButton(emoji.emojize("Назад :right_arrow_curving_left:"))]
+        ]
+
+        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+    @staticmethod
+    def get_back_to_admin_keyboard() -> ReplyKeyboardMarkup:
+        """
+        Создает клавиатуру для возврата в админ-панель.
+
+        Returns:
+            ReplyKeyboardMarkup: Клавиатура с кнопкой возврата в админ-панель
+        """
+        keyboard = [
+            [KeyboardButton(emoji.emojize("⬅️ Назад в админ-панель"))],
+            [KeyboardButton(emoji.emojize("Главное меню :right_arrow_curving_left:"))]
+        ]
+
+        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+    @staticmethod
+    def get_admin_keyboard() -> ReplyKeyboardMarkup:
+        """
+        Создает клавиатуру админ-панели
+
+        Returns:
+            ReplyKeyboardMarkup: Клавиатура админ-панели
+        """
+        keyboard = [
+            [KeyboardButton(emoji.emojize("👥 Вывести пользователей"))],
+            [KeyboardButton(emoji.emojize("✏️ Редактировать пользователя"))],
+            [KeyboardButton(emoji.emojize("📢 Отправить рассылку"))],
+            [KeyboardButton(emoji.emojize("Главное меню :right_arrow_curving_left:"))]
         ]
 
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
