@@ -292,16 +292,29 @@ class MessageProcessor(BaseHandler):
                 del user_tasks[user_id]
 
 
-class MessageHandlers(MessageProcessor):
+class MessageHandlers(MessageProcessor, PhotoEditorMixin):
     """Класс для обработки сообщений."""
 
     def __init__(self, database: database.Database, subscription_handlers: Any,
                  chat_mode_handlers: Any, admin_handlers: Any, image_handlers: Any):
-        super().__init__(database)
+        # Инициализируем BaseHandler
+        BaseHandler.__init__(self, database)
         self.subscription_handlers = subscription_handlers
         self.chat_mode_handlers = chat_mode_handlers
         self.admin_handlers = admin_handlers
         self.image_handlers = image_handlers
+
+    async def photo_editor_handle(self, update: Update, context: CallbackContext,
+                                 message: Optional[str] = None) -> None:
+        """Прокси-метод для обработки фоторедактора."""
+        # Вызываем метод миксина напрямую
+        await PhotoEditorMixin.photo_editor_handle(self, update, context, message)
+
+    async def generate_image_handle(self, update: Update, context: CallbackContext,
+                                   message: Optional[str] = None) -> None:
+        """Прокси-метод для генерации изображений."""
+        await self.image_handlers.generate_image_handle(update, context, message=message)
+
 
     async def start_handle(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает команду /start."""
@@ -986,6 +999,7 @@ class PhotoEditorMixin(BaseHandler):
         elif update.message.text and not update.message.photo:
             return update.message.text
         return None
+
 
     async def _handle_photo_for_editing(self, update: Update, context: CallbackContext,
                                        edit_description: Optional[str] = None) -> None:
