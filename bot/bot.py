@@ -11,7 +11,8 @@ import json
 import base64
 import io
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Union
+from abc import ABC, abstractmethod
 
 import requests
 import emoji
@@ -78,22 +79,19 @@ class CustomEncoder(json.JSONEncoder):
     """Кастомный JSON энкодер для обработки datetime объектов."""
 
     def default(self, obj: Any) -> Any:
-        """Обрабатывает специальные типы данных для JSON сериализации."""
         if isinstance(obj, datetime):
             return obj.isoformat()
         return super().default(obj)
 
 
-class BotHandlers:
-    """Базовый класс для обработчиков бота."""
+class BaseHandler(ABC):
+    """Базовый класс для всех обработчиков."""
 
     def __init__(self, database: database.Database):
         self.db = database
 
     async def register_user_if_not_exists(self, update: Update, context: CallbackContext, user: User) -> bool:
-        """
-        Регистрирует пользователя если он не существует.
-        """
+        """Регистрирует пользователя если он не существует."""
         user_registered_now = False
 
         if not self.db.check_if_user_exists(user.id):
@@ -108,7 +106,6 @@ class BotHandlers:
             user_registered_now = True
             self.db.start_new_dialog(user.id)
 
-        # Инициализация необходимых атрибутов пользователя
         await self._initialize_user_attributes(user.id)
 
         if user_registered_now:
@@ -154,10 +151,53 @@ class BotHandlers:
             except Exception as e:
                 logger.warning(f"Failed to send registration to admin {admin_id}: {e}")
 
+    async def is_previous_message_not_answered_yet(self, update: Update, context: CallbackContext) -> bool:
+        """Проверяет, обрабатывается ли предыдущее сообщение."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        user_id = update.message.from_user.id
+
+        if user_semaphores[user_id].locked():
+            text = "⏳ Пожалуйста, <b>подождите</b> ответ на предыдущее сообщение\nИли отмените его командой /cancel"
+            await update.message.reply_text(text, reply_to_message_id=update.message.id, parse_mode=ParseMode.HTML)
+            return True
+        return False
+
+    async def subscription_preprocessor(self, update: Update, context: CallbackContext) -> bool:
+        """Проверяет возможность выполнения запроса по подписке."""
+        user_id = update.effective_user.id
+        subscription_info = self.db.get_user_subscription_info(user_id)
+
+        if not subscription_info["is_active"]:
+            await update.message.reply_text(
+                "❌ Для использования бота требуется активная подписка. "
+                "Пожалуйста, приобретите подписку через /subscription",
+                parse_mode=ParseMode.HTML
+            )
+            return False
+
+        return await self._check_subscription_limits(subscription_info, update)
+
+    async def _check_subscription_limits(self, subscription_info: Dict[str, Any], update: Update) -> bool:
+        """Проверяет лимиты подписки используя централизованную конфигурацию."""
+        subscription_type = SubscriptionType(subscription_info["type"])
+
+        if not SubscriptionConfig.can_make_request(subscription_type, subscription_info["requests_used"]):
+            description = SubscriptionConfig.get_description(subscription_type)
+            await update.message.reply_text(
+                f"❌ Лимит запросов подписки {description['name']} исчерпан. "
+                "Пожалуйста, обновите подписку через /subscription",
+                parse_mode=ParseMode.HTML
+            )
+            return False
+
+        return True
+
+
+class MessageProcessor(BaseHandler):
+    """Класс для обработки сообщений с устранением дублирования."""
+
     async def is_bot_mentioned(self, update: Update, context: CallbackContext) -> bool:
-        """
-        Проверяет, упомянут ли бот в сообщении.
-        """
+        """Проверяет, упомянут ли бот в сообщении."""
         try:
             message = update.message
 
@@ -176,62 +216,91 @@ class BotHandlers:
 
         return False
 
-    async def is_previous_message_not_answered_yet(self, update: Update, context: CallbackContext) -> bool:
-        """
-        Проверяет, обрабатывается ли предыдущее сообщение.
-        """
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
-        user_id = update.message.from_user.id
+    async def prepare_dialog(self, user_id: int, use_new_dialog_timeout: bool,
+                            chat_mode: str, update: Update) -> None:
+        """Подготавливает диалог для нового сообщения."""
+        if use_new_dialog_timeout:
+            last_interaction = self.db.get_user_attribute(user_id, "last_interaction")
+            dialog_messages = self.db.get_dialog_messages(user_id)
 
-        if user_semaphores[user_id].locked():
-            text = "⏳ Пожалуйста, <b>подождите</b> ответ на предыдущее сообщение\nИли отмените его командой /cancel"
-            await update.message.reply_text(text, reply_to_message_id=update.message.id, parse_mode=ParseMode.HTML)
-            return True
-        return False
+            if (datetime.now() - last_interaction).seconds > config.new_dialog_timeout and len(dialog_messages) > 0:
+                self.db.start_new_dialog(user_id)
+                await update.message.reply_text(
+                    f"Запуск нового диалога (<b>{config.chat_modes[chat_mode]['name']}</b>) ✅",
+                    parse_mode=ParseMode.HTML
+                )
 
-    async def subscription_preprocessor(self, update: Update, context: CallbackContext) -> bool:
-        """
-        Проверяет возможность выполнения запроса по подписке.
-        """
-        user_id = update.effective_user.id
-        subscription_info = self.db.get_user_subscription_info(user_id)
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if not subscription_info["is_active"]:
-            await update.message.reply_text(
-                "❌ Для использования бота требуется активная подписка. "
-                "Пожалуйста, приобретите подписку через /subscription",
-                parse_mode=ParseMode.HTML
+    def update_dialog_and_tokens(self, user_id: int, new_dialog_message: Dict,
+                                n_input_tokens: int, n_output_tokens: int) -> None:
+        """Обновляет диалог и счетчики токенов."""
+        current_model = self.db.get_user_attribute(user_id, "current_model")
+        current_dialog_messages = self.db.get_dialog_messages(user_id, dialog_id=None)
+        self.db.set_dialog_messages(user_id, current_dialog_messages + [new_dialog_message], dialog_id=None)
+
+        self.db.update_n_used_tokens(user_id, current_model, n_input_tokens, n_output_tokens)
+
+        action_type = self.db.get_user_attribute(user_id, "current_model")
+        self.db.deduct_cost_for_action(
+            user_id=user_id,
+            action_type=action_type,
+            action_params={'n_input_tokens': n_input_tokens, 'n_output_tokens': n_output_tokens}
+        )
+
+    async def edit_message_with_retry(self, context: CallbackContext, placeholder_message: telegram.Message,
+                                     answer: str, chat_mode: str) -> None:
+        """Редактирует сообщение с повторными попытками при ошибках."""
+        parse_mode = {
+            "html": ParseMode.HTML,
+            "markdown": ParseMode.MARKDOWN
+        }[config.chat_modes[chat_mode]["parse_mode"]]
+
+        try:
+            await context.bot.edit_message_text(
+                answer[:4096],
+                chat_id=placeholder_message.chat_id,
+                message_id=placeholder_message.message_id,
+                parse_mode=parse_mode,
+                disable_web_page_preview=True
             )
-            return False
+        except telegram.error.BadRequest as e:
+            if not str(e).startswith("Message is not modified"):
+                await context.bot.edit_message_text(
+                    answer[:4096],
+                    chat_id=placeholder_message.chat_id,
+                    message_id=placeholder_message.message_id,
+                    disable_web_page_preview=True
+                )
 
-        return await self._check_subscription_limits(subscription_info, update)
+    async def handle_message_error(self, update: Update, error: Exception) -> None:
+        """Обрабатывает ошибки при обработке сообщений."""
+        error_text = f"Something went wrong during completion. Reason: {error}"
+        logger.error(error_text)
+        await update.message.reply_text(error_text)
 
-    async def _check_subscription_limits(self, subscription_info: Dict[str, Any], update: Update) -> bool:
-        """Проверяет лимиты подписки используя централизованную конфигурацию."""
-        subscription_type = SubscriptionType(subscription_info["type"])
+    async def execute_user_task(self, user_id: int, task: asyncio.Task, update: Update) -> None:
+        """Выполняет задачу пользователя с обработкой отмены."""
+        user_tasks[user_id] = task
 
-        # Проверяем лимит запросов
-        if not SubscriptionConfig.can_make_request(subscription_type, subscription_info["requests_used"]):
-            description = SubscriptionConfig.get_description(subscription_type)
-            await update.message.reply_text(
-                f"❌ Лимит запросов подписки {description['name']} исчерпан. "
-                "Пожалуйста, обновите подписку через /subscription",
-                parse_mode=ParseMode.HTML
-            )
-            return False
-
-        return True
+        try:
+            await task
+        except asyncio.CancelledError:
+            await update.message.reply_text("✅ Приостановлено", parse_mode=ParseMode.HTML)
+        finally:
+            if user_id in user_tasks:
+                del user_tasks[user_id]
 
 
-class MessageHandlers(BotHandlers):
+class MessageHandlers(MessageProcessor):
     """Класс для обработки сообщений."""
 
     def __init__(self, database: database.Database, subscription_handlers: Any,
-                 chat_mode_handlers: Any, admin_handlers: Any):  # Добавляем admin_handlers
+                 chat_mode_handlers: Any, admin_handlers: Any):
         super().__init__(database)
         self.subscription_handlers = subscription_handlers
         self.chat_mode_handlers = chat_mode_handlers
-        self.admin_handlers = admin_handlers  # Сохраняем обработчик админ-панели
+        self.admin_handlers = admin_handlers
 
     async def start_handle(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает команду /start."""
@@ -251,26 +320,26 @@ class MessageHandlers(BotHandlers):
     def _get_welcome_message(self) -> str:
         """Возвращает приветственное сообщение."""
         return (
-                "👋 Привет! Мы <b>Ducks GPT</b>\n"
-                "Компактный чат-бот на базе <b>ChatGPT</b>\n"
-                "Рады знакомству!\n\n"
-                "Доступны в <b>РФ</b>🇷🇺\n"
-                "<b>Дарим подписку на 7 дней:</b>\n"
-                "- 15 запросов\n"
-                "- 3 генерации изображения\n\n"
-                + HELP_MESSAGE
+            "👋 Привет! Мы <b>Ducks GPT</b>\n"
+            "Компактный чат-бот на базе <b>ChatGPT</b>\n"
+            "Рады знакомству!\n\n"
+            "Доступны в <b>РФ</b>🇷🇺\n"
+            "<b>Дарим подписку на 7 дней:</b>\n"
+            "- 15 запросов\n"
+            "- 3 генерации изображения\n\n"
+            + HELP_MESSAGE
         )
 
     def _get_no_subscription_message(self) -> str:
         """Возвращает сообщение об отсутствии подписки."""
         return (
-                "👋 Привет! Мы <b>Ducks GPT</b>\n"
-                "Компактный чат-бот на базе <b>ChatGPT</b>\n"
-                "Рады знакомству!\n\n"
-                "❌ <b>Для использования бота требуется активная подписка</b>\n\n"
-                "🎁 <b>100 ₽ за наш счёт при регистрации!</b>\n\n"
-                "Используйте команду /subscription чтобы посмотреть доступные подписки\n\n"
-                + HELP_MESSAGE
+            "👋 Привет! Мы <b>Ducks GPT</b>\n"
+            "Компактный чат-бот на базе <b>ChatGPT</b>\n"
+            "Рады знакомству!\n\n"
+            "❌ <b>Для использования бота требуется активная подписка</b>\n\n"
+            "🎁 <b>100 ₽ за наш счёт при регистрации!</b>\n\n"
+            "Используйте команду /subscription чтобы посмотреть доступные подписки\n\n"
+            + HELP_MESSAGE
         )
 
     async def help_handle(self, update: Update, context: CallbackContext) -> None:
@@ -340,7 +409,7 @@ class MessageHandlers(BotHandlers):
             )
 
     async def message_handle(self, update: Update, context: CallbackContext,
-                             message: Optional[str] = None, use_new_dialog_timeout: bool = True) -> None:
+                            message: Optional[str] = None, use_new_dialog_timeout: bool = True) -> None:
         """Обрабатывает текстовые сообщения."""
         if not await self.is_bot_mentioned(update, context):
             return
@@ -368,7 +437,7 @@ class MessageHandlers(BotHandlers):
         # Определяем тип обработки сообщения
         chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
 
-        # Проверяем режим фоторедактора ПЕРВЫМ, так как он может иметь фото
+        # Обработка специальных режимов
         if chat_mode == "photo_editor":
             await self.photo_editor_handle(update, context, message=message)
             return
@@ -381,214 +450,8 @@ class MessageHandlers(BotHandlers):
 
         await self._handle_text_message(update, context, processed_message, use_new_dialog_timeout)
 
-    async def photo_editor_handle(self, update: Update, context: CallbackContext,
-                                  message: Optional[str] = None) -> None:
-        """Обрабатывает запросы в режиме фоторедактора."""
-        logger.info(
-            f"Photo editor handle called: has_photo={bool(update.message.photo)}, caption='{update.message.caption}'")
-
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
-
-        if await self.is_previous_message_not_answered_yet(update, context):
-            return
-
-        user_id = update.message.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
-        if not await self.subscription_preprocessor(update, context):
-            return
-
-        # Получаем описание из caption
-        edit_description = update.message.caption
-
-        if update.message.photo:
-            if edit_description:
-                # Есть и фото и описание - сразу обрабатываем
-                logger.info(f"Processing photo with caption: {edit_description}")
-                await self._process_photo_with_description(update, context, edit_description)
-            else:
-                # Есть фото, но нет описания - сохраняем фото и ждем описание
-                logger.info("Photo received without caption, waiting for description")
-                await self._save_photo_and_wait_for_description(update, context)
-        elif context.user_data.get('waiting_for_edit_description') and message:
-            # Получили описание после фото
-            logger.info(f"Received description after photo: {message}")
-            await self._process_saved_photo_with_description(update, context, message)
-        else:
-            # Нет фото - просим отправить фото
-            logger.info("No photo received, requesting photo")
-            await self._request_photo(update, context)
-
-    async def _process_photo_with_description(self, update: Update, context: CallbackContext,
-                                              edit_description: str) -> None:
-        """Обрабатывает фото с описанием редактирования."""
-        try:
-            # Сохраняем фото
-            photo = update.message.photo[-1]
-            photo_file = await context.bot.get_file(photo.file_id)
-
-            buf = io.BytesIO()
-            await photo_file.download_to_memory(buf)
-            buf.name = "photo_to_edit.jpg"
-            buf.seek(0)
-
-            # Сохраняем фото в контексте
-            context.user_data['photo_to_edit'] = buf.getvalue()
-
-            # Сразу выполняем редактирование
-            await self._perform_photo_editing(update, context, edit_description)
-
-        except Exception as e:
-            logger.error(f"Error processing photo with description: {e}")
-            await update.message.reply_text(
-                "❌ Ошибка при обработке фото. Попробуйте еще раз.",
-                parse_mode=ParseMode.HTML
-            )
-
-    async def _save_photo_and_wait_for_description(self, update: Update, context: CallbackContext) -> None:
-        """Сохраняет фото и ждет описание редактирования."""
-        try:
-            # Сохраняем фото
-            photo = update.message.photo[-1]
-            photo_file = await context.bot.get_file(photo.file_id)
-
-            buf = io.BytesIO()
-            await photo_file.download_to_memory(buf)
-            buf.name = "photo_to_edit.jpg"
-            buf.seek(0)
-
-            # Сохраняем фото в контексте
-            context.user_data['photo_to_edit'] = buf.getvalue()
-            context.user_data['waiting_for_edit_description'] = True
-
-            await update.message.reply_text(
-                "📸 <b>Фото получено!</b>\n\n"
-                "Теперь опишите что нужно изменить на фото. Например:\n"
-                "• <i>\"Добавь кота на диван\"</i>\n"
-                "• <i>\"Убери человека с фона\"</i>\n"
-                "• <i>\"Поменяй цвет машины на красный\"</i>\n\n"
-                "Просто напишите что нужно сделать с фото 👇",
-                parse_mode=ParseMode.HTML
-            )
-
-        except Exception as e:
-            logger.error(f"Error saving photo: {e}")
-            await update.message.reply_text(
-                "❌ Ошибка при сохранении фото. Попробуйте еще раз.",
-                parse_mode=ParseMode.HTML
-            )
-
-    async def _process_saved_photo_with_description(self, update: Update, context: CallbackContext,
-                                                    edit_description: str) -> None:
-        """Обрабатывает сохраненное фото с полученным описанием."""
-        if 'photo_to_edit' not in context.user_data:
-            await update.message.reply_text(
-                "❌ Фото не найдено. Пожалуйста, отправьте фото заново.",
-                parse_mode=ParseMode.HTML
-            )
-            return
-
-        await self._perform_photo_editing(update, context, edit_description)
-
-    async def _request_photo(self, update: Update, context: CallbackContext) -> None:
-        """Запрашивает фото для редактирования."""
-        await update.message.reply_text(
-            "🎨 <b>Режим фоторедактора</b>\n\n"
-            "Для редактирования фото:\n"
-            "1. 📸 <b>Отправьте фото</b> которое нужно изменить\n"
-            "2. ✍️ <b>Опишите в подписи</b> что нужно добавить/изменить\n\n"
-            "<i>Или просто отправьте фото, а затем опишите изменения отдельным сообщением</i>\n\n"
-            "Пример подписи к фото: <i>\"Добавь кота на диван\"</i>",
-            parse_mode=ParseMode.HTML
-        )
-
-    async def _is_main_menu_button(self, text: str) -> bool:
-        """Проверяет, является ли текст кнопкой главного меню."""
-        main_menu_buttons = [
-            emoji.emojize("Продлить подписку :money_bag:"),
-            emoji.emojize("Выбрать режим :red_heart:"),
-            emoji.emojize("Пригласить :woman_and_man_holding_hands:"),
-            emoji.emojize("Помощь :heart_hands:"),
-            emoji.emojize("Админ-панель :smiling_face_with_sunglasses:"),
-            emoji.emojize("Назад :right_arrow_curving_left:"),
-            emoji.emojize("Вывести пользователей"),
-            emoji.emojize("Редактировать пользователя"),
-            emoji.emojize("Данные пользователя"),
-            emoji.emojize("Отправить рассылку"),
-            emoji.emojize("Назад в админ-панель"),
-            emoji.emojize("Главное меню"),
-        ]
-        return text in main_menu_buttons
-
-    async def handle_main_menu_buttons(self, update: Update, context: CallbackContext) -> None:
-        """Обрабатывает нажатия кнопок главного меню."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
-        user_id = update.message.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
-        text = update.message.text
-
-        if text == emoji.emojize("Продлить подписку :money_bag:"):
-            await self.subscription_handlers.subscription_handle(update, context)
-        elif text == emoji.emojize("Выбрать режим :red_heart:"):
-            await self.chat_mode_handlers.show_chat_modes_handle(update, context)
-        elif text == emoji.emojize("Пригласить :woman_and_man_holding_hands:"):
-            await self._handle_invite(update, context)
-        elif text == emoji.emojize("Помощь :heart_hands:"):
-            await self.help_handle(update, context)
-        elif text == emoji.emojize("Админ-панель :smiling_face_with_sunglasses:"):
-            await self.admin_handlers.admin_panel_handle(update, context)  # Используем admin_handlers
-        elif text == emoji.emojize("Назад :right_arrow_curving_left:"):
-            await self._handle_back(update, context)
-        elif text == emoji.emojize("Вывести пользователей"):
-            await self.admin_handlers.show_users_handle(update, context)
-        elif text == emoji.emojize("Редактировать пользователя"):
-            await self.admin_handlers.edit_user_handle(update, context)
-        elif text == emoji.emojize("Данные пользователя"):
-            await self.admin_handlers.get_user_data_handle(update, context)
-        elif text == emoji.emojize("Отправить рассылку"):
-            await self.admin_handlers.broadcast_handle(update, context)
-        elif text == emoji.emojize("Назад в админ-панель"):
-            await self.admin_handlers.handle_admin_panel_back(update, context)
-        elif text == emoji.emojize("Главное меню"):
-            await self.admin_handlers.handle_main_menu_back(update, context)
-        elif emoji.emojize(":green_circle:") in text or emoji.emojize(":red_circle:") in text:
-            await self.subscription_handlers.subscription_handle(update, context)
-
-    async def _handle_invite(self, update: Update, context: CallbackContext) -> None:
-        """Обрабатывает кнопку приглашения друзей."""
-        await update.message.reply_text(
-            "👥 <b>Пригласите друзей!</b>\n\n"
-            "Поделитесь ссылкой на бота с друзьями:\n"
-            f"https://t.me/{context.bot.username}\n\n"
-            "Чем больше друзей - тем лучше!",
-            parse_mode=ParseMode.HTML
-        )
-
-    async def _handle_back(self, update: Update, context: CallbackContext) -> None:
-        """Обрабатывает кнопку 'Назад'."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
-        user_id = update.message.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
-        reply_markup = await BotKeyboards.get_main_keyboard(user_id)
-        await update.message.reply_text(
-            "Возврат в главное меню...",
-            reply_markup=reply_markup,
-            parse_mode=ParseMode.HTML
-        )
-
-    def _process_message_text(self, update: Update, context: CallbackContext, message: Optional[str]) -> str:
-        """Обрабатывает текст сообщения."""
-        _message = message or update.message.text
-
-        if update.message.chat.type != "private":
-            _message = _message.replace("@" + context.bot.username, "").strip()
-
-        return _message
-
     async def _handle_text_message(self, update: Update, context: CallbackContext,
-                                   message: str, use_new_dialog_timeout: bool) -> None:
+                                  message: str, use_new_dialog_timeout: bool) -> None:
         """Обрабатывает текстовое сообщение."""
         user_id = update.message.from_user.id
         current_model = self.db.get_user_attribute(user_id, "current_model")
@@ -609,31 +472,19 @@ class MessageHandlers(BotHandlers):
                 self._text_message_handle_fn(update, context, message, use_new_dialog_timeout)
             )
 
-        await self._execute_user_task(user_id, task, update)
-
-    async def _execute_user_task(self, user_id: int, task: asyncio.Task, update: Update) -> None:
-        """Выполняет задачу пользователя с обработкой отмены."""
-        user_tasks[user_id] = task
-
-        try:
-            await task
-        except asyncio.CancelledError:
-            await update.message.reply_text("✅ Приостановлено", parse_mode=ParseMode.HTML)
-        finally:
-            if user_id in user_tasks:
-                del user_tasks[user_id]
+        await self.execute_user_task(user_id, task, update)
 
     async def _text_message_handle_fn(self, update: Update, context: CallbackContext,
-                                      message: str, use_new_dialog_timeout: bool) -> None:
+                                     message: str, use_new_dialog_timeout: bool) -> None:
         """Обрабатывает текстовое сообщение (внутренняя функция)."""
         user_id = update.message.from_user.id
         chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
 
-        await self._prepare_dialog(user_id, use_new_dialog_timeout, chat_mode, update)
+        await self.prepare_dialog(user_id, use_new_dialog_timeout, chat_mode, update)
 
         if not message or len(message) == 0:
             await update.message.reply_text("🥲 You sent <b>empty message</b>. Please, try again!",
-                                            parse_mode=ParseMode.HTML)
+                                           parse_mode=ParseMode.HTML)
             return
 
         try:
@@ -651,33 +502,29 @@ class MessageHandlers(BotHandlers):
                 chatgpt_instance = openai_utils.ChatGPT(model=current_model)
 
                 if config.enable_message_streaming:
-                    # Потоковый режим - отправляем части ответа по мере поступления
                     await self._handle_streaming_response(
                         update, context, message, dialog_messages, chat_mode,
                         chatgpt_instance, placeholder_message, parse_mode, user_id
                     )
                 else:
-                    # Непотоковый режим - получаем весь ответ сразу
                     answer, n_input_tokens, n_output_tokens = await self._get_non_streaming_response(
                         chatgpt_instance, message, dialog_messages, chat_mode
                     )
 
-                    # Отправляем полный ответ
-                    await self._edit_message_with_retry(context, placeholder_message, answer, chat_mode)
+                    await self.edit_message_with_retry(context, placeholder_message, answer, chat_mode)
 
-                    # Сохраняем диалог и токены
                     new_dialog_message = {"user": [{"type": "text", "text": message}], "bot": answer,
-                                          "date": datetime.now()}
-                    self._update_dialog_and_tokens(user_id, new_dialog_message, n_input_tokens, n_output_tokens)
+                                         "date": datetime.now()}
+                    self.update_dialog_and_tokens(user_id, new_dialog_message, n_input_tokens, n_output_tokens)
 
         except Exception as e:
-            await self._handle_message_error(update, e)
+            await self.handle_message_error(update, e)
 
     async def _handle_streaming_response(self, update: Update, context: CallbackContext, message: str,
-                                         dialog_messages: List[Dict], chat_mode: str,
-                                         chatgpt_instance: openai_utils.ChatGPT,
-                                         placeholder_message: telegram.Message,
-                                         parse_mode: str, user_id: int) -> None:
+                                        dialog_messages: List[Dict], chat_mode: str,
+                                        chatgpt_instance: openai_utils.ChatGPT,
+                                        placeholder_message: telegram.Message,
+                                        parse_mode: str, user_id: int) -> None:
         """Обрабатывает потоковый ответ от ChatGPT."""
         gen = chatgpt_instance.send_message_stream(message, dialog_messages=dialog_messages, chat_mode=chat_mode)
 
@@ -689,22 +536,16 @@ class MessageHandlers(BotHandlers):
         async for gen_item in gen:
             status, answer, (chunk_n_input_tokens, chunk_n_output_tokens), n_first_dialog_messages_removed = gen_item
 
-            # Обновляем полный ответ
             full_answer = answer
             n_input_tokens, n_output_tokens = chunk_n_input_tokens, chunk_n_output_tokens
 
-            # Проверяем, нужно ли обновлять сообщение
             current_time = datetime.now()
             time_diff = (current_time - last_update_time).total_seconds()
 
-            # Обновляем сообщение если:
-            # 1. Прошло больше 0.5 секунд с последнего обновления ИЛИ
-            # 2. Ответ значительно изменился ИЛИ
-            # 3. Это финальный статус
             should_update = (
-                    time_diff > 0.5 or
-                    abs(len(answer) - len(prev_answer)) > 50 or
-                    status == "finished"
+                time_diff > 0.5 or
+                abs(len(answer) - len(prev_answer)) > 50 or
+                status == "finished"
             )
 
             if should_update and answer.strip():
@@ -720,7 +561,6 @@ class MessageHandlers(BotHandlers):
                     last_update_time = current_time
                 except telegram.error.BadRequest as e:
                     if not str(e).startswith("Message is not modified"):
-                        # Если ошибка не связана с неизмененным сообщением, пытаемся отправить без форматирования
                         try:
                             await context.bot.edit_message_text(
                                 answer[:4096],
@@ -733,14 +573,11 @@ class MessageHandlers(BotHandlers):
                         except Exception:
                             pass
 
-            # Небольшая задержка для плавности
             await asyncio.sleep(0.01)
 
-        # Сохраняем финальный ответ в диалог
         new_dialog_message = {"user": [{"type": "text", "text": message}], "bot": full_answer, "date": datetime.now()}
-        self._update_dialog_and_tokens(user_id, new_dialog_message, n_input_tokens, n_output_tokens)
+        self.update_dialog_and_tokens(user_id, new_dialog_message, n_input_tokens, n_output_tokens)
 
-        # Уведомление если были удалены сообщения из контекста
         if n_first_dialog_messages_removed > 0:
             if n_first_dialog_messages_removed == 1:
                 text = "✍️ <i>Note:</i> Your current dialog is too long, so your <b>first message</b> was removed from the context.\n Send /new command to start new dialog"
@@ -749,7 +586,7 @@ class MessageHandlers(BotHandlers):
             await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
     async def _get_non_streaming_response(self, chatgpt_instance: openai_utils.ChatGPT, message: str,
-                                          dialog_messages: List[Dict], chat_mode: str) -> Tuple[str, int, int]:
+                                         dialog_messages: List[Dict], chat_mode: str) -> Tuple[str, int, int]:
         """Получает непотоковый ответ от ChatGPT."""
         answer, (n_input_tokens, n_output_tokens), _ = await chatgpt_instance.send_message(
             message, dialog_messages=dialog_messages, chat_mode=chat_mode
@@ -757,7 +594,7 @@ class MessageHandlers(BotHandlers):
         return answer, n_input_tokens, n_output_tokens
 
     async def _vision_message_handle_fn(self, update: Update, context: CallbackContext,
-                                        use_new_dialog_timeout: bool = True) -> None:
+                                       use_new_dialog_timeout: bool = True) -> None:
         """Обрабатывает сообщения с изображениями для GPT-4 Vision."""
         logger.info('_vision_message_handle_fn')
         user_id = update.message.from_user.id
@@ -772,282 +609,7 @@ class MessageHandlers(BotHandlers):
 
         chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
 
-        if use_new_dialog_timeout:
-            last_interaction = self.db.get_user_attribute(user_id, "last_interaction")
-            dialog_messages = self.db.get_dialog_messages(user_id)
-
-            if (datetime.now() - last_interaction).seconds > config.new_dialog_timeout and len(dialog_messages) > 0:
-                self.db.start_new_dialog(user_id)
-                await update.message.reply_text(
-                    f"Запуск нового диалога (<b>{config.chat_modes[chat_mode]['name']}</b>) ✅",
-                    parse_mode=ParseMode.HTML
-                )
-
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
-        transcribed_text = ''
-        buf = None
-
-        # Обработка голосового сообщения
-        if update.message.voice:
-            voice = update.message.voice
-            voice_file = await context.bot.get_file(voice.file_id)
-
-            buf = io.BytesIO()
-            await voice_file.download_to_memory(buf)
-            buf.name = "voice.oga"
-            buf.seek(0)
-
-            transcribed_text = await openai_utils.transcribe_audio(buf)
-            transcribed_text = transcribed_text.strip()
-
-        # Обработка изображения
-        if update.message.photo:
-            photo = update.message.photo[-1]
-            photo_file = await context.bot.get_file(photo.file_id)
-
-            buf = io.BytesIO()
-            await photo_file.download_to_memory(buf)
-            buf.name = "image.jpg"
-            buf.seek(0)
-
-        n_input_tokens, n_output_tokens = 0, 0
-
-        try:
-            placeholder_message = await update.message.reply_text("<i>Думаю...</i>", parse_mode=ParseMode.HTML)
-            message_text = update.message.caption or update.message.text or transcribed_text or ''
-
-            await update.message.chat.send_action(action="typing")
-
-            dialog_messages = self.db.get_dialog_messages(user_id, dialog_id=None)
-            parse_mode = {
-                "html": ParseMode.HTML,
-                "markdown": ParseMode.MARKDOWN
-            }[config.chat_modes[chat_mode]["parse_mode"]]
-
-            chatgpt_instance = openai_utils.ChatGPT(model=current_model)
-
-            if config.enable_message_streaming:
-                # Потоковый режим для vision
-                gen = chatgpt_instance.send_vision_message_stream(
-                    message_text,
-                    dialog_messages=dialog_messages,
-                    image_buffer=buf,
-                    chat_mode=chat_mode,
-                )
-
-                full_answer = ""
-                prev_answer = ""
-                last_update_time = datetime.now()
-
-                async for gen_item in gen:
-                    status, answer, (
-                        chunk_n_input_tokens, chunk_n_output_tokens), n_first_dialog_messages_removed = gen_item
-
-                    full_answer = answer
-                    n_input_tokens, n_output_tokens = chunk_n_input_tokens, chunk_n_output_tokens
-
-                    # Проверяем, нужно ли обновлять сообщение
-                    current_time = datetime.now()
-                    time_diff = (current_time - last_update_time).total_seconds()
-
-                    should_update = (
-                            time_diff > 0.5 or
-                            abs(len(answer) - len(prev_answer)) > 50 or
-                            status == "finished"
-                    )
-
-                    if should_update and answer.strip():
-                        try:
-                            await context.bot.edit_message_text(
-                                answer[:4096],
-                                chat_id=placeholder_message.chat_id,
-                                message_id=placeholder_message.message_id,
-                                parse_mode=parse_mode,
-                            )
-                            prev_answer = answer
-                            last_update_time = current_time
-                        except telegram.error.BadRequest as e:
-                            if not str(e).startswith("Message is not modified"):
-                                try:
-                                    await context.bot.edit_message_text(
-                                        answer[:4096],
-                                        chat_id=placeholder_message.chat_id,
-                                        message_id=placeholder_message.message_id,
-                                    )
-                                    prev_answer = answer
-                                    last_update_time = current_time
-                                except Exception:
-                                    pass
-
-                    await asyncio.sleep(0.01)
-
-            else:
-                # Непотоковый режим для vision
-                answer, (n_input_tokens, n_output_tokens), _ = await chatgpt_instance.send_vision_message(
-                    message_text,
-                    dialog_messages=dialog_messages,
-                    image_buffer=buf,
-                    chat_mode=chat_mode,
-                )
-
-                await context.bot.edit_message_text(
-                    answer[:4096],
-                    chat_id=placeholder_message.chat_id,
-                    message_id=placeholder_message.message_id,
-                    parse_mode=parse_mode,
-                )
-                full_answer = answer
-
-            # Сохраняем диалог
-            if buf is not None:
-                base_image = base64.b64encode(buf.getvalue()).decode("utf-8")
-                new_dialog_message = {
-                    "user": [
-                        {"type": "text", "text": message_text},
-                        {"type": "image", "image": base_image}
-                    ],
-                    "bot": full_answer,
-                    "date": datetime.now()
-                }
-            else:
-                new_dialog_message = {"user": message_text, "bot": full_answer, "date": datetime.now()}
-
-            self._update_dialog_and_tokens(user_id, new_dialog_message, n_input_tokens, n_output_tokens)
-
-        except asyncio.CancelledError:
-            self.db.update_n_used_tokens(user_id, current_model, n_input_tokens, n_output_tokens)
-            raise
-        except Exception as e:
-            error_text = f"Something went wrong during completion_1. Reason: {e}"
-            logger.error(error_text)
-            await update.message.reply_text(error_text)
-
-    async def _get_chatgpt_response(self, message: str, dialog_messages: List[Dict],
-                                    chat_mode: str, user_id: str) -> Tuple[str, int, int]:
-        """Получает ответ от ChatGPT."""
-        current_model = self.db.get_user_attribute(user_id, "current_model")
-        chatgpt_instance = openai_utils.ChatGPT(model=current_model)
-
-        if config.enable_message_streaming:
-            return await self._get_streamed_response(chatgpt_instance, message, dialog_messages, chat_mode)
-        else:
-            answer, (n_input_tokens, n_output_tokens), _ = await chatgpt_instance.send_message(
-                message, dialog_messages=dialog_messages, chat_mode=chat_mode
-            )
-            return answer, n_input_tokens, n_output_tokens
-
-    async def _get_streamed_response(self, chatgpt_instance: openai_utils.ChatGPT, message: str,
-                                     dialog_messages: List[Dict], chat_mode: str) -> Tuple[str, int, int]:
-        """Получает потоковый ответ от ChatGPT."""
-        gen = chatgpt_instance.send_message_stream(message, dialog_messages=dialog_messages, chat_mode=chat_mode)
-        answer = ""
-        n_input_tokens, n_output_tokens = 0, 0
-
-        async for gen_item in gen:
-            status, chunk_answer, (chunk_n_input_tokens, chunk_n_output_tokens), _ = gen_item
-
-            # Исправление: не конкатенируем, а заменяем ответ
-            # В потоковом режиме каждый чанк содержит полный ответ на данный момент
-            answer = chunk_answer
-            n_input_tokens, n_output_tokens = chunk_n_input_tokens, chunk_n_output_tokens
-
-            if status == "finished":
-                break
-
-        return answer, n_input_tokens, n_output_tokens
-
-    async def _prepare_dialog(self, user_id: int, use_new_dialog_timeout: bool,
-                              chat_mode: str, update: Update) -> None:
-        """Подготавливает диалог для нового сообщения."""
-        if use_new_dialog_timeout:
-            last_interaction = self.db.get_user_attribute(user_id, "last_interaction")
-            dialog_messages = self.db.get_dialog_messages(user_id)
-
-            if (datetime.now() - last_interaction).seconds > config.new_dialog_timeout and len(dialog_messages) > 0:
-                self.db.start_new_dialog(user_id)
-                await update.message.reply_text(
-                    f"Запуск нового диалога (<b>{config.chat_modes[chat_mode]['name']}</b>) ✅",
-                    parse_mode=ParseMode.HTML
-                )
-
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
-    def _update_dialog_and_tokens(self, user_id: int, new_dialog_message: Dict,
-                                  n_input_tokens: int, n_output_tokens: int) -> None:
-        """Обновляет диалог и счетчики токенов."""
-        current_model = self.db.get_user_attribute(user_id, "current_model")
-        current_dialog_messages = self.db.get_dialog_messages(user_id, dialog_id=None)
-        self.db.set_dialog_messages(user_id, current_dialog_messages + [new_dialog_message], dialog_id=None)
-
-        self.db.update_n_used_tokens(user_id, current_model, n_input_tokens, n_output_tokens)
-
-        action_type = self.db.get_user_attribute(user_id, "current_model")
-        self.db.deduct_cost_for_action(
-            user_id=user_id,
-            action_type=action_type,
-            action_params={'n_input_tokens': n_input_tokens, 'n_output_tokens': n_output_tokens}
-        )
-
-    async def _edit_message_with_retry(self, context: CallbackContext, placeholder_message: telegram.Message,
-                                       answer: str, chat_mode: str) -> None:
-        """Редактирует сообщение с повторными попытками при ошибках."""
-        parse_mode = {
-            "html": ParseMode.HTML,
-            "markdown": ParseMode.MARKDOWN
-        }[config.chat_modes[chat_mode]["parse_mode"]]
-
-        try:
-            await context.bot.edit_message_text(
-                answer[:4096],  # Ограничение длины сообщения в Telegram
-                chat_id=placeholder_message.chat_id,
-                message_id=placeholder_message.message_id,
-                parse_mode=parse_mode,
-                disable_web_page_preview=True
-            )
-        except telegram.error.BadRequest as e:
-            if not str(e).startswith("Message is not modified"):
-                await context.bot.edit_message_text(
-                    answer[:4096],
-                    chat_id=placeholder_message.chat_id,
-                    message_id=placeholder_message.message_id,
-                    disable_web_page_preview=True
-                )
-
-    async def _handle_message_error(self, update: Update, error: Exception) -> None:
-        """Обрабатывает ошибки при обработке сообщений."""
-        error_text = f"Something went wrong during completion. Reason: {error}"
-        logger.error(error_text)
-        await update.message.reply_text(error_text)
-
-    async def _vision_message_handle_fn(self, update: Update, context: CallbackContext,
-                                        use_new_dialog_timeout: bool = True) -> None:
-        """Обрабатывает сообщения с изображениями для GPT-4 Vision."""
-        logger.info('_vision_message_handle_fn')
-        user_id = update.message.from_user.id
-        current_model = self.db.get_user_attribute(user_id, "current_model")
-
-        if current_model != "gpt-4-vision-preview":
-            await update.message.reply_text(
-                "🥲 Images processing is only available for the <b>GPT-4 Vision</b> model. Please change your settings in /settings",
-                parse_mode=ParseMode.HTML,
-            )
-            return
-
-        chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
-
-        if use_new_dialog_timeout:
-            last_interaction = self.db.get_user_attribute(user_id, "last_interaction")
-            dialog_messages = self.db.get_dialog_messages(user_id)
-
-            if (datetime.now() - last_interaction).seconds > config.new_dialog_timeout and len(dialog_messages) > 0:
-                self.db.start_new_dialog(user_id)
-                await update.message.reply_text(
-                    f"Запуск нового диалога (<b>{config.chat_modes[chat_mode]['name']}</b>) ✅",
-                    parse_mode=ParseMode.HTML
-                )
-
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+        await self.prepare_dialog(user_id, use_new_dialog_timeout, chat_mode, update)
 
         transcribed_text = ''
         buf = None
@@ -1151,7 +713,7 @@ class MessageHandlers(BotHandlers):
             else:
                 new_dialog_message = {"user": message_text, "bot": answer, "date": datetime.now()}
 
-            self._update_dialog_and_tokens(user_id, new_dialog_message, n_input_tokens, n_output_tokens)
+            self.update_dialog_and_tokens(user_id, new_dialog_message, n_input_tokens, n_output_tokens)
 
         except asyncio.CancelledError:
             self.db.update_n_used_tokens(user_id, current_model, n_input_tokens, n_output_tokens)
@@ -1161,8 +723,7 @@ class MessageHandlers(BotHandlers):
             logger.error(error_text)
             await update.message.reply_text(error_text)
 
-    async def voice_message_handle(self, update: Update, context: CallbackContext, message: Optional[str] = None) -> \
-            Optional[str]:
+    async def voice_message_handle(self, update: Update, context: CallbackContext, message: Optional[str] = None) -> Optional[str]:
         """Обрабатывает голосовые сообщения."""
         if not await self.is_bot_mentioned(update, context):
             return
@@ -1181,7 +742,7 @@ class MessageHandlers(BotHandlers):
         transcribed_text = await self._transcribe_voice_message(update, context, chat_mode)
 
         if chat_mode == "stenographer":
-            return  # Обработка завершена в _transcribe_voice_message
+            return
 
         await self.message_handle(update, context, message=transcribed_text)
         return transcribed_text
@@ -1202,11 +763,10 @@ class MessageHandlers(BotHandlers):
         transcribed_text = await openai_utils.transcribe_audio(buf)
         text = f"🎤: <i>{transcribed_text}</i>"
 
-        # Обновляем статистику использования
         user_id = update.message.from_user.id
         audio_duration_minutes = voice.duration / 60.0
         self.db.set_user_attribute(user_id, "n_transcribed_seconds",
-                                   voice.duration + self.db.get_user_attribute(user_id, "n_transcribed_seconds"))
+                                  voice.duration + self.db.get_user_attribute(user_id, "n_transcribed_seconds"))
         self.db.deduct_cost_for_action(
             user_id=user_id,
             action_type='whisper',
@@ -1248,49 +808,91 @@ class MessageHandlers(BotHandlers):
         else:
             await update.message.reply_text("<i>Нечего отменять...</i>", parse_mode=ParseMode.HTML)
 
-    async def message_handle(self, update: Update, context: CallbackContext,
-                             message: Optional[str] = None, use_new_dialog_timeout: bool = True) -> None:
-        """Обрабатывает текстовые сообщения."""
-        if not await self.is_bot_mentioned(update, context):
-            return
+    async def _is_main_menu_button(self, text: str) -> bool:
+        """Проверяет, является ли текст кнопкой главного меню."""
+        main_menu_buttons = [
+            emoji.emojize("Продлить подписку :money_bag:"),
+            emoji.emojize("Выбрать режим :red_heart:"),
+            emoji.emojize("Пригласить :woman_and_man_holding_hands:"),
+            emoji.emojize("Помощь :heart_hands:"),
+            emoji.emojize("Админ-панель :smiling_face_with_sunglasses:"),
+            emoji.emojize("Назад :right_arrow_curving_left:"),
+            emoji.emojize("Вывести пользователей"),
+            emoji.emojize("Редактировать пользователя"),
+            emoji.emojize("Данные пользователя"),
+            emoji.emojize("Отправить рассылку"),
+            emoji.emojize("Назад в админ-панель"),
+            emoji.emojize("Главное меню"),
+        ]
+        return text in main_menu_buttons
 
-        if update.edited_message is not None:
-            await self.edited_message_handle(update, context)
-            return
-
-        # Проверяем, не является ли сообщение кнопкой главного меню
-        if await self._is_main_menu_button(update.message.text):
-            await self.handle_main_menu_buttons(update, context)
-            return
-
-        processed_message = self._process_message_text(update, context, message)
+    async def handle_main_menu_buttons(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает нажатия кнопок главного меню."""
         await self.register_user_if_not_exists(update, context, update.message.from_user)
-
-        if await self.is_previous_message_not_answered_yet(update, context):
-            return
-
         user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if not await self.subscription_preprocessor(update, context):
-            return
+        text = update.message.text
 
-        # Определяем тип обработки сообщения
-        chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
+        button_handlers = {
+            emoji.emojize("Продлить подписку :money_bag:"): self.subscription_handlers.subscription_handle,
+            emoji.emojize("Выбрать режим :red_heart:"): self.chat_mode_handlers.show_chat_modes_handle,
+            emoji.emojize("Пригласить :woman_and_man_holding_hands:"): self._handle_invite,
+            emoji.emojize("Помощь :heart_hands:"): self.help_handle,
+            emoji.emojize("Админ-панель :smiling_face_with_sunglasses:"): self.admin_handlers.admin_panel_handle,
+            emoji.emojize("Назад :right_arrow_curving_left:"): self._handle_back,
+            emoji.emojize("Вывести пользователей"): self.admin_handlers.show_users_handle,
+            emoji.emojize("Редактировать пользователя"): self.admin_handlers.edit_user_handle,
+            emoji.emojize("Данные пользователя"): self.admin_handlers.get_user_data_handle,
+            emoji.emojize("Отправить рассылку"): self.admin_handlers.broadcast_handle,
+            emoji.emojize("Назад в админ-панель"): self.admin_handlers.handle_admin_panel_back,
+            emoji.emojize("Главное меню"): self.admin_handlers.handle_main_menu_back,
+        }
 
-        if chat_mode == "artist":
-            await self.generate_image_handle(update, context, message=message)
-            return
-        elif chat_mode == "stenographer":
-            await self.voice_message_handle(update, context, message=message)
-            return
-        elif chat_mode == "photo_editor":
-            await self.photo_editor_handle(update, context, message=message)
-            return  # Новый обработчик для фоторедактора
+        handler = button_handlers.get(text)
+        if handler:
+            await handler(update, context)
+        elif emoji.emojize(":green_circle:") in text or emoji.emojize(":red_circle:") in text:
+            await self.subscription_handlers.subscription_handle(update, context)
 
-        await self._handle_text_message(update, context, processed_message, use_new_dialog_timeout)
+    async def _handle_invite(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает кнопку приглашения друзей."""
+        await update.message.reply_text(
+            "👥 <b>Пригласите друзей!</b>\n\n"
+            "Поделитесь ссылкой на бота с друзьями:\n"
+            f"https://t.me/{context.bot.username}\n\n"
+            "Чем больше друзей - тем лучше!",
+            parse_mode=ParseMode.HTML
+        )
+
+    async def _handle_back(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает кнопку 'Назад'."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        reply_markup = await BotKeyboards.get_main_keyboard(user_id)
+        await update.message.reply_text(
+            "Возврат в главное меню...",
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.HTML
+        )
+
+    def _process_message_text(self, update: Update, context: CallbackContext, message: Optional[str]) -> str:
+        """Обрабатывает текст сообщения."""
+        _message = message or update.message.text
+
+        if update.message.chat.type != "private":
+            _message = _message.replace("@" + context.bot.username, "").strip()
+
+        return _message
+
+
+class PhotoEditorMixin:
+    """Миксин для обработки фоторедактора."""
 
     async def photo_editor_handle(self, update: Update, context: CallbackContext,
-                                  message: Optional[str] = None) -> None:
+                                 message: Optional[str] = None) -> None:
         """Обрабатывает запросы в режиме фоторедактора."""
         logger.info(
             f"Photo editor handle: photo={bool(update.message.photo)}, caption='{update.message.caption}', text='{update.message.text}'")
@@ -1306,32 +908,27 @@ class MessageHandlers(BotHandlers):
         if not await self.subscription_preprocessor(update, context):
             return
 
-        # Получаем описание из caption или текста сообщения
-        edit_description = None
-        if update.message.caption:
-            edit_description = update.message.caption
-            logger.info(f"Using caption: {edit_description}")
-        elif message:
-            edit_description = message
-            logger.info(f"Using message: {edit_description}")
-        elif update.message.text and not update.message.photo:
-            edit_description = update.message.text
-            logger.info(f"Using text: {edit_description}")
+        edit_description = self._get_edit_description(update, message)
 
-        # Проверяем, есть ли фото для редактирования
         if update.message.photo:
-            logger.info("Processing photo with editing")
             await self._handle_photo_for_editing(update, context, edit_description)
         elif context.user_data.get('waiting_for_edit_description') and edit_description:
-            # Пользователь отправил описание после фото
-            logger.info("Processing edit description for saved photo")
             await self._perform_photo_editing(update, context, edit_description)
         else:
-            logger.info("Requesting photo")
             await self._request_photo_for_editing(update, context, edit_description)
 
+    def _get_edit_description(self, update: Update, message: Optional[str]) -> Optional[str]:
+        """Получает описание редактирования из различных источников."""
+        if update.message.caption:
+            return update.message.caption
+        elif message:
+            return message
+        elif update.message.text and not update.message.photo:
+            return update.message.text
+        return None
+
     async def _handle_photo_for_editing(self, update: Update, context: CallbackContext,
-                                        edit_description: Optional[str] = None) -> None:
+                                       edit_description: Optional[str] = None) -> None:
         """Обрабатывает фото для редактирования."""
         user_id = update.message.from_user.id
 
@@ -1344,14 +941,11 @@ class MessageHandlers(BotHandlers):
         buf.name = "photo_to_edit.jpg"
         buf.seek(0)
 
-        # Сохраняем фото в контексте пользователя
         context.user_data['photo_to_edit'] = buf.getvalue()
 
         if edit_description:
-            # Если описание уже есть в caption - сразу выполняем редактирование
             await self._perform_photo_editing(update, context, edit_description)
         else:
-            # Ждем описание отдельным сообщением
             context.user_data['waiting_for_edit_description'] = True
 
             await update.message.reply_text(
@@ -1363,15 +957,12 @@ class MessageHandlers(BotHandlers):
             )
 
     async def _request_photo_for_editing(self, update: Update, context: CallbackContext,
-                                         message: Optional[str] = None) -> None:
+                                        message: Optional[str] = None) -> None:
         """Запрашивает фото для редактирования."""
         if message and context.user_data.get('waiting_for_edit_description'):
-            # Пользователь отправил описание после фото
             context.user_data['waiting_for_edit_description'] = False
-            edit_description = message
-            await self._perform_photo_editing(update, context, edit_description)
+            await self._perform_photo_editing(update, context, message)
         else:
-            # Просто текстовый запрос без фото
             await update.message.reply_text(
                 "🎨 <b>Режим фоторедактора</b>\n\n"
                 "Для редактирования фото:\n"
@@ -1387,7 +978,7 @@ class MessageHandlers(BotHandlers):
             )
 
     async def _perform_photo_editing(self, update: Update, context: CallbackContext,
-                                     edit_description: str) -> None:
+                                    edit_description: str) -> None:
         """Выполняет редактирование фото через DALL-E."""
         user_id = update.message.from_user.id
 
@@ -1411,14 +1002,12 @@ class MessageHandlers(BotHandlers):
         )
 
         try:
-            # Получаем сохраненное фото
             photo_data = context.user_data['photo_to_edit']
             photo_buffer = io.BytesIO(photo_data)
-            photo_buffer.name = "image.jpg"  # Указываем оригинальное имя
+            photo_buffer.name = "image.jpg"
 
             logger.info(f"Starting photo editing with prompt: {edit_description}")
 
-            # Выполняем редактирование через DALL-E
             edited_image_url = await openai_utils.edit_image(
                 image=photo_buffer,
                 prompt=edit_description,
@@ -1427,16 +1016,10 @@ class MessageHandlers(BotHandlers):
 
             if edited_image_url:
                 logger.info("Photo editing successful")
-                # Отправляем отредактированное фото
                 await self._send_edited_photo(update, context, edited_image_url,
-                                              edit_description, placeholder_message)
-
-                # Обновляем статистику использования
+                                             edit_description, placeholder_message)
                 self._update_photo_editor_usage(user_id)
-
-                # Очищаем временные данные
                 self._cleanup_photo_context(context)
-
             else:
                 logger.error("Photo editing returned no URL")
                 await context.bot.edit_message_text(
@@ -1461,16 +1044,19 @@ class MessageHandlers(BotHandlers):
         """Возвращает понятное пользователю сообщение об ошибке."""
         error_str = str(error).lower()
 
-        if "unsupported mimetype" in error_str or "invalid image" in error_str:
-            return "❌ Формат изображения не поддерживается. Попробуйте другое фото (JPEG, PNG)."
-        elif "safety system" in error_str:
-            return "❌ Запрос не соответствует политикам безопасности OpenAI. Попробуйте другое описание."
-        elif "billing" in error_str:
-            return "❌ Проблемы с биллингом OpenAI. Обратитесь к администратору."
-        elif "size" in error_str:
-            return "❌ Изображение слишком большое. Попробуйте фото меньшего размера."
-        else:
-            return f"❌ Ошибка при редактировании фото: {str(error)}"
+        error_messages = {
+            "unsupported mimetype": "❌ Формат изображения не поддерживается. Попробуйте другое фото (JPEG, PNG).",
+            "invalid image": "❌ Формат изображения не поддерживается. Попробуйте другое фото (JPEG, PNG).",
+            "safety system": "❌ Запрос не соответствует политикам безопасности OpenAI. Попробуйте другое описание.",
+            "billing": "❌ Проблемы с биллингом OpenAI. Обратитесь к администратору.",
+            "size": "❌ Изображение слишком большое. Попробуйте фото меньшего размера."
+        }
+
+        for key, message in error_messages.items():
+            if key in error_str:
+                return message
+
+        return f"❌ Ошибка при редактировании фото: {str(error)}"
 
     def _cleanup_photo_context(self, context: CallbackContext) -> None:
         """Очищает временные данные фото из контекста."""
@@ -1479,19 +1065,16 @@ class MessageHandlers(BotHandlers):
             if key in context.user_data:
                 del context.user_data[key]
 
-
     async def _send_edited_photo(self, update: Update, context: CallbackContext,
-                                 image_url: str, edit_description: str,
-                                 placeholder_message: telegram.Message) -> None:
+                                image_url: str, edit_description: str,
+                                placeholder_message: telegram.Message) -> None:
         """Отправляет отредактированное фото."""
         try:
-            # Скачиваем и отправляем изображение
             response = requests.get(image_url, stream=True)
             if response.status_code == 200:
                 image_buffer = io.BytesIO(response.content)
                 image_buffer.name = "edited_image.png"
 
-                # Редактируем сообщение "Редактирую фото" на финальное
                 await context.bot.edit_message_text(
                     f"✅ <b>Фото отредактировано!</b>\n\n"
                     f"<i>Запрос:</i> {edit_description}\n\n"
@@ -1501,7 +1084,6 @@ class MessageHandlers(BotHandlers):
                     parse_mode=ParseMode.HTML
                 )
 
-                # Отправляем само изображение
                 await update.message.chat.send_photo(
                     photo=InputFile(image_buffer, "edited_image.png"),
                     caption=f"🎨 Отредактировано: {edit_description}"
@@ -1525,77 +1107,21 @@ class MessageHandlers(BotHandlers):
 
     def _update_photo_editor_usage(self, user_id: int) -> None:
         """Обновляет статистику использования фоторедактора."""
-        # Увеличиваем счетчик использований
         current_usage = self.db.get_user_attribute(user_id, "n_photo_edits") or 0
         self.db.set_user_attribute(user_id, "n_photo_edits", current_usage + 1)
 
-        # Списание стоимости (можно настроить отдельную стоимость для редактирования)
         self.db.deduct_cost_for_action(
             user_id=user_id,
             action_type='photo_edit',
             action_params={'n_edits': 1}
         )
 
-    async def photo_message_handle(self, update: Update, context: CallbackContext) -> None:
-        """Обрабатывает сообщения с фото."""
-        logger.info("Photo message received")
 
-        if not await self.is_bot_mentioned(update, context):
-            return
-
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
-
-        if await self.is_previous_message_not_answered_yet(update, context):
-            return
-
-        user_id = update.message.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
-        if not await self.subscription_preprocessor(update, context):
-            return
-
-        # Определяем режим чата и обрабатываем фото соответствующим образом
-        chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
-        logger.info(f"Photo received in chat mode: {chat_mode}")
-
-        if chat_mode == "photo_editor":
-            await self.photo_editor_handle(update, context)
-        elif chat_mode == "artist":
-            # В режиме художника фото можно использовать как референс
-            caption = update.message.caption or "Создай изображение похожее на это фото"
-            await self.generate_image_handle(update, context, message=caption)
-        else:
-            # В других режимах обрабатываем как обычное сообщение с фото
-            await self._handle_photo_in_regular_mode(update, context)
-
-    async def _handle_photo_in_regular_mode(self, update: Update, context: CallbackContext) -> None:
-        """Обрабатывает фото в обычных режимах чата."""
-        user_id = update.message.from_user.id
-        current_model = self.db.get_user_attribute(user_id, "current_model")
-
-        # Если модель поддерживает vision, используем её
-        if current_model == "gpt-4-vision-preview":
-            await self._vision_message_handle_fn(update, context, use_new_dialog_timeout=True)
-        else:
-            # Иначе просто уведомляем пользователя
-            caption = update.message.caption
-            if caption:
-                await self.message_handle(update, context, message=caption)
-            else:
-                await update.message.reply_text(
-                    "📸 Фото получено! Если хотите его описать или задать вопрос по фото, "
-                    "напишите текст в подписи к фото или следующим сообщением.",
-                    parse_mode=ParseMode.HTML
-                )
-
-
-class ChatModeHandlers(BotHandlers):
+class ChatModeHandlers(BaseHandler):
     """Класс для обработки режимов чата."""
 
     def get_chat_mode_menu(self, page_index: int):
-        """
-        Создает меню выбора режима чата.
-        """
+        """Создает меню выбора режима чата."""
         n_chat_modes_per_page = config.n_chat_modes_per_page
         text = f"Выберите <b>режим чата</b> (Доступно {len(config.chat_modes)} режимов):"
 
@@ -1615,7 +1141,7 @@ class ChatModeHandlers(BotHandlers):
         if row:
             keyboard.append(row)
 
-        # Добавляем пагинацию если нужно
+        # Пагинация
         if len(chat_mode_keys) > n_chat_modes_per_page:
             is_first_page = (page_index == 0)
             is_last_page = ((page_index + 1) * n_chat_modes_per_page >= len(chat_mode_keys))
@@ -1683,281 +1209,7 @@ class ChatModeHandlers(BotHandlers):
         )
 
 
-class SettingsHandlers(BotHandlers):
-    """Класс для обработки настроек."""
-
-    def get_settings_menu(self, user_id: int):
-        """
-        Создает меню настроек.
-        """
-        text = "⚙️ Настройки:"
-
-        keyboard = [
-            [InlineKeyboardButton("🧠 Модель нейросети", callback_data='model-ai_model')],
-            [InlineKeyboardButton("🎨 Модель художника", callback_data='model-artist_model')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        return text, reply_markup
-
-    async def settings_handle(self, update: Update, context: CallbackContext) -> None:
-        """Обрабатывает команду /settings."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
-        if await self.is_previous_message_not_answered_yet(update, context):
-            return
-
-        user_id = update.message.from_user.id
-
-        # Проверяем права
-        if str(user_id) not in config.roles.get('admin', []):
-            await update.message.reply_text("❌ У вас нет доступа к админ-панели.")
-            return
-
-
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
-        text, reply_markup = self.get_settings_menu(user_id)
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-
-    async def set_settings_handle(self, update: Update, context: CallbackContext) -> None:
-        """Обрабатывает выбор настроек."""
-        await self.register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
-        user_id = update.callback_query.from_user.id
-
-        query = update.callback_query
-        await query.answer()
-
-        _, model_key = query.data.split("|")
-        self.db.set_user_attribute(user_id, "current_model", model_key)
-
-        await self.display_model_info(query, user_id, context)
-
-    async def display_model_info(self, query, user_id, context):
-        """Отображает информацию о модели."""
-        current_model = self.db.get_user_attribute(user_id, "current_model")
-        model_info = config.models["info"][current_model]
-        description = model_info["description"]
-        scores = model_info["scores"]
-
-        details_text = f"{description}\n\n"
-        for score_key, score_value in scores.items():
-            details_text += f"{'🟢' * score_value}{'⚪️' * (5 - score_value)} – {score_key}\n"
-
-        details_text += "\nВыберите <b>модель</b>:"
-
-        buttons = []
-        claude_buttons = []
-        other_buttons = []
-
-        for model_key in config.models["available_text_models"]:
-            title = config.models["info"][model_key]["name"]
-            if model_key == current_model:
-                title = "✅ " + title
-
-            if "claude" in model_key.lower():
-                callback_data = f"claude-model-set_settings|{model_key}"
-                claude_buttons.append(InlineKeyboardButton(title, callback_data=callback_data))
-            else:
-                callback_data = f"model-set_settings|{model_key}"
-                other_buttons.append(InlineKeyboardButton(title, callback_data=callback_data))
-
-        half_size = len(other_buttons) // 2
-        first_row = other_buttons[:half_size]
-        second_row = other_buttons[half_size:]
-        back_button = [InlineKeyboardButton("⬅️", callback_data='model-back_to_settings')]
-
-        reply_markup = InlineKeyboardMarkup([first_row, second_row, claude_buttons, back_button])
-
-        try:
-            await query.edit_message_text(text=details_text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
-        except telegram.error.BadRequest as e:
-            if "Message is not modified" in str(e):
-                pass
-
-    async def model_settings_handler(self, update: Update, context: CallbackContext) -> None:
-        """Обрабатывает настройки моделей."""
-        query = update.callback_query
-        await query.answer()
-
-        data = query.data
-        user_id = query.from_user.id
-
-        if data == 'model-ai_model':
-            current_model = self.db.get_user_attribute(user_id, "current_model")
-            text = f"{config.models['info'][current_model]['description']}\n\n"
-
-            score_dict = config.models["info"][current_model]["scores"]
-            for score_key, score_value in score_dict.items():
-                text += f"{'🟢' * score_value}{'⚪️' * (5 - score_value)} – {score_key}\n"
-
-            text += "\nSelect <b>model</b>:\n"
-
-            buttons = []
-            claude_buttons = []
-            other_buttons = []
-
-            for model_key in config.models["available_text_models"]:
-                title = config.models["info"][model_key]["name"]
-                if model_key == current_model:
-                    title = "✅ " + title
-
-                if "claude" in model_key.lower():
-                    callback_data = f"claude-model-set_settings|{model_key}"
-                    claude_buttons.append(InlineKeyboardButton(title, callback_data=callback_data))
-                else:
-                    callback_data = f"model-set_settings|{model_key}"
-                    other_buttons.append(InlineKeyboardButton(title, callback_data=callback_data))
-
-            half_size = len(other_buttons) // 2
-            first_row = other_buttons[:half_size]
-            second_row = other_buttons[half_size:]
-            back_button = [InlineKeyboardButton("⬅️", callback_data='model-back_to_settings')]
-
-            reply_markup = InlineKeyboardMarkup([first_row, second_row, claude_buttons, back_button])
-
-            await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
-
-        elif data.startswith('claude-model-set_settings|'):
-            if config.anthropic_api_key is None or config.anthropic_api_key == "":
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text="This bot does not have the Anthropic models available :(",
-                    parse_mode='Markdown'
-                )
-                return
-            _, model_key = data.split("|")
-            self.db.set_user_attribute(user_id, "current_model", model_key)
-            await self.display_model_info(query, user_id, context)
-
-        elif data.startswith('model-set_settings|'):
-            _, model_key = data.split("|")
-            if "claude" in model_key.lower() and (config.anthropic_api_key is None or config.anthropic_api_key == ""):
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text="This bot does not have the Anthropic models available :(",
-                    parse_mode='Markdown'
-                )
-                return
-            self.db.set_user_attribute(user_id, "current_model", model_key)
-            await self.display_model_info(query, user_id, context)
-
-        elif data.startswith('model-artist-set_model|'):
-            _, model_key = data.split("|")
-            await self.switch_between_artist_handler(query, user_id, model_key)
-
-        elif data == 'model-artist_model':
-            await self.artist_model_settings_handler(query, user_id)
-
-        elif data.startswith('model-artist-set_model|'):
-            _, model_key = data.split("|")
-            preferences = self.db.get_user_attribute(user_id, "image_preferences")
-            preferences["model"] = model_key
-            self.db.set_user_attribute(user_id, "image_preferences", preferences)
-            await self.artist_model_settings_handler(query, user_id)
-
-        elif data.startswith("model-artist-set_images|"):
-            _, n_images = data.split("|")
-            preferences = self.db.get_user_attribute(user_id, "image_preferences")
-            preferences["n_images"] = int(n_images)
-            self.db.set_user_attribute(user_id, "image_preferences", preferences)
-            await self.artist_model_settings_handler(query, user_id)
-
-        elif data.startswith("model-artist-set_resolution|"):
-            _, resolution = data.split("|")
-            preferences = self.db.get_user_attribute(user_id, "image_preferences")
-            preferences["resolution"] = resolution
-            self.db.set_user_attribute(user_id, "image_preferences", preferences)
-            await self.artist_model_settings_handler(query, user_id)
-
-        elif data.startswith("model-artist-set_quality|"):
-            _, quality = data.split("|")
-            preferences = self.db.get_user_attribute(user_id, "image_preferences")
-            preferences["quality"] = quality
-            self.db.set_user_attribute(user_id, "image_preferences", preferences)
-            await self.artist_model_settings_handler(query, user_id)
-
-        elif data == 'model-back_to_settings':
-            text, reply_markup = self.get_settings_menu(user_id)
-            await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
-
-    async def artist_model_settings_handler(self, query, user_id):
-        """Обрабатывает настройки модели художника."""
-        current_preferences = self.db.get_user_attribute(user_id, "image_preferences")
-        current_model = current_preferences.get("model", "dalle-2")
-
-        model_info = config.models["info"][current_model]
-        description = model_info["description"]
-        scores = model_info["scores"]
-
-        details_text = f"{description}\n\n"
-        for score_key, score_value in scores.items():
-            details_text += f"{'🟢' * score_value}{'⚪️' * (5 - score_value)} – {score_key}\n"
-
-        buttons = []
-        for model_key in config.models["available_image_models"]:
-            title = config.models["info"][model_key]["name"]
-            if model_key == current_model:
-                title = "✅ " + title
-            buttons.append(InlineKeyboardButton(title, callback_data=f"model-artist-set_model|{model_key}"))
-
-        if current_model == "dalle-2":
-            details_text += "\nFor this model, choose the number of images to generate and the resolution:"
-            n_images = current_preferences.get("n_images", 1)
-            images_buttons = [
-                InlineKeyboardButton(
-                    f"✅ {i} image" if i == n_images and i == 1 else f"✅ {i} images" if i == n_images else f"{i} image" if i == 1 else f"{i} images",
-                    callback_data=f"model-artist-set_images|{i}")
-                for i in range(1, 4)
-            ]
-            current_resolution = current_preferences.get("resolution", "1024x1024")
-            resolution_buttons = [
-                InlineKeyboardButton(f"✅ {res_key}" if res_key == current_resolution else f"{res_key}",
-                                     callback_data=f"model-artist-set_resolution|{res_key}")
-                for res_key in config.models["info"]["dalle-2"]["resolutions"].keys()
-            ]
-            keyboard = [buttons] + [images_buttons] + [resolution_buttons]
-
-        elif current_model == "dalle-3":
-            details_text += "\nFor this model, choose the quality of the images and the resolution:"
-            current_quality = current_preferences.get("quality", "standard")
-            quality_buttons = [
-                InlineKeyboardButton(f"✅ {quality_key}" if quality_key == current_quality else f"{quality_key}",
-                                     callback_data=f"model-artist-set_quality|{quality_key}")
-                for quality_key in config.models["info"]["dalle-3"]["qualities"].keys()
-            ]
-            current_resolution = current_preferences.get("resolution", "1024x1024")
-            resolution_buttons = [
-                InlineKeyboardButton(f"✅ {res_key}" if res_key == current_resolution else f"{res_key}",
-                                     callback_data=f"model-artist-set_resolution|{res_key}")
-                for res_key in config.models["info"]["dalle-3"]["qualities"][current_quality]["resolutions"].keys()
-            ]
-            keyboard = [buttons] + [quality_buttons] + [resolution_buttons]
-        else:
-            keyboard = [buttons]
-
-        keyboard.append([InlineKeyboardButton("⬅️", callback_data='model-back_to_settings')])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        try:
-            await query.edit_message_text(text=details_text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
-        except telegram.error.BadRequest as e:
-            if "Message is not modified" in str(e):
-                pass
-
-    async def switch_between_artist_handler(self, query, user_id, model_key):
-        """Переключает между моделями художника."""
-        preferences = self.db.get_user_attribute(user_id, "image_preferences")
-        preferences["model"] = model_key
-        if model_key == "dalle-2":
-            preferences["quality"] = "standard"
-        elif model_key == "dalle-3":
-            preferences["n_images"] = 1
-        preferences["resolution"] = "1024x1024"
-        self.db.set_user_attribute(user_id, "image_preferences", preferences)
-        await self.artist_model_settings_handler(query, user_id)
-
-
-class SubscriptionHandlers(BotHandlers):
+class SubscriptionHandlers(BaseHandler):
     """Класс для обработки подписок и платежей."""
 
     async def subscription_handle(self, update: Update, context: CallbackContext) -> None:
@@ -2012,7 +1264,6 @@ class SubscriptionHandlers(BotHandlers):
         max_requests = limits.get("max_requests", 0)
         max_images = limits.get("max_images", 0)
 
-        # Для безлимитных подписок показываем соответствующий текст
         requests_text = f"{subscription_info['requests_used']}/{max_requests}" if max_requests != float(
             'inf') else f"{subscription_info['requests_used']} (безлимитно)"
         images_text = f"{subscription_info['images_used']}/{max_images}" if max_images != float(
@@ -2052,7 +1303,7 @@ class SubscriptionHandlers(BotHandlers):
         return InlineKeyboardMarkup(keyboard)
 
     async def _send_subscription_message(self, update: Update, text: str,
-                                         reply_markup: InlineKeyboardMarkup) -> None:
+                                        reply_markup: InlineKeyboardMarkup) -> None:
         """Отправляет сообщение с информацией о подписках."""
         if update.message is not None:
             await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
@@ -2183,11 +1434,11 @@ class SubscriptionHandlers(BotHandlers):
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
-class ImageHandlers(BotHandlers):
+class ImageHandlers(BaseHandler):
     """Класс для обработки генерации изображений."""
 
     async def generate_image_handle(self, update: Update, context: CallbackContext,
-                                    message: Optional[str] = None) -> None:
+                                   message: Optional[str] = None) -> None:
         """Обрабатывает генерацию изображений."""
         await self.register_user_if_not_exists(update, context, update.message.from_user)
         if await self.is_previous_message_not_answered_yet(update, context):
@@ -2224,9 +1475,7 @@ class ImageHandlers(BotHandlers):
             prompt=prompt, model=model, n_images=n_images, size=resolution
         )
 
-        # Обновляем статистику использования
         self._update_image_usage_stats(user_id, user_preferences, n_images)
-
         return image_urls
 
     def _update_image_usage_stats(self, user_id: int, user_preferences: Dict[str, Any], n_images: int) -> None:
@@ -2251,7 +1500,7 @@ class ImageHandlers(BotHandlers):
         )
 
     async def _send_generated_images(self, update: Update, context: CallbackContext, prompt: str,
-                                     image_urls: List[str], placeholder_message: telegram.Message) -> None:
+                                    image_urls: List[str], placeholder_message: telegram.Message) -> None:
         """Отправляет сгенерированные изображения."""
         pre_generation_message = f"Нарисовали 🎨:\n\n  <i>{prompt or ''}</i>  \n\n Подождите немного, изображение почти готово!"
         await context.bot.edit_message_text(
@@ -2282,7 +1531,7 @@ class ImageHandlers(BotHandlers):
             await bot.send_photo(chat_id=chat_id, photo=InputFile(image_buffer, "image.jpg"))
 
     async def _handle_image_generation_error(self, update: Update, error: Exception,
-                                             is_unexpected: bool = False) -> None:
+                                            is_unexpected: bool = False) -> None:
         """Обрабатывает ошибки генерации изображений."""
         if is_unexpected:
             error_text = f"⚠️ An unexpected error occurred. Please try again. \n\n<b>Reason</b>: {str(error)}"
@@ -2295,7 +1544,7 @@ class ImageHandlers(BotHandlers):
         await update.message.reply_text(error_text, parse_mode=ParseMode.HTML)
 
 
-class AdminHandlers(BotHandlers):
+class AdminHandlers(BaseHandler):
     """Класс для обработки админ-панели."""
 
     async def admin_panel_handle(self, update: Update, context: CallbackContext) -> None:
@@ -2304,12 +1553,15 @@ class AdminHandlers(BotHandlers):
         user_id = update.message.from_user.id
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        # Проверяем права администратора
-        if str(user_id) not in config.roles.get('admin', []):
+        if not self._is_admin(user_id):
             await update.message.reply_text("❌ У вас нет доступа к админ-панели.")
             return
 
         await self._show_admin_panel(update, context)
+
+    def _is_admin(self, user_id: int) -> bool:
+        """Проверяет, является ли пользователь администратором."""
+        return str(user_id) in config.roles.get('admin', [])
 
     async def _show_admin_panel(self, update: Update, context: CallbackContext) -> None:
         """Показывает админ-панель."""
@@ -2327,7 +1579,7 @@ class AdminHandlers(BotHandlers):
         user_id = update.message.from_user.id
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if str(user_id) not in config.roles.get('admin', []):
+        if not self._is_admin(user_id):
             await update.message.reply_text("❌ У вас нет доступа к этой команде.")
             return
 
@@ -2338,7 +1590,7 @@ class AdminHandlers(BotHandlers):
             return
 
         text = "👥 <b>Список пользователей:</b>\n\n"
-        for i, user in enumerate(users[:50], 1):  # Ограничиваем вывод первыми 50 пользователями
+        for i, user in enumerate(users[:50], 1):
             username = user.get('username', 'Нет username')
             first_name = user.get('first_name', 'Нет имени')
             role = user.get('role', 'Не указана')
@@ -2355,7 +1607,6 @@ class AdminHandlers(BotHandlers):
         if len(users) > 50:
             text += f"\n... и еще {len(users) - 50} пользователей"
 
-        # Добавляем кнопку возврата
         reply_markup = BotKeyboards.get_back_to_admin_keyboard()
         await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
@@ -2365,7 +1616,7 @@ class AdminHandlers(BotHandlers):
         user_id = update.message.from_user.id
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if str(user_id) not in config.roles.get('admin', []):
+        if not self._is_admin(user_id):
             await update.message.reply_text("❌ У вас нет доступа к этой команде.")
             return
 
@@ -2387,7 +1638,7 @@ class AdminHandlers(BotHandlers):
         user_id = update.message.from_user.id
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if str(user_id) not in config.roles.get('admin', []):
+        if not self._is_admin(user_id):
             await update.message.reply_text("❌ У вас нет доступа к этой команде.")
             return
 
@@ -2421,7 +1672,7 @@ class AdminHandlers(BotHandlers):
         user_id = update.message.from_user.id
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if str(user_id) not in config.roles.get('admin', []):
+        if not self._is_admin(user_id):
             await update.message.reply_text("❌ У вас нет доступа к админ-панели.")
             return
 
@@ -2432,7 +1683,7 @@ class AdminHandlers(BotHandlers):
         await self.register_user_if_not_exists(update, context, update.message.from_user)
         user_id = update.message.from_user.id
 
-        if str(user_id) not in config.roles.get('admin', []):
+        if not self._is_admin(user_id):
             await update.message.reply_text("❌ У вас нет доступа к этой команде.")
             return
 
@@ -2448,12 +1699,10 @@ class AdminHandlers(BotHandlers):
             target_user_id = int(context.args[0])
             new_role = context.args[1]
 
-            # Проверяем существование пользователя
             if not self.db.check_if_user_exists(target_user_id):
                 await update.message.reply_text(f"❌ Пользователь с ID {target_user_id} не найден.")
                 return
 
-            # Проверяем валидность роли
             valid_roles = ['admin', 'beta_tester', 'friend', 'regular_user', 'trial_user']
             if new_role not in valid_roles:
                 await update.message.reply_text(
@@ -2461,7 +1710,6 @@ class AdminHandlers(BotHandlers):
                 )
                 return
 
-            # Обновляем роль пользователя
             self.db.set_user_attribute(target_user_id, "role", new_role)
 
             await update.message.reply_text(
@@ -2479,7 +1727,7 @@ class AdminHandlers(BotHandlers):
         await self.register_user_if_not_exists(update, context, update.message.from_user)
         user_id = update.message.from_user.id
 
-        if str(user_id) not in config.roles.get('admin', []):
+        if not self._is_admin(user_id):
             await update.message.reply_text("❌ У вас нет доступа к этой команде.")
             return
 
@@ -2493,7 +1741,6 @@ class AdminHandlers(BotHandlers):
 
         message_text = ' '.join(context.args)
 
-        # Подтверждение рассылки
         confirmation_text = (
             f"📢 <b>Подтверждение рассылки</b>\n\n"
             f"Текст сообщения:\n{message_text}\n\n"
@@ -2516,7 +1763,7 @@ class AdminHandlers(BotHandlers):
         await query.answer()
 
         user_id = query.from_user.id
-        if str(user_id) not in config.roles.get('admin', []):
+        if not self._is_admin(user_id):
             await query.edit_message_text("❌ У вас нет доступа к этой команде.")
             return
 
@@ -2531,7 +1778,6 @@ class AdminHandlers(BotHandlers):
 
             await query.edit_message_text("🔄 Начинаю рассылку...")
 
-            # Получаем всех пользователей
             all_user_ids = self.db.get_all_user_ids()
             success_count = 0
             fail_count = 0
@@ -2552,7 +1798,6 @@ class AdminHandlers(BotHandlers):
                     logger.error(f"Error sending broadcast to {target_user_id}: {e}")
                     fail_count += 1
 
-                # Небольшая задержка чтобы не превысить лимиты Telegram
                 await asyncio.sleep(0.1)
 
             result_text = (
@@ -2570,7 +1815,7 @@ class AdminHandlers(BotHandlers):
         user_id = update.message.from_user.id
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if str(user_id) not in config.roles.get('admin', []):
+        if not self._is_admin(user_id):
             await update.message.reply_text("❌ У вас нет доступа к этой команде.")
             return
 
@@ -2590,23 +1835,12 @@ class AdminHandlers(BotHandlers):
     async def get_user_data_command(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает команду /user_data."""
         try:
-            # Получаем пользователя из update
-            if update.message:
-                user = update.message.from_user
-            elif update.callback_query:
-                user = update.callback_query.from_user
-            else:
-                logger.error("Cannot get user from update")
-                return
-
+            user = self._get_user_from_update(update)
             await self.register_user_if_not_exists(update, context, user)
             user_id = user.id
 
-            if str(user_id) not in config.roles.get('admin', []):
-                if update.message:
-                    await update.message.reply_text("❌ У вас нет доступа к этой команде.")
-                elif update.callback_query:
-                    await update.callback_query.message.reply_text("❌ У вас нет доступа к этой команде.")
+            if not self._is_admin(user_id):
+                await self._send_reply(update, "❌ У вас нет доступа к этой команде.")
                 return
 
             if not context.args:
@@ -2615,45 +1849,43 @@ class AdminHandlers(BotHandlers):
                     "Используйте: /user_data USER_ID\n"
                     "Пример: /user_data 123456789"
                 )
-                if update.message:
-                    await update.message.reply_text(error_text)
-                elif update.callback_query:
-                    await update.callback_query.message.reply_text(error_text)
+                await self._send_reply(update, error_text)
                 return
 
             user_identifier = context.args[0]
+            target_user = self._find_user_by_identifier(user_identifier)
 
-            # Пытаемся найти пользователя по ID или username
-            target_user = None
+            if not target_user:
+                await self._send_reply(update, f"❌ Пользователь '{user_identifier}' не найден.")
+                return
 
-            if user_identifier.startswith('@'):
-                # Поиск по username
-                username = user_identifier[1:]  # Убираем @
-                target_user = self.db.find_user_by_username(username)
-                if not target_user:
-                    await self._send_reply(update, f"❌ Пользователь с username @{username} не найден.")
-                    return
-            else:
-                # Поиск по ID
-                try:
-                    target_user_id = int(user_identifier)
-                    target_user = self.db.get_user_by_id(target_user_id)
-                    if not target_user:
-                        await self._send_reply(update, f"❌ Пользователь с ID {user_identifier} не найден.")
-                        return
-                except ValueError:
-                    await self._send_reply(update, "❌ ID пользователя должен быть числом.")
-                    return
-
-            # Формируем подробную информацию о пользователе
             user_info = await self._format_user_details(target_user)
-
             await self._send_reply(update, user_info)
 
         except Exception as e:
             logger.error(f"Error getting user data: {e}")
             error_text = "❌ Произошла ошибка при получении данных пользователя."
             await self._send_reply(update, error_text)
+
+    def _get_user_from_update(self, update: Update):
+        """Получает пользователя из update."""
+        if update.message:
+            return update.message.from_user
+        elif update.callback_query:
+            return update.callback_query.from_user
+        return None
+
+    def _find_user_by_identifier(self, user_identifier: str) -> Optional[Dict[str, Any]]:
+        """Находит пользователя по ID или username."""
+        if user_identifier.startswith('@'):
+            username = user_identifier[1:]
+            return self.db.find_user_by_username(username)
+        else:
+            try:
+                target_user_id = int(user_identifier)
+                return self.db.get_user_by_id(target_user_id)
+            except ValueError:
+                return None
 
     async def _send_reply(self, update: Update, text: str, parse_mode: str = ParseMode.HTML) -> None:
         """Вспомогательный метод для отправки ответа."""
@@ -2669,7 +1901,6 @@ class AdminHandlers(BotHandlers):
         """Форматирует подробную информацию о пользователе."""
         user_id = user_data['_id']
 
-        # Основная информация
         text = f"👤 <b>Данные пользователя</b>\n\n"
         text += f"<b>ID:</b> <code>{user_id}</code>\n"
         text += f"<b>Username:</b> @{user_data.get('username', 'не указан')}\n"
@@ -2692,7 +1923,6 @@ class AdminHandlers(BotHandlers):
         # Статистика использования
         text += "<b>Статистика использования:</b>\n"
 
-        # Токены
         n_used_tokens = user_data.get('n_used_tokens', {})
         if n_used_tokens:
             for model, tokens in n_used_tokens.items():
@@ -2702,11 +1932,9 @@ class AdminHandlers(BotHandlers):
         else:
             text += "  Токены: не использовались\n"
 
-        # Изображения
         n_generated_images = user_data.get('n_generated_images', 0)
         text += f"  Сгенерировано изображений: {n_generated_images}\n"
 
-        # Аудио
         n_transcribed_seconds = user_data.get('n_transcribed_seconds', 0)
         text += f"  Расшифровано аудио: {n_transcribed_seconds} сек.\n\n"
 
@@ -2731,7 +1959,6 @@ class AdminHandlers(BotHandlers):
         text += f"<b>Первое посещение:</b> {first_seen}\n"
         text += f"<b>Последняя активность:</b> {last_interaction}\n"
 
-        # Текущие настройки
         current_model = user_data.get('current_model', 'не указана')
         current_chat_mode = user_data.get('current_chat_mode', 'не указан')
         text += f"<b>Текущая модель:</b> {current_model}\n"
@@ -2742,7 +1969,7 @@ class AdminHandlers(BotHandlers):
 
 # Функции для работы с платежами
 async def create_subscription_yookassa_payment(user_id: int, subscription_type: SubscriptionType,
-                                               context: CallbackContext) -> str:
+                                              context: CallbackContext) -> str:
     """
     Создает платеж в Yookassa для подписки используя централизованную конфигурацию.
     """
@@ -2834,17 +2061,13 @@ async def send_subscription_confirmation(user_id: int, subscription_type: Subscr
 
 # Вспомогательные функции
 def split_text_into_chunks(text: str, chunk_size: int):
-    """
-    Разделяет текст на части заданного размера.
-    """
+    """Разделяет текст на части заданного размера."""
     for i in range(0, len(text), chunk_size):
         yield text[i:i + chunk_size]
 
 
 def update_user_roles_from_config(database: database.Database, roles: Dict[str, List[int]]) -> None:
-    """
-    Обновляет роли пользователей из конфигурации.
-    """
+    """Обновляет роли пользователей из конфигурации."""
     for role, user_ids in roles.items():
         for user_id in user_ids:
             database.user_collection.update_one(
@@ -2866,22 +2089,18 @@ def configure_logging() -> None:
 
 # Инициализация и запуск бота
 async def post_init(application: Application) -> None:
-    """
-    Функция инициализации после запуска бота.
-    """
+    """Функция инициализации после запуска бота."""
     commands = [
         BotCommand("/new", "Начать новый диалог 🆕"),
         BotCommand("/retry", "Перегенерировать предыдущий запрос 🔁"),
         BotCommand("/mode", "Выбрать режим"),
         BotCommand("/subscription", "Управление подписками 🔔"),
         BotCommand("/my_payments", "Мои платежи 📋"),
-        # BotCommand("/settings", "Настройки ⚙️"),
         BotCommand("/help", "Помощь ❓"),
     ]
 
     await application.bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
 
-    # Добавляем фоновую задачу для проверки платежей
     if config.yookassa_shop_id and config.yookassa_secret_key:
         application.job_queue.run_repeating(
             check_pending_payments_wrapper,
@@ -2891,9 +2110,7 @@ async def post_init(application: Application) -> None:
 
 
 async def check_pending_payments_wrapper(context: CallbackContext) -> None:
-    """
-    Обертка для проверки pending платежей.
-    """
+    """Обертка для проверки pending платежей."""
     try:
         await check_pending_payments()
     except Exception as e:
@@ -2929,7 +2146,6 @@ def run_bot() -> None:
     """Запускает бота."""
     global bot_instance
 
-    # Инициализация Yookassa
     if config.yookassa_shop_id and config.yookassa_secret_key:
         Configuration.account_id = config.yookassa_shop_id
         Configuration.secret_key = config.yookassa_secret_key
@@ -2937,7 +2153,6 @@ def run_bot() -> None:
     update_user_roles_from_config(db, config.roles)
     configure_logging()
 
-    # Создаем application
     application = (
         ApplicationBuilder()
         .token(config.telegram_token)
@@ -2951,15 +2166,12 @@ def run_bot() -> None:
 
     bot_instance = application.bot
 
-    # Создаем обработчики
     subscription_handlers = SubscriptionHandlers(db)
     image_handlers = ImageHandlers(db)
     chat_mode_handlers = ChatModeHandlers(db)
-    settings_handlers = SettingsHandlers(db)
-    admin_handlers = AdminHandlers(db)  # Создаем обработчик админ-панели
+    admin_handlers = AdminHandlers(db)
     message_handlers = MessageHandlers(db, subscription_handlers, chat_mode_handlers, admin_handlers)
 
-    # Настраиваем фильтр пользователей
     user_filter = filters.ALL
     if config.allowed_telegram_usernames:
         usernames = [x for x in config.allowed_telegram_usernames if isinstance(x, str)]
@@ -2979,7 +2191,6 @@ def run_bot() -> None:
     application.add_handler(CommandHandler("new", message_handlers.new_dialog_handle, filters=user_filter))
     application.add_handler(CommandHandler("cancel", message_handlers.cancel_handle, filters=user_filter))
     application.add_handler(CommandHandler("mode", chat_mode_handlers.show_chat_modes_handle, filters=user_filter))
-    application.add_handler(CommandHandler("settings", settings_handlers.settings_handle, filters=user_filter))
     application.add_handler(
         CommandHandler("my_payments", subscription_handlers.my_payments_handle, filters=user_filter))
 
@@ -2988,47 +2199,39 @@ def run_bot() -> None:
     application.add_handler(CommandHandler("broadcast", admin_handlers.broadcast_command, filters=user_filter))
     application.add_handler(CommandHandler("user_data", admin_handlers.get_user_data_command, filters=user_filter))
 
-    # Добавляем обработчики сообщений (включая кнопки админ-панели)
+    # Добавляем обработчики сообщений
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & user_filter,
-                                           message_handlers.message_handle))
+                                          message_handlers.message_handle))
     application.add_handler(MessageHandler(filters.VOICE & user_filter,
-                                           message_handlers.voice_message_handle))
-
-    # ДОБАВЛЯЕМ ОБРАБОТЧИК ДЛЯ ФОТО - ВАЖНО!
+                                          message_handlers.voice_message_handle))
     application.add_handler(MessageHandler(filters.PHOTO & user_filter,
-                                           message_handlers.photo_message_handle))
-    application.add_handler(MessageHandler(filters.ATTACHMENT & user_filter,
-                                           message_handlers.photo_message_handle))
+                                          message_handlers.photo_message_handle))
+    application.add_handler(MessageHandler(filters.Document.IMAGE & user_filter,
+                                          message_handlers.photo_message_handle))
 
     # Добавляем обработчики подписок
     application.add_handler(
         CommandHandler("subscription", subscription_handlers.subscription_handle, filters=user_filter))
     application.add_handler(CallbackQueryHandler(subscription_handlers.subscription_callback_handle,
-                                                 pattern='^subscribe\\|'))
+                                                pattern='^subscribe\\|'))
     application.add_handler(CallbackQueryHandler(subscription_handlers.subscription_handle,
-                                                 pattern='^subscription_back$'))
+                                                pattern='^subscription_back$'))
 
     # Добавляем обработчики режимов чата
     application.add_handler(CallbackQueryHandler(chat_mode_handlers.show_chat_modes_callback_handle,
-                                                 pattern="^show_chat_modes"))
+                                                pattern="^show_chat_modes"))
     application.add_handler(CallbackQueryHandler(chat_mode_handlers.set_chat_mode_handle,
-                                                 pattern="^set_chat_mode"))
-
-    # Добавляем обработчики настроек
-    application.add_handler(CallbackQueryHandler(settings_handlers.set_settings_handle, pattern="^set_settings"))
-    application.add_handler(CallbackQueryHandler(settings_handlers.model_settings_handler, pattern='^model-'))
-    application.add_handler(CallbackQueryHandler(settings_handlers.model_settings_handler, pattern='^claude-model-'))
+                                                pattern="^set_chat_mode"))
 
     # Добавляем обработчики админ-панели (callback)
     application.add_handler(CallbackQueryHandler(admin_handlers.broadcast_confirmation_handler,
-                                                 pattern="^confirm_broadcast\\|"))
+                                                pattern="^confirm_broadcast\\|"))
     application.add_handler(CallbackQueryHandler(admin_handlers.broadcast_confirmation_handler,
-                                                 pattern="^cancel_broadcast"))
+                                                pattern="^cancel_broadcast"))
 
     # Добавляем обработчик ошибок
     application.add_error_handler(error_handle)
 
-    # Запускаем бота
     application.run_polling()
 
 
@@ -3047,7 +2250,6 @@ async def error_handle(update: Update, context: CallbackContext) -> None:
             f"<pre>{html.escape(tb_string)}</pre>"
         )
 
-        # Отправляем сообщение об ошибке
         error_for_user = (
             f"An unexpected error occurred. "
             f"Please try again or contact support if the issue persists."
