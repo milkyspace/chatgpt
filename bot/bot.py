@@ -2230,7 +2230,7 @@ def run_bot() -> None:
     image_handlers = ImageHandlers(db)
     chat_mode_handlers = ChatModeHandlers(db)
     admin_handlers = AdminHandlers(db)
-    message_handlers = MessageHandlers(db, subscription_handlers, chat_mode_handlers, admin_handlers)
+    message_handlers = MessageHandlers(db, subscription_handlers, chat_mode_handlers, admin_handlers, image_handlers)
 
     user_filter = filters.ALL
     if config.allowed_telegram_usernames:
