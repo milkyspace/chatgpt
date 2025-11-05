@@ -85,11 +85,6 @@ class BotKeyboards:
         ])
 
         # Кнопка админ-панели для администраторов
-        logger.warning("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        logger.warning(user_id)
-        logger.warning(config.roles.get('admin', []))
-        logger.warning("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-
         if str(user_id) in config.roles.get('admin', []):
             keyboard.append([KeyboardButton(emoji.emojize("Админ-панель :smiling_face_with_sunglasses:"))])
 
@@ -118,7 +113,7 @@ class BotKeyboards:
             ReplyKeyboardMarkup: Клавиатура с кнопкой возврата в админ-панель
         """
         keyboard = [
-            [KeyboardButton(emoji.emojize("⬅️ Назад в админ-панель"))],
+            [KeyboardButton(emoji.emojize(":left_arrow_curving_right: Назад в админ-панель"))],
             [KeyboardButton(emoji.emojize("Главное меню :right_arrow_curving_left:"))]
         ]
 
@@ -133,9 +128,9 @@ class BotKeyboards:
             ReplyKeyboardMarkup: Клавиатура админ-панели
         """
         keyboard = [
-            [KeyboardButton(emoji.emojize("👥 Вывести пользователей"))],
-            [KeyboardButton(emoji.emojize("✏️ Редактировать пользователя"))],
-            [KeyboardButton(emoji.emojize("📢 Отправить рассылку"))],
+            [KeyboardButton(emoji.emojize(":busts_in_silhouette: Вывести пользователей"))],
+            [KeyboardButton(emoji.emojize(":lower_left_fountain_pen: Редактировать пользователя"))],
+            [KeyboardButton(emoji.emojize(":loudspeaker: Отправить рассылку"))],
             [KeyboardButton(emoji.emojize("Главное меню :right_arrow_curving_left:"))]
         ]
 
