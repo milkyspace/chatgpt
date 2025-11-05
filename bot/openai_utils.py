@@ -5,6 +5,9 @@ import config
 import logging
 import imghdr
 
+import tempfile
+import os
+
 import tiktoken
 import openai
 import anthropic
@@ -600,8 +603,9 @@ async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
 async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
                      model: str = "dall-e-2") -> Optional[str]:
     """
-    Редактирует изображение с помощью DALL-E используя base64 кодирование.
+    Редактирует изображение с помощью DALL-E.
     """
+    temp_file = None
     try:
         # DALL-E 2 поддерживает редактирование, DALL-E 3 пока нет
         if model == "dall-e-3":
@@ -618,21 +622,29 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
         if png_size > 4 * 1024 * 1024:  # 4MB limit for DALL-E
             raise ValueError("Изображение слишком большое после конвертации")
 
-        # Кодируем изображение в base64
-        image_b64 = base64.b64encode(png_buffer.getvalue()).decode('utf-8')
+        # Создаем временный файл с правильным расширением
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
+            temp_file.write(png_buffer.getvalue())
+            temp_file_path = temp_file.name
 
-        # Создаем данные для запроса
-        data = {
-            "image": f"data:image/png;base64,{image_b64}",
-            "prompt": prompt,
-            "size": size,
-            "n": 1,
-            "model": model
-        }
+        try:
+            # Открываем файл в бинарном режиме для передачи в OpenAI
+            with open(temp_file_path, 'rb') as file_obj:
+                # Выполняем редактирование
+                response = await openai.Image.acreate_edit(
+                    image=file_obj,
+                    prompt=prompt,
+                    size=size,
+                    n=1,
+                    model=model
+                )
 
-        # Выполняем запрос
-        response = await openai.Image.acreate_edit(**data)
-        return response.data[0].url
+            return response.data[0].url
+
+        finally:
+            # Удаляем временный файл
+            if os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
 
     except openai.error.InvalidRequestError as e:
         logger.error(f"OpenAI invalid request error: {e}")
