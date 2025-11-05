@@ -199,3 +199,8 @@ info:
   whisper:
     type: audio
     price_per_1_min: 1
+
+  "photo_edit":
+    name: "Редактирование фото"
+    description: "Добавление и изменение объектов на изображениях"
+    price_per_edit: 0.08

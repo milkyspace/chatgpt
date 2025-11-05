@@ -389,6 +389,15 @@ class Database:
             cost_in_euros = audio_duration_minutes * price_per_minute * deduction_rate
             cost_in_rubs = cost_in_euros  # Конвертируем в рубли
 
+        # Добавляем обработку фоторедактирования
+        elif action_type == 'photo_edit':
+            # Стоимость редактирования фото (можно настроить)
+            cost_per_edit = 0.08  # $0.08 за редактирование
+            n_edits = action_params.get('n_edits', 1)
+
+            cost_in_rubs = n_edits * cost_per_edit
+            self.deduct_rub_balance(user_id, cost_in_rubs)
+
         else:
             raise ValueError(f"Unknown action type: {action_type}")
 

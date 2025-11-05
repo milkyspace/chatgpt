@@ -1123,6 +1123,239 @@ class MessageHandlers(BotHandlers):
         else:
             await update.message.reply_text("<i>Нечего отменять...</i>", parse_mode=ParseMode.HTML)
 
+    async def message_handle(self, update: Update, context: CallbackContext,
+                             message: Optional[str] = None, use_new_dialog_timeout: bool = True) -> None:
+        """Обрабатывает текстовые сообщения."""
+        if not await self.is_bot_mentioned(update, context):
+            return
+
+        if update.edited_message is not None:
+            await self.edited_message_handle(update, context)
+            return
+
+        # Проверяем, не является ли сообщение кнопкой главного меню
+        if await self._is_main_menu_button(update.message.text):
+            await self.handle_main_menu_buttons(update, context)
+            return
+
+        processed_message = self._process_message_text(update, context, message)
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+
+        if await self.is_previous_message_not_answered_yet(update, context):
+            return
+
+        user_id = update.message.from_user.id
+
+        if not await self.subscription_preprocessor(update, context):
+            return
+
+        # Определяем тип обработки сообщения
+        chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
+
+        if chat_mode == "artist":
+            await self.generate_image_handle(update, context, message=message)
+            return
+        elif chat_mode == "stenographer":
+            await self.voice_message_handle(update, context, message=message)
+            return
+        elif chat_mode == "photo_editor":
+            await self.photo_editor_handle(update, context, message=message)
+            return  # Новый обработчик для фоторедактора
+
+        await self._handle_text_message(update, context, processed_message, use_new_dialog_timeout)
+
+    async def photo_editor_handle(self, update: Update, context: CallbackContext,
+                                  message: Optional[str] = None) -> None:
+        """Обрабатывает запросы в режиме фоторедактора."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+
+        if await self.is_previous_message_not_answered_yet(update, context):
+            return
+
+        user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        if not await self.subscription_preprocessor(update, context):
+            return
+
+        # Проверяем, есть ли фото для редактирования
+        if update.message.photo:
+            await self._handle_photo_for_editing(update, context, message)
+        else:
+            await self._request_photo_for_editing(update, context, message)
+
+    async def _handle_photo_for_editing(self, update: Update, context: CallbackContext,
+                                        edit_description: Optional[str] = None) -> None:
+        """Обрабатывает фото для редактирования."""
+        user_id = update.message.from_user.id
+
+        if not edit_description:
+            # Сохраняем фото и ждем описание редактирования
+            photo = update.message.photo[-1]
+            photo_file = await context.bot.get_file(photo.file_id)
+
+            buf = io.BytesIO()
+            await photo_file.download_to_memory(buf)
+            buf.name = "photo_to_edit.jpg"
+            buf.seek(0)
+
+            # Сохраняем фото в контексте пользователя
+            context.user_data['photo_to_edit'] = buf.getvalue()
+            context.user_data['waiting_for_edit_description'] = True
+
+            await update.message.reply_text(
+                "📸 <b>Фото получено!</b>\n\n"
+                "Теперь опишите что нужно изменить на фото:\n"
+                "• Что добавить\n• Что убрать\n• Какие изменения сделать\n\n"
+                "<i>Пример: \"Добавь кота на диван\" или \"Поменяй цвет стены на синий\"</i>",
+                parse_mode=ParseMode.HTML
+            )
+            return
+
+        # Если есть и фото и описание - выполняем редактирование
+        await self._perform_photo_editing(update, context, edit_description)
+
+    async def _request_photo_for_editing(self, update: Update, context: CallbackContext,
+                                         message: Optional[str] = None) -> None:
+        """Запрашивает фото для редактирования."""
+        if message and context.user_data.get('waiting_for_edit_description'):
+            # Пользователь отправил описание после фото
+            context.user_data['waiting_for_edit_description'] = False
+            edit_description = message
+            await self._perform_photo_editing(update, context, edit_description)
+        else:
+            # Просто текстовый запрос без фото
+            await update.message.reply_text(
+                "🎨 <b>Режим фоторедактора</b>\n\n"
+                "Для редактирования фото:\n"
+                "1. 📸 <b>Отправьте фото</b> которое нужно изменить\n"
+                "2. ✍️ <b>Опишите</b> что нужно добавить/изменить\n\n"
+                "Я могу:\n"
+                "• Добавлять объекты и людей\n"
+                "• Убирать ненужные элементы\n"
+                "• Менять цвета и фон\n"
+                "• Улучшать качество\n\n"
+                "<i>Просто отправьте фото чтобы начать!</i>",
+                parse_mode=ParseMode.HTML
+            )
+
+    async def _perform_photo_editing(self, update: Update, context: CallbackContext,
+                                     edit_description: str) -> None:
+        """Выполняет редактирование фото через DALL-E."""
+        user_id = update.message.from_user.id
+
+        if 'photo_to_edit' not in context.user_data:
+            await update.message.reply_text(
+                "❌ Сначала отправьте фото для редактирования!",
+                parse_mode=ParseMode.HTML
+            )
+            return
+
+        placeholder_message = await update.message.reply_text(
+            "🎨 <i>Редактирую фото...</i>",
+            parse_mode=ParseMode.HTML
+        )
+
+        try:
+            # Получаем сохраненное фото
+            photo_data = context.user_data['photo_to_edit']
+            photo_buffer = io.BytesIO(photo_data)
+            photo_buffer.name = "image.png"
+
+            # Выполняем редактирование через DALL-E
+            edited_image_url = await openai_utils.edit_image(
+                image=photo_buffer,
+                prompt=edit_description,
+                size="1024x1024"
+            )
+
+            if edited_image_url:
+                # Отправляем отредактированное фото
+                await self._send_edited_photo(update, context, edited_image_url,
+                                              edit_description, placeholder_message)
+
+                # Обновляем статистику использования
+                self._update_photo_editor_usage(user_id)
+
+                # Очищаем временные данные
+                if 'photo_to_edit' in context.user_data:
+                    del context.user_data['photo_to_edit']
+                if 'waiting_for_edit_description' in context.user_data:
+                    del context.user_data['waiting_for_edit_description']
+
+            else:
+                await context.bot.edit_message_text(
+                    "❌ Не удалось отредактировать фото. Попробуйте другое описание.",
+                    chat_id=placeholder_message.chat_id,
+                    message_id=placeholder_message.message_id,
+                    parse_mode=ParseMode.HTML
+                )
+
+        except Exception as e:
+            logger.error(f"Error in photo editing: {e}")
+            await context.bot.edit_message_text(
+                f"❌ Ошибка при редактировании фото: {str(e)}",
+                chat_id=placeholder_message.chat_id,
+                message_id=placeholder_message.message_id,
+                parse_mode=ParseMode.HTML
+            )
+
+    async def _send_edited_photo(self, update: Update, context: CallbackContext,
+                                 image_url: str, edit_description: str,
+                                 placeholder_message: telegram.Message) -> None:
+        """Отправляет отредактированное фото."""
+        try:
+            # Скачиваем и отправляем изображение
+            response = requests.get(image_url, stream=True)
+            if response.status_code == 200:
+                image_buffer = io.BytesIO(response.content)
+                image_buffer.name = "edited_image.png"
+
+                # Редактируем сообщение "Редактирую фото" на финальное
+                await context.bot.edit_message_text(
+                    f"✅ <b>Фото отредактировано!</b>\n\n"
+                    f"<i>Запрос:</i> {edit_description}\n\n"
+                    f"Как вам результат? 🎨",
+                    chat_id=placeholder_message.chat_id,
+                    message_id=placeholder_message.message_id,
+                    parse_mode=ParseMode.HTML
+                )
+
+                # Отправляем само изображение
+                await update.message.chat.send_photo(
+                    photo=InputFile(image_buffer, "edited_image.png"),
+                    caption=f"🎨 Отредактировано: {edit_description}"
+                )
+            else:
+                await context.bot.edit_message_text(
+                    "❌ Не удалось загрузить отредактированное изображение.",
+                    chat_id=placeholder_message.chat_id,
+                    message_id=placeholder_message.message_id,
+                    parse_mode=ParseMode.HTML
+                )
+
+        except Exception as e:
+            logger.error(f"Error sending edited photo: {e}")
+            await context.bot.edit_message_text(
+                "❌ Ошибка при отправке отредактированного фото.",
+                chat_id=placeholder_message.chat_id,
+                message_id=placeholder_message.message_id,
+                parse_mode=ParseMode.HTML
+            )
+
+    def _update_photo_editor_usage(self, user_id: int) -> None:
+        """Обновляет статистику использования фоторедактора."""
+        # Увеличиваем счетчик использований
+        current_usage = self.db.get_user_attribute(user_id, "n_photo_edits") or 0
+        self.db.set_user_attribute(user_id, "n_photo_edits", current_usage + 1)
+
+        # Списание стоимости (можно настроить отдельную стоимость для редактирования)
+        self.db.deduct_cost_for_action(
+            user_id=user_id,
+            action_type='photo_edit',
+            action_params={'n_edits': 1}
+        )
+
 
 class ChatModeHandlers(BotHandlers):
     """Класс для обработки режимов чата."""

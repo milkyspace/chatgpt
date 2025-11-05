@@ -524,3 +524,80 @@ async def generate_images(prompt, model="dall-e-2", n_images=4, size="1024x1024"
 async def is_content_acceptable(prompt):
     r = await openai.Moderation.acreate(input=prompt)
     return not all(r.results[0].categories.values())
+
+
+async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
+                     model: str = "dall-e-2") -> Optional[str]:
+    """
+    Редактирует изображение с помощью DALL-E.
+
+    Args:
+        image: BytesIO объект с исходным изображением
+        prompt: Описание изменений
+        size: Размер выходного изображения
+        model: Модель DALL-E (dall-e-2 или dall-e-3)
+
+    Returns:
+        URL отредактированного изображения или None при ошибке
+    """
+    try:
+        # DALL-E 2 поддерживает редактирование, DALL-E 3 пока нет
+        if model == "dall-e-3":
+            logger.warning("DALL-E 3 doesn't support image editing yet, using DALL-E 2")
+            model = "dall-e-2"
+
+        # Для редактирования нужна маска, но в простом случае можно без нее
+        # В реальном приложении лучше запрашивать у пользователя область редактирования
+        response = await openai.Image.acreate_edit(
+            image=image,
+            prompt=prompt,
+            size=size,
+            n=1,
+            model=model
+        )
+
+        return response.data[0].url
+
+    except openai.error.OpenAIError as e:
+        logger.error(f"OpenAI error in image editing: {e}")
+
+        # Обработка специфичных ошибок
+        if "safety system" in str(e).lower():
+            raise ValueError("Запрос не соответствует политикам безопасности OpenAI")
+        elif "billing" in str(e).lower():
+            raise ValueError("Проблемы с биллингом OpenAI")
+        else:
+            raise e
+
+    except Exception as e:
+        logger.error(f"Unexpected error in image editing: {e}")
+        raise e
+
+
+async def create_image_variation(image: BytesIO, size: str = "1024x1024",
+                                 n: int = 1, model: str = "dall-e-2") -> List[str]:
+    """
+    Создает вариации изображения.
+
+    Args:
+        image: BytesIO объект с исходным изображением
+        size: Размер выходных изображений
+        n: Количество вариаций
+        model: Модель DALL-E
+
+    Returns:
+        Список URL вариаций изображения
+    """
+    try:
+        response = await openai.Image.acreate_variation(
+            image=image,
+            size=size,
+            n=n,
+            model=model
+        )
+
+        return [item.url for item in response.data]
+
+    except Exception as e:
+        logger.error(f"Error creating image variations: {e}")
+        raise e
