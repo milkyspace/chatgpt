@@ -3,18 +3,14 @@ from io import BytesIO
 from typing import Optional, List  # Добавляем импорты типов
 import config
 import imghdr
-import aiohttp
 import tiktoken
 import openai
 import anthropic
 import logging
 import base64
-import time
 from typing import Optional
-
-import json #logging error
-
-#from tokenizers import Tokenizer, models, pre_tokenizers, trainers # other tokenizer module
+import asyncio
+import requests
 
 # setup openai
 openai.api_key = config.openai_api_key
