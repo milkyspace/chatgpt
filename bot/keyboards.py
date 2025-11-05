@@ -9,7 +9,21 @@ import database
 import config
 from bot.openai_utils import logger
 from subscription import SubscriptionType
+import logging
 
+logger = logging.getLogger(__name__)
+
+def configure_logging():
+    # Configure logging based on the enable_detailed_logging value
+    if config.enable_detailed_logging:
+        logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+    else:
+        logging.basicConfig(level=logging.CRITICAL, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+
+    # Set the logger level based on configuration
+    logger.setLevel(logging.getLogger().level)
+
+configure_logging()
 
 class BotKeyboards:
     """Класс для создания клавиатур бота"""
