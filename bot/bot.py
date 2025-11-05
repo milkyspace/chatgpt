@@ -433,20 +433,6 @@ class MessageHandlers(BotHandlers):
             parse_mode=ParseMode.HTML
         )
 
-    async def _handle_admin_panel(self, update: Update, context: CallbackContext) -> None:
-        """Обрабатывает кнопку админ-панели."""
-        user_id = update.message.from_user.id
-        if str(user_id) in config.roles.get('admin', []):
-            await self._show_admin_panel(update, context)
-        else:
-            await update.message.reply_text("У вас нет доступа к админ-панели.")
-
-    async def _show_admin_panel(self, update: Update, context: CallbackContext) -> None:
-        """Показывает админ-панель."""
-        text = "🛠️ <b>Админ-панель</b>\n\nВыберите действие:"
-        reply_markup = BotKeyboards.get_admin_keyboard()
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-
     async def _handle_back(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает кнопку 'Назад'."""
         await self.register_user_if_not_exists(update, context, update.message.from_user)
