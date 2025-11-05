@@ -1,6 +1,8 @@
 import base64
 from io import BytesIO
+from typing import Optional, List  # Добавляем импорты типов
 import config
+import logging
 
 import tiktoken
 import openai
