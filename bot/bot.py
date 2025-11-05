@@ -384,6 +384,9 @@ class MessageHandlers(BotHandlers):
     async def photo_editor_handle(self, update: Update, context: CallbackContext,
                                   message: Optional[str] = None) -> None:
         """Обрабатывает запросы в режиме фоторедактора."""
+        logger.info(
+            f"Photo editor handle called: has_photo={bool(update.message.photo)}, caption='{update.message.caption}'")
+
         await self.register_user_if_not_exists(update, context, update.message.from_user)
 
         if await self.is_previous_message_not_answered_yet(update, context):
@@ -395,23 +398,109 @@ class MessageHandlers(BotHandlers):
         if not await self.subscription_preprocessor(update, context):
             return
 
-        # Получаем описание из caption или текста сообщения
-        edit_description = None
-        if update.message.caption:
-            edit_description = update.message.caption
-        elif message:
-            edit_description = message
-        elif update.message.text and not update.message.photo:
-            edit_description = update.message.text
+        # Получаем описание из caption
+        edit_description = update.message.caption
 
-        # Проверяем, есть ли фото для редактирования
         if update.message.photo:
-            await self._handle_photo_for_editing(update, context, edit_description)
-        elif context.user_data.get('waiting_for_edit_description') and edit_description:
-            # Пользователь отправил описание после фото
-            await self._perform_photo_editing(update, context, edit_description)
+            if edit_description:
+                # Есть и фото и описание - сразу обрабатываем
+                logger.info(f"Processing photo with caption: {edit_description}")
+                await self._process_photo_with_description(update, context, edit_description)
+            else:
+                # Есть фото, но нет описания - сохраняем фото и ждем описание
+                logger.info("Photo received without caption, waiting for description")
+                await self._save_photo_and_wait_for_description(update, context)
+        elif context.user_data.get('waiting_for_edit_description') and message:
+            # Получили описание после фото
+            logger.info(f"Received description after photo: {message}")
+            await self._process_saved_photo_with_description(update, context, message)
         else:
-            await self._request_photo_for_editing(update, context, edit_description)
+            # Нет фото - просим отправить фото
+            logger.info("No photo received, requesting photo")
+            await self._request_photo(update, context)
+
+    async def _process_photo_with_description(self, update: Update, context: CallbackContext,
+                                              edit_description: str) -> None:
+        """Обрабатывает фото с описанием редактирования."""
+        try:
+            # Сохраняем фото
+            photo = update.message.photo[-1]
+            photo_file = await context.bot.get_file(photo.file_id)
+
+            buf = io.BytesIO()
+            await photo_file.download_to_memory(buf)
+            buf.name = "photo_to_edit.jpg"
+            buf.seek(0)
+
+            # Сохраняем фото в контексте
+            context.user_data['photo_to_edit'] = buf.getvalue()
+
+            # Сразу выполняем редактирование
+            await self._perform_photo_editing(update, context, edit_description)
+
+        except Exception as e:
+            logger.error(f"Error processing photo with description: {e}")
+            await update.message.reply_text(
+                "❌ Ошибка при обработке фото. Попробуйте еще раз.",
+                parse_mode=ParseMode.HTML
+            )
+
+    async def _save_photo_and_wait_for_description(self, update: Update, context: CallbackContext) -> None:
+        """Сохраняет фото и ждет описание редактирования."""
+        try:
+            # Сохраняем фото
+            photo = update.message.photo[-1]
+            photo_file = await context.bot.get_file(photo.file_id)
+
+            buf = io.BytesIO()
+            await photo_file.download_to_memory(buf)
+            buf.name = "photo_to_edit.jpg"
+            buf.seek(0)
+
+            # Сохраняем фото в контексте
+            context.user_data['photo_to_edit'] = buf.getvalue()
+            context.user_data['waiting_for_edit_description'] = True
+
+            await update.message.reply_text(
+                "📸 <b>Фото получено!</b>\n\n"
+                "Теперь опишите что нужно изменить на фото. Например:\n"
+                "• <i>\"Добавь кота на диван\"</i>\n"
+                "• <i>\"Убери человека с фона\"</i>\n"
+                "• <i>\"Поменяй цвет машины на красный\"</i>\n\n"
+                "Просто напишите что нужно сделать с фото 👇",
+                parse_mode=ParseMode.HTML
+            )
+
+        except Exception as e:
+            logger.error(f"Error saving photo: {e}")
+            await update.message.reply_text(
+                "❌ Ошибка при сохранении фото. Попробуйте еще раз.",
+                parse_mode=ParseMode.HTML
+            )
+
+    async def _process_saved_photo_with_description(self, update: Update, context: CallbackContext,
+                                                    edit_description: str) -> None:
+        """Обрабатывает сохраненное фото с полученным описанием."""
+        if 'photo_to_edit' not in context.user_data:
+            await update.message.reply_text(
+                "❌ Фото не найдено. Пожалуйста, отправьте фото заново.",
+                parse_mode=ParseMode.HTML
+            )
+            return
+
+        await self._perform_photo_editing(update, context, edit_description)
+
+    async def _request_photo(self, update: Update, context: CallbackContext) -> None:
+        """Запрашивает фото для редактирования."""
+        await update.message.reply_text(
+            "🎨 <b>Режим фоторедактора</b>\n\n"
+            "Для редактирования фото:\n"
+            "1. 📸 <b>Отправьте фото</b> которое нужно изменить\n"
+            "2. ✍️ <b>Опишите в подписи</b> что нужно добавить/изменить\n\n"
+            "<i>Или просто отправьте фото, а затем опишите изменения отдельным сообщением</i>\n\n"
+            "Пример подписи к фото: <i>\"Добавь кота на диван\"</i>",
+            parse_mode=ParseMode.HTML
+        )
 
     async def _is_main_menu_button(self, text: str) -> bool:
         """Проверяет, является ли текст кнопкой главного меню."""
@@ -1434,6 +1523,58 @@ class MessageHandlers(BotHandlers):
             action_type='photo_edit',
             action_params={'n_edits': 1}
         )
+
+    async def photo_message_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает сообщения с фото."""
+        logger.info("Photo message received")
+
+        if not await self.is_bot_mentioned(update, context):
+            return
+
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+
+        if await self.is_previous_message_not_answered_yet(update, context):
+            return
+
+        user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        if not await self.subscription_preprocessor(update, context):
+            return
+
+        # Определяем режим чата и обрабатываем фото соответствующим образом
+        chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
+        logger.info(f"Photo received in chat mode: {chat_mode}")
+
+        if chat_mode == "photo_editor":
+            await self.photo_editor_handle(update, context)
+        elif chat_mode == "artist":
+            # В режиме художника фото можно использовать как референс
+            caption = update.message.caption or "Создай изображение похожее на это фото"
+            await self.generate_image_handle(update, context, message=caption)
+        else:
+            # В других режимах обрабатываем как обычное сообщение с фото
+            await self._handle_photo_in_regular_mode(update, context)
+
+    async def _handle_photo_in_regular_mode(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает фото в обычных режимах чата."""
+        user_id = update.message.from_user.id
+        current_model = self.db.get_user_attribute(user_id, "current_model")
+
+        # Если модель поддерживает vision, используем её
+        if current_model == "gpt-4-vision-preview":
+            await self._vision_message_handle_fn(update, context, use_new_dialog_timeout=True)
+        else:
+            # Иначе просто уведомляем пользователя
+            caption = update.message.caption
+            if caption:
+                await self.message_handle(update, context, message=caption)
+            else:
+                await update.message.reply_text(
+                    "📸 Фото получено! Если хотите его описать или задать вопрос по фото, "
+                    "напишите текст в подписи к фото или следующим сообщением.",
+                    parse_mode=ParseMode.HTML
+                )
 
 
 class ChatModeHandlers(BotHandlers):
@@ -2840,6 +2981,10 @@ def run_bot() -> None:
                                            message_handlers.message_handle))
     application.add_handler(MessageHandler(filters.VOICE & user_filter,
                                            message_handlers.voice_message_handle))
+
+    # ДОБАВЛЯЕМ ОБРАБОТЧИК ДЛЯ ФОТО - ВАЖНО!
+    application.add_handler(MessageHandler(filters.PHOTO & user_filter,
+                                           message_handlers.photo_message_handle))
 
     # Добавляем обработчики подписок
     application.add_handler(
