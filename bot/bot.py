@@ -424,7 +424,7 @@ class MessageHandlers(BotHandlers):
     async def _handle_admin_panel(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает кнопку админ-панели."""
         user_id = update.message.from_user.id
-        if user_id in config.roles.get('admin', []):
+        if str(user_id) in config.roles.get('admin', []):
             await self._show_admin_panel(update, context)
         else:
             await update.message.reply_text("У вас нет доступа к админ-панели.")
