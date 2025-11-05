@@ -1949,90 +1949,88 @@ class AdminHandlers(BotHandlers):
 
         await self._show_admin_panel(update, context)
 
+    async def edit_user_command(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает команду /edit_user."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        user_id = update.message.from_user.id
 
-async def edit_user_command(self, update: Update, context: CallbackContext) -> None:
-    """Обрабатывает команду /edit_user."""
-    await self.register_user_if_not_exists(update, context, update.message.from_user)
-    user_id = update.message.from_user.id
-
-    if user_id not in config.roles.get('admin', []):
-        await update.message.reply_text("❌ У вас нет доступа к этой команде.")
-        return
-
-    if not context.args or len(context.args) < 2:
-        await update.message.reply_text(
-            "❌ Неправильный формат команды.\n"
-            "Используйте: /edit_user USER_ID ROLE\n"
-            "Пример: /edit_user 123456789 admin"
-        )
-        return
-
-    try:
-        target_user_id = int(context.args[0])
-        new_role = context.args[1]
-
-        # Проверяем существование пользователя
-        if not self.db.check_if_user_exists(target_user_id):
-            await update.message.reply_text(f"❌ Пользователь с ID {target_user_id} не найден.")
+        if user_id not in config.roles.get('admin', []):
+            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
             return
 
-        # Проверяем валидность роли
-        valid_roles = ['admin', 'beta_tester', 'friend', 'regular_user', 'trial_user']
-        if new_role not in valid_roles:
+        if not context.args or len(context.args) < 2:
             await update.message.reply_text(
-                f"❌ Неверная роль. Допустимые роли: {', '.join(valid_roles)}"
+                "❌ Неправильный формат команды.\n"
+                "Используйте: /edit_user USER_ID ROLE\n"
+                "Пример: /edit_user 123456789 admin"
             )
             return
 
-        # Обновляем роль пользователя
-        self.db.set_user_attribute(target_user_id, "role", new_role)
+        try:
+            target_user_id = int(context.args[0])
+            new_role = context.args[1]
 
-        await update.message.reply_text(
-            f"✅ Роль пользователя {target_user_id} успешно изменена на '{new_role}'"
+            # Проверяем существование пользователя
+            if not self.db.check_if_user_exists(target_user_id):
+                await update.message.reply_text(f"❌ Пользователь с ID {target_user_id} не найден.")
+                return
+
+            # Проверяем валидность роли
+            valid_roles = ['admin', 'beta_tester', 'friend', 'regular_user', 'trial_user']
+            if new_role not in valid_roles:
+                await update.message.reply_text(
+                    f"❌ Неверная роль. Допустимые роли: {', '.join(valid_roles)}"
+                )
+                return
+
+            # Обновляем роль пользователя
+            self.db.set_user_attribute(target_user_id, "role", new_role)
+
+            await update.message.reply_text(
+                f"✅ Роль пользователя {target_user_id} успешно изменена на '{new_role}'"
+            )
+
+        except ValueError:
+            await update.message.reply_text("❌ ID пользователя должен быть числом.")
+        except Exception as e:
+            logger.error(f"Error editing user: {e}")
+            await update.message.reply_text("❌ Произошла ошибка при изменении роли пользователя.")
+
+    async def broadcast_command(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает команду /broadcast."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        user_id = update.message.from_user.id
+
+        if user_id not in config.roles.get('admin', []):
+            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+            return
+
+        if not context.args:
+            await update.message.reply_text(
+                "❌ Неправильный формат команды.\n"
+                "Используйте: /broadcast ТЕКСТ_СООБЩЕНИЯ\n"
+                "Пример: /broadcast Всем привет! Это тестовая рассылка."
+            )
+            return
+
+        message_text = ' '.join(context.args)
+
+        # Подтверждение рассылки
+        confirmation_text = (
+            f"📢 <b>Подтверждение рассылки</b>\n\n"
+            f"Текст сообщения:\n{message_text}\n\n"
+            f"Отправить это сообщение всем пользователям?"
         )
 
-    except ValueError:
-        await update.message.reply_text("❌ ID пользователя должен быть числом.")
-    except Exception as e:
-        logger.error(f"Error editing user: {e}")
-        await update.message.reply_text("❌ Произошла ошибка при изменении роли пользователя.")
-
-
-async def broadcast_command(self, update: Update, context: CallbackContext) -> None:
-    """Обрабатывает команду /broadcast."""
-    await self.register_user_if_not_exists(update, context, update.message.from_user)
-    user_id = update.message.from_user.id
-
-    if user_id not in config.roles.get('admin', []):
-        await update.message.reply_text("❌ У вас нет доступа к этой команде.")
-        return
-
-    if not context.args:
-        await update.message.reply_text(
-            "❌ Неправильный формат команды.\n"
-            "Используйте: /broadcast ТЕКСТ_СООБЩЕНИЯ\n"
-            "Пример: /broadcast Всем привет! Это тестовая рассылка."
-        )
-        return
-
-    message_text = ' '.join(context.args)
-
-    # Подтверждение рассылки
-    confirmation_text = (
-        f"📢 <b>Подтверждение рассылки</b>\n\n"
-        f"Текст сообщения:\n{message_text}\n\n"
-        f"Отправить это сообщение всем пользователям?"
-    )
-
-    keyboard = [
-        [
-            InlineKeyboardButton("✅ Да, отправить", callback_data=f"confirm_broadcast|{message_text}"),
-            InlineKeyboardButton("❌ Отмена", callback_data="cancel_broadcast")
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Да, отправить", callback_data=f"confirm_broadcast|{message_text}"),
+                InlineKeyboardButton("❌ Отмена", callback_data="cancel_broadcast")
+            ]
         ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_text(confirmation_text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+        await update.message.reply_text(confirmation_text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
 
 async def broadcast_confirmation_handler(self, update: Update, context: CallbackContext) -> None:
