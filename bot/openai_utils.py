@@ -437,7 +437,7 @@ class ChatGPT:
     def _count_tokens_from_messages(self, messages, answer, model="gpt-4-1106-preview"):
 
         if model.startswith("claude"):
-            encoding = tiktoken.encoding_for_model("gpt-4-turbo-2024-04-09")
+            encoding = tiktoken.encoding_for_model("gpt-4o")
         else:
             encoding = tiktoken.encoding_for_model(model)
 
@@ -483,7 +483,7 @@ class ChatGPT:
 
     def _count_tokens_from_prompt(self, prompt, answer, model="text-davinci-003"):
         if model.startswith("claude"):
-            encoding = tiktoken.encoding_for_model("gpt-4-turbo-2024-04-09")
+            encoding = tiktoken.encoding_for_model("gpt-4o")
         else:
             encoding = tiktoken.encoding_for_model(model)
 

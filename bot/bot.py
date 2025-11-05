@@ -52,7 +52,6 @@ HELP_MESSAGE = """<b>Команды:</b>
 /mode – Выбрать режим
 /subscription – Управление подписками 🔔
 /my_payments – Мои платежи 📋
-/settings – Настройки ⚙️
 /help – Помощь ❓
 
 🎤 Вы можете отправлять <b>голосовые сообщения</b> вместо текста
@@ -321,7 +320,7 @@ class MessageHandlers(BotHandlers):
         # Сбрасываем модель с vision на текстовую по умолчанию
         current_model = self.db.get_user_attribute(user_id, "current_model")
         if current_model == "gpt-4-vision-preview":
-            self.db.set_user_attribute(user_id, "current_model", "gpt-4-turbo-2024-04-09")
+            self.db.set_user_attribute(user_id, "current_model", "gpt-4o")
 
         try:
             self.db.start_new_dialog(user_id)
@@ -1243,6 +1242,13 @@ class SettingsHandlers(BotHandlers):
             return
 
         user_id = update.message.from_user.id
+
+        # Проверяем права
+        if str(user_id) not in config.roles.get('admin', []):
+            await update.message.reply_text("❌ У вас нет доступа к админ-панели.")
+            return
+
+
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
         text, reply_markup = self.get_settings_menu(user_id)
@@ -2404,7 +2410,7 @@ async def post_init(application: Application) -> None:
         BotCommand("/mode", "Выбрать режим"),
         BotCommand("/subscription", "Управление подписками 🔔"),
         BotCommand("/my_payments", "Мои платежи 📋"),
-        BotCommand("/settings", "Настройки ⚙️"),
+        # BotCommand("/settings", "Настройки ⚙️"),
         BotCommand("/help", "Помощь ❓"),
     ]
 
