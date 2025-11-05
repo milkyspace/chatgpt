@@ -532,12 +532,7 @@ async def is_content_acceptable(prompt):
 async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
     """
     Конвертирует изображение в PNG формат с улучшенной обработкой.
-
-    Args:
-        image_buffer: BytesIO с исходным изображением
-
-    Returns:
-        BytesIO с изображением в PNG формате
+    Конвертирует в RGBA формат, который требуется OpenAI для редактирования изображений.
     """
     try:
         # Сбрасываем позицию буфера
@@ -560,16 +555,23 @@ async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
         # Логируем информацию об изображении
         logger.info(f"Original image: size={image.size}, mode={image.mode}, format={image.format}")
 
-        # Конвертируем в RGB если нужно
-        if image.mode in ('RGBA', 'LA', 'P'):
-            # Создаем белый фон для прозрачных изображений
-            background = Image.new('RGB', image.size, (255, 255, 255))
-            if image.mode == 'P':
+        # Конвертируем в RGBA формат, который требуется OpenAI для редактирования
+        if image.mode != 'RGBA':
+            logger.info(f"Converting image from {image.mode} to RGBA")
+            if image.mode in ('RGBA', 'LA'):
+                # Уже прозрачное изображение - оставляем как есть
+                pass
+            elif image.mode == 'P':
+                # Палитровое изображение - конвертируем в RGBA
                 image = image.convert('RGBA')
-            background.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
-            image = background
-        elif image.mode != 'RGB':
-            image = image.convert('RGB')
+            elif image.mode == 'L':
+                # Градации серого - конвертируем в LA (L с альфа-каналом)
+                image = image.convert('LA')
+            else:
+                # RGB и другие форматы - конвертируем в RGBA
+                image = image.convert('RGBA')
+
+        logger.info(f"After conversion: size={image.size}, mode={image.mode}")
 
         # Ограничиваем максимальный размер (DALL-E имеет ограничения)
         max_size = (1024, 1024)
@@ -579,13 +581,17 @@ async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
 
         # Создаем новый буфер для PNG
         png_buffer = BytesIO()
+
+        # Сохраняем с максимальным качеством
         image.save(png_buffer, format='PNG', optimize=True)
         png_buffer.seek(0)
 
-        # Устанавливаем правильное имя файла
-        png_buffer.name = "image.png"
+        # Проверяем, что сохранение прошло успешно
+        if len(png_buffer.getvalue()) == 0:
+            raise ValueError("Не удалось сохранить изображение в PNG формате")
 
-        logger.info(f"Image successfully converted to PNG: {image.size}, mode: {image.mode}")
+        logger.info(
+            f"Image successfully converted to PNG: {image.size}, mode: {image.mode}, size: {len(png_buffer.getvalue())} bytes")
 
         return png_buffer
 
