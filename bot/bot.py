@@ -948,7 +948,7 @@ class MessageHandlers(MessageProcessor):
                 )
 
 
-class PhotoEditorMixin:
+class PhotoEditorMixin(BaseHandler):
     """Миксин для обработки фоторедактора."""
 
     async def photo_editor_handle(self, update: Update, context: CallbackContext,
