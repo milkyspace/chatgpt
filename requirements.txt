@@ -15,5 +15,4 @@ yookassa==2.4.0
 emoji==2.10.0
 python-telegram-bot[job-queue]
 Pillow>=10.0.0
-aiohttp
 #tokenizers #other tokenizer if you want to also use the one in the utils file

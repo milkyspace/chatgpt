@@ -13,7 +13,6 @@ import openai
 import anthropic
 import logging
 
-import aiohttp
 import base64
 
 import json #logging error
