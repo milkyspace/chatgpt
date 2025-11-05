@@ -9,6 +9,8 @@ import openai
 import anthropic
 import logging
 import base64
+import time
+from typing import Optional
 
 import json #logging error
 
@@ -603,63 +605,114 @@ async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
 async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
                      model: str = "dall-e-2") -> Optional[str]:
     """
-    Редактирует изображение с помощью DALL-E используя aiohttp FormData.
+    Редактирует изображение с помощью DALL-E с повторными попытками при ошибках сервера.
     """
-    try:
-        # DALL-E 2 поддерживает редактирование, DALL-E 3 пока нет
-        if model == "dall-e-3":
-            logger.warning("DALL-E 3 doesn't support image editing yet, using DALL-E 2")
-            model = "dall-e-2"
+    max_retries = 3
+    retry_delay = 2  # секунды
 
-        # Конвертируем изображение в PNG
-        png_buffer = await _convert_image_to_png(image)
+    for attempt in range(max_retries):
+        try:
+            # DALL-E 2 поддерживает редактирование, DALL-E 3 пока нет
+            if model == "dall-e-3":
+                logger.warning("DALL-E 3 doesn't support image editing yet, using DALL-E 2")
+                model = "dall-e-2"
 
-        # Проверяем размер файла после конвертации
-        png_size = len(png_buffer.getvalue())
-        logger.info(f"PNG file size: {png_size} bytes")
+            # Конвертируем изображение в PNG с RGBA форматом
+            png_buffer = await _convert_image_to_png(image)
 
-        if png_size > 4 * 1024 * 1024:  # 4MB limit for DALL-E
-            raise ValueError("Изображение слишком большое после конвертации")
+            # Проверяем размер файла после конвертации
+            png_size = len(png_buffer.getvalue())
+            logger.info(f"PNG file size: {png_size} bytes")
 
-        # Создаем FormData
-        form_data = aiohttp.FormData()
-        form_data.add_field('image',
-                           png_buffer.getvalue(),
-                           filename='image.png',
-                           content_type='image/png')
-        form_data.add_field('prompt', prompt)
-        form_data.add_field('size', size)
-        form_data.add_field('n', '1')
-        form_data.add_field('model', model)
+            if png_size > 4 * 1024 * 1024:  # 4MB limit for DALL-E
+                raise ValueError("Изображение слишком большое после конвертации")
 
-        headers = {
-            "Authorization": f"Bearer {openai.api_key}",
-        }
+            # Используем синхронный запрос с requests
+            headers = {
+                "Authorization": f"Bearer {openai.api_key}",
+            }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
+            files = {
+                'image': ('image.png', png_buffer.getvalue(), 'image/png'),
+            }
+
+            data = {
+                'prompt': prompt,
+                'size': size,
+                'n': 1,
+                'model': model
+            }
+
+            logger.info(f"Attempt {attempt + 1}/{max_retries}: Sending image edit request to OpenAI")
+
+            response = requests.post(
                 'https://api.openai.com/v1/images/edits',
                 headers=headers,
-                data=form_data
-            ) as response:
-                if response.status == 200:
-                    result = await response.json()
-                    return result['data'][0]['url']
-                else:
-                    error_text = await response.text()
-                    logger.error(f"OpenAI API error: {response.status} - {error_text}")
-                    if "unsupported_file_mimetype" in error_text:
-                        raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
-                    else:
-                        raise Exception(f"OpenAI API error: {response.status} - {error_text}")
+                files=files,
+                data=data,
+                timeout=30  # добавляем таймаут
+            )
 
-    except Exception as e:
-        logger.error(f"Error in photo editing: {e}")
-        error_msg = str(e)
-        if "unsupported_file_mimetype" in error_msg or "image" in error_msg.lower():
-            raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
-        else:
-            raise e
+            if response.status_code == 200:
+                result = response.json()
+                logger.info("Image editing successful")
+                return result['data'][0]['url']
+            elif response.status_code == 500:
+                # Серверная ошибка - пробуем повторить
+                error_text = response.text
+                logger.warning(f"OpenAI server error (attempt {attempt + 1}): {response.status_code}")
+
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying in {retry_delay} seconds...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # exponential backoff
+                    continue
+                else:
+                    raise Exception(f"OpenAI server error after {max_retries} attempts: {response.status_code}")
+            else:
+                error_text = response.text
+                logger.error(f"OpenAI API error: {response.status_code} - {error_text}")
+
+                # Более точная обработка ошибок
+                if "unsupported_file_mimetype" in error_text:
+                    raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
+                elif "Invalid input image" in error_text and "RGBA" in error_text:
+                    raise ValueError("Проблема с форматом изображения. Требуется изображение с прозрачностью.")
+                elif "safety system" in error_text.lower():
+                    raise ValueError("Запрос не соответствует политикам безопасности OpenAI.")
+                else:
+                    raise Exception(f"OpenAI API error: {response.status_code} - {error_text}")
+
+        except requests.exceptions.Timeout:
+            logger.warning(f"Request timeout (attempt {attempt + 1})")
+            if attempt < max_retries - 1:
+                logger.info(f"Retrying in {retry_delay} seconds...")
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 2
+                continue
+            else:
+                raise Exception("Request timeout after multiple attempts")
+
+        except Exception as e:
+            logger.error(f"Error in photo editing (attempt {attempt + 1}): {e}")
+
+            # Если это последняя попытка, пробрасываем ошибку дальше
+            if attempt == max_retries - 1:
+                error_msg = str(e)
+                if "unsupported_file_mimetype" in error_msg or "image" in error_msg.lower() or "RGBA" in error_msg:
+                    raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
+                elif "safety system" in error_msg.lower():
+                    raise ValueError("Запрос не соответствует политикам безопасности OpenAI.")
+                elif "server_error" in error_msg.lower():
+                    raise Exception("Временная ошибка сервера OpenAI. Пожалуйста, попробуйте позже.")
+                else:
+                    raise e
+            else:
+                logger.info(f"Retrying in {retry_delay} seconds...")
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 2
+
+    return None
 
 
 async def create_image_variation(image: BytesIO, size: str = "1024x1024",
