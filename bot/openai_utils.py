@@ -4,6 +4,7 @@ from io import BytesIO
 from typing import Optional, List  # Добавляем импорты типов
 import config
 import logging
+import imghdr
 
 import tiktoken
 import openai
@@ -528,61 +529,9 @@ async def is_content_acceptable(prompt):
     r = await openai.Moderation.acreate(input=prompt)
     return not all(r.results[0].categories.values())
 
-
-async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
-                     model: str = "dall-e-2") -> Optional[str]:
-    """
-    Редактирует изображение с помощью DALL-E.
-
-    Args:
-        image: BytesIO объект с исходным изображением
-        prompt: Описание изменений
-        size: Размер выходного изображения
-        model: Модель DALL-E (dall-e-2 или dall-e-3)
-
-    Returns:
-        URL отредактированного изображения или None при ошибке
-    """
-    try:
-        # DALL-E 2 поддерживает редактирование, DALL-E 3 пока нет
-        if model == "dall-e-3":
-            logger.warning("DALL-E 3 doesn't support image editing yet, using DALL-E 2")
-            model = "dall-e-2"
-
-        # Конвертируем изображение в PNG
-        png_buffer = await _convert_image_to_png(image)
-
-        # Для редактирования нужна маска, но в простом случае можно без нее
-        # В реальном приложении лучше запрашивать у пользователя область редактирования
-        response = await openai.Image.acreate_edit(
-            image=png_buffer,
-            prompt=prompt,
-            size=size,
-            n=1,
-            model=model
-        )
-
-        return response.data[0].url
-
-    except openai.error.OpenAIError as e:
-        logger.error(f"OpenAI error in image editing: {e}")
-
-        # Обработка специфичных ошибок
-        if "safety system" in str(e).lower():
-            raise ValueError("Запрос не соответствует политикам безопасности OpenAI")
-        elif "billing" in str(e).lower():
-            raise ValueError("Проблемы с биллингом OpenAI")
-        else:
-            raise e
-
-    except Exception as e:
-        logger.error(f"Unexpected error in image editing: {e}")
-        raise e
-
-
 async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
     """
-    Конвертирует изображение в PNG формат.
+    Конвертирует изображение в PNG формат с улучшенной обработкой.
 
     Args:
         image_buffer: BytesIO с исходным изображением
@@ -594,10 +543,24 @@ async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
         # Сбрасываем позицию буфера
         image_buffer.seek(0)
 
-        # Открываем изображение с помощью PIL
-        image = Image.open(image_buffer)
+        # Определяем формат изображения
+        image_format = imghdr.what(image_buffer)
+        logger.info(f"Detected image format: {image_format}")
 
-        # Конвертируем в RGB если нужно (для JPEG)
+        # Снова сбрасываем позицию после проверки формата
+        image_buffer.seek(0)
+
+        # Открываем изображение с помощью PIL
+        try:
+            image = Image.open(image_buffer)
+        except Exception as e:
+            logger.error(f"Error opening image with PIL: {e}")
+            raise ValueError(f"Не удалось открыть изображение: {str(e)}")
+
+        # Логируем информацию об изображении
+        logger.info(f"Original image: size={image.size}, mode={image.mode}, format={image.format}")
+
+        # Конвертируем в RGB если нужно
         if image.mode in ('RGBA', 'LA', 'P'):
             # Создаем белый фон для прозрачных изображений
             background = Image.new('RGB', image.size, (255, 255, 255))
@@ -608,19 +571,68 @@ async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
         elif image.mode != 'RGB':
             image = image.convert('RGB')
 
+        # Ограничиваем максимальный размер (DALL-E имеет ограничения)
+        max_size = (1024, 1024)
+        if image.size[0] > max_size[0] or image.size[1] > max_size[1]:
+            image.thumbnail(max_size, Image.Resampling.LANCZOS)
+            logger.info(f"Resized image to: {image.size}")
+
         # Создаем новый буфер для PNG
         png_buffer = BytesIO()
-        image.save(png_buffer, format='PNG')
+        image.save(png_buffer, format='PNG', optimize=True)
         png_buffer.seek(0)
         png_buffer.name = "image.png"
 
-        logger.info(f"Image converted to PNG: {image.size}, mode: {image.mode}")
+        logger.info(f"Image successfully converted to PNG: {image.size}, mode: {image.mode}")
 
         return png_buffer
 
     except Exception as e:
         logger.error(f"Error converting image to PNG: {e}")
         raise ValueError(f"Не удалось обработать изображение: {str(e)}")
+
+
+async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
+                     model: str = "dall-e-2") -> Optional[str]:
+    """
+    Редактирует изображение с помощью DALL-E.
+    """
+    try:
+        # DALL-E 2 поддерживает редактирование, DALL-E 3 пока нет
+        if model == "dall-e-3":
+            logger.warning("DALL-E 3 doesn't support image editing yet, using DALL-E 2")
+            model = "dall-e-2"
+
+        # Конвертируем изображение в PNG
+        png_buffer = await _convert_image_to_png(image)
+
+        # Проверяем размер файла после конвертации
+        png_size = len(png_buffer.getvalue())
+        logger.info(f"PNG file size: {png_size} bytes")
+
+        if png_size > 4 * 1024 * 1024:  # 4MB limit for DALL-E
+            raise ValueError("Изображение слишком большое после конвертации")
+
+        # Выполняем редактирование
+        response = await openai.Image.acreate_edit(
+            image=png_buffer,
+            prompt=prompt,
+            size=size,
+            n=1,
+            model=model
+        )
+
+        return response.data[0].url
+
+    except openai.error.InvalidRequestError as e:
+        logger.error(f"OpenAI invalid request error: {e}")
+        if "image" in str(e).lower():
+            raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
+        else:
+            raise e
+    except Exception as e:
+        logger.error(f"Unexpected error in image editing: {e}")
+        raise e
 
 async def create_image_variation(image: BytesIO, size: str = "1024x1024",
                                  n: int = 1, model: str = "dall-e-2") -> List[str]:
