@@ -598,7 +598,7 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
     """
     Редактирует изображение с помощью DALL-E с использованием маски.
     """
-    max_retries = 3
+    max_retries = 10
     retry_delay = 5  # увеличиваем задержку между попытками
 
     for attempt in range(max_retries):
