@@ -7,8 +7,22 @@ from datetime import datetime
 from telegram import ReplyKeyboardMarkup, KeyboardButton
 import database
 import config
-from bot.openai_utils import logger
 from subscription import SubscriptionType
+import logging
+
+logger = logging.getLogger(__name__)
+
+def configure_logging():
+    # Configure logging based on the enable_detailed_logging value
+    if config.enable_detailed_logging:
+        logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+    else:
+        logging.basicConfig(level=logging.CRITICAL, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+
+    # Set the logger level based on configuration
+    logger.setLevel(logging.getLogger().level)
+
+configure_logging()
 
 class BotKeyboards:
     """Класс для создания клавиатур бота"""
@@ -71,10 +85,10 @@ class BotKeyboards:
         ])
 
         # Кнопка админ-панели для администраторов
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        print(user_id)
-        print(config.roles.get('admin', []))
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        logger.warning("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        logger.warning(user_id)
+        logger.warning(config.roles.get('admin', []))
+        logger.warning("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
         if user_id in config.roles.get('admin', []):
             keyboard.append([KeyboardButton(emoji.emojize("Админ-панель :smiling_face_with_sunglasses:"))])
