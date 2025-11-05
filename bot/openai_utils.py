@@ -645,28 +645,15 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
                     if "unsupported_file_mimetype" in error_text:
                         raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
                     else:
-                        raise Exception(f"OpenAI API error: {response.status}")
+                        raise Exception(f"OpenAI API error: {response.status} - {error_text}")
 
     except Exception as e:
         logger.error(f"Error in photo editing: {e}")
-        # Для новой версии OpenAI используем правильные исключения
-        try:
-            import openai
-            if isinstance(e, openai.BadRequestError):
-                error_msg = str(e)
-                if "unsupported_file_mimetype" in error_msg or "image" in error_msg.lower():
-                    raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
-                else:
-                    raise e
-            else:
-                raise e
-        except ImportError:
-            # Если не удалось импортировать openai, используем общую обработку
-            error_msg = str(e)
-            if "unsupported_file_mimetype" in error_msg or "image" in error_msg.lower():
-                raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
-            else:
-                raise e
+        error_msg = str(e)
+        if "unsupported_file_mimetype" in error_msg or "image" in error_msg.lower():
+            raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
+        else:
+            raise e
 
 
 async def create_image_variation(image: BytesIO, size: str = "1024x1024",
