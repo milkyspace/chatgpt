@@ -887,6 +887,58 @@ class MessageHandlers(MessageProcessor):
 
         return _message
 
+    async def photo_message_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает сообщения с фото."""
+        logger.info("Photo message received")
+
+        if not await self.is_bot_mentioned(update, context):
+            return
+
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+
+        if await self.is_previous_message_not_answered_yet(update, context):
+            return
+
+        user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        if not await self.subscription_preprocessor(update, context):
+            return
+
+        # Определяем режим чата и обрабатываем фото соответствующим образом
+        chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
+        logger.info(f"Photo received in chat mode: {chat_mode}")
+
+        if chat_mode == "photo_editor":
+            await PhotoEditorMixin.photo_editor_handle(update, context)
+        elif chat_mode == "artist":
+            # В режиме художника фото можно использовать как референс
+            caption = update.message.caption or "Создай изображение похожее на это фото"
+            await ImageHandlers.generate_image_handle(update, context, message=caption)
+        else:
+            # В других режимах обрабатываем как обычное сообщение с фото
+            await self._handle_photo_in_regular_mode(update, context)
+
+    async def _handle_photo_in_regular_mode(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает фото в обычных режимах чата."""
+        user_id = update.message.from_user.id
+        current_model = self.db.get_user_attribute(user_id, "current_model")
+
+        # Если модель поддерживает vision, используем её
+        if current_model == "gpt-4-vision-preview":
+            await self._vision_message_handle_fn(update, context, use_new_dialog_timeout=True)
+        else:
+            # Иначе просто уведомляем пользователя
+            caption = update.message.caption
+            if caption:
+                await self.message_handle(update, context, message=caption)
+            else:
+                await update.message.reply_text(
+                    "📸 Фото получено! Если хотите его описать или задать вопрос по фото, "
+                    "напишите текст в подписи к фото или следующим сообщением.",
+                    parse_mode=ParseMode.HTML
+                )
+
 
 class PhotoEditorMixin:
     """Миксин для обработки фоторедактора."""
