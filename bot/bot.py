@@ -391,7 +391,7 @@ class MessageHandlers(BotHandlers):
             emoji.emojize("Редактировать пользователя"),
             emoji.emojize("Отправить рассылку"),
             emoji.emojize("Назад в админ-панель"),
-            emoji.emojize("Главное меню")
+            emoji.emojize("Главное меню"),
         ]
         return text in main_menu_buttons
 

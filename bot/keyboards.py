@@ -113,8 +113,8 @@ class BotKeyboards:
             ReplyKeyboardMarkup: Клавиатура с кнопкой возврата в админ-панель
         """
         keyboard = [
-            [KeyboardButton(emoji.emojize(":left_arrow_curving_right: Назад в админ-панель"))],
-            [KeyboardButton(emoji.emojize("Главное меню :right_arrow_curving_left:"))]
+            [KeyboardButton(emoji.emojize("Назад в админ-панель"))],
+            [KeyboardButton(emoji.emojize("Главное меню"))]
         ]
 
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
