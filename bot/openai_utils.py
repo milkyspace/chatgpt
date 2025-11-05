@@ -1,3 +1,4 @@
+from PIL import Image  # Добавляем импорт для работы с изображениями
 import base64
 from io import BytesIO
 from typing import Optional, List  # Добавляем импорты типов
@@ -548,10 +549,13 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
             logger.warning("DALL-E 3 doesn't support image editing yet, using DALL-E 2")
             model = "dall-e-2"
 
+        # Конвертируем изображение в PNG
+        png_buffer = await _convert_image_to_png(image)
+
         # Для редактирования нужна маска, но в простом случае можно без нее
         # В реальном приложении лучше запрашивать у пользователя область редактирования
         response = await openai.Image.acreate_edit(
-            image=image,
+            image=png_buffer,
             prompt=prompt,
             size=size,
             n=1,
@@ -575,6 +579,48 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
         logger.error(f"Unexpected error in image editing: {e}")
         raise e
 
+
+async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
+    """
+    Конвертирует изображение в PNG формат.
+
+    Args:
+        image_buffer: BytesIO с исходным изображением
+
+    Returns:
+        BytesIO с изображением в PNG формате
+    """
+    try:
+        # Сбрасываем позицию буфера
+        image_buffer.seek(0)
+
+        # Открываем изображение с помощью PIL
+        image = Image.open(image_buffer)
+
+        # Конвертируем в RGB если нужно (для JPEG)
+        if image.mode in ('RGBA', 'LA', 'P'):
+            # Создаем белый фон для прозрачных изображений
+            background = Image.new('RGB', image.size, (255, 255, 255))
+            if image.mode == 'P':
+                image = image.convert('RGBA')
+            background.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
+            image = background
+        elif image.mode != 'RGB':
+            image = image.convert('RGB')
+
+        # Создаем новый буфер для PNG
+        png_buffer = BytesIO()
+        image.save(png_buffer, format='PNG')
+        png_buffer.seek(0)
+        png_buffer.name = "image.png"
+
+        logger.info(f"Image converted to PNG: {image.size}, mode: {image.mode}")
+
+        return png_buffer
+
+    except Exception as e:
+        logger.error(f"Error converting image to PNG: {e}")
+        raise ValueError(f"Не удалось обработать изображение: {str(e)}")
 
 async def create_image_variation(image: BytesIO, size: str = "1024x1024",
                                  n: int = 1, model: str = "dall-e-2") -> List[str]:

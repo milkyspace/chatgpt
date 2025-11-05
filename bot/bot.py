@@ -1414,7 +1414,7 @@ class MessageHandlers(BotHandlers):
             # Получаем сохраненное фото
             photo_data = context.user_data['photo_to_edit']
             photo_buffer = io.BytesIO(photo_data)
-            photo_buffer.name = "image.png"
+            photo_buffer.name = "image.jpg"  # Указываем оригинальное имя
 
             logger.info(f"Starting photo editing with prompt: {edit_description}")
 
@@ -1435,10 +1435,7 @@ class MessageHandlers(BotHandlers):
                 self._update_photo_editor_usage(user_id)
 
                 # Очищаем временные данные
-                if 'photo_to_edit' in context.user_data:
-                    del context.user_data['photo_to_edit']
-                if 'waiting_for_edit_description' in context.user_data:
-                    del context.user_data['waiting_for_edit_description']
+                self._cleanup_photo_context(context)
 
             else:
                 logger.error("Photo editing returned no URL")
@@ -1451,15 +1448,7 @@ class MessageHandlers(BotHandlers):
 
         except Exception as e:
             logger.error(f"Error in photo editing: {e}")
-            error_message = f"❌ Ошибка при редактировании фото: {str(e)}"
-
-            # Более понятные сообщения об ошибках
-            if "safety system" in str(e).lower():
-                error_message = "❌ Запрос не соответствует политикам безопасности OpenAI. Попробуйте другое описание."
-            elif "billing" in str(e).lower():
-                error_message = "❌ Проблемы с биллингом OpenAI. Обратитесь к администратору."
-            elif "invalid image" in str(e).lower():
-                error_message = "❌ Неверный формат изображения. Попробуйте другое фото."
+            error_message = self._get_user_friendly_error(e)
 
             await context.bot.edit_message_text(
                 error_message,
@@ -1467,6 +1456,29 @@ class MessageHandlers(BotHandlers):
                 message_id=placeholder_message.message_id,
                 parse_mode=ParseMode.HTML
             )
+
+    def _get_user_friendly_error(self, error: Exception) -> str:
+        """Возвращает понятное пользователю сообщение об ошибке."""
+        error_str = str(error).lower()
+
+        if "unsupported mimetype" in error_str or "invalid image" in error_str:
+            return "❌ Формат изображения не поддерживается. Попробуйте другое фото (JPEG, PNG)."
+        elif "safety system" in error_str:
+            return "❌ Запрос не соответствует политикам безопасности OpenAI. Попробуйте другое описание."
+        elif "billing" in error_str:
+            return "❌ Проблемы с биллингом OpenAI. Обратитесь к администратору."
+        elif "size" in error_str:
+            return "❌ Изображение слишком большое. Попробуйте фото меньшего размера."
+        else:
+            return f"❌ Ошибка при редактировании фото: {str(error)}"
+
+    def _cleanup_photo_context(self, context: CallbackContext) -> None:
+        """Очищает временные данные фото из контекста."""
+        keys_to_remove = ['photo_to_edit', 'waiting_for_edit_description']
+        for key in keys_to_remove:
+            if key in context.user_data:
+                del context.user_data[key]
+
 
     async def _send_edited_photo(self, update: Update, context: CallbackContext,
                                  image_url: str, edit_description: str,
