@@ -1,5 +1,4 @@
 from PIL import Image  # Добавляем импорт для работы с изображениями
-import base64
 from io import BytesIO
 from typing import Optional, List  # Добавляем импорты типов
 import config
@@ -10,6 +9,9 @@ import tiktoken
 import openai
 import anthropic
 import logging
+
+import aiohttp
+import base64
 
 import json #logging error
 
@@ -598,7 +600,7 @@ async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
 async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
                      model: str = "dall-e-2") -> Optional[str]:
     """
-    Редактирует изображение с помощью DALL-E.
+    Редактирует изображение с помощью DALL-E используя прямой API вызов.
     """
     try:
         # DALL-E 2 поддерживает редактирование, DALL-E 3 пока нет
@@ -616,32 +618,36 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
         if png_size > 4 * 1024 * 1024:  # 4MB limit for DALL-E
             raise ValueError("Изображение слишком большое после конвертации")
 
-        # Создаем файловый объект с правильным именем и MIME-типом
-        from io import BufferedReader
-        png_buffer.name = "image.png"
+        # Используем прямой API вызов через aiohttp
+        headers = {
+            "Authorization": f"Bearer {openai.api_key}",
+            "Content-Type": "multipart/form-data"
+        }
 
-        # Используем BufferedReader для правильной обработки файла
-        file_obj = BufferedReader(png_buffer)
+        # Создаем форму данных
+        form_data = aiohttp.FormData()
+        form_data.add_field('image', png_buffer.getvalue(), filename='image.png', content_type='image/png')
+        form_data.add_field('prompt', prompt)
+        form_data.add_field('size', size)
+        form_data.add_field('n', '1')
+        form_data.add_field('model', model)
 
-        # Выполняем редактирование
-        response = await openai.Image.acreate_edit(
-            image=file_obj,
-            prompt=prompt,
-            size=size,
-            n=1,
-            model=model
-        )
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                'https://api.openai.com/v1/images/edits',
+                headers=headers,
+                data=form_data
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    return result['data'][0]['url']
+                else:
+                    error_text = await response.text()
+                    logger.error(f"OpenAI API error: {response.status} - {error_text}")
+                    raise Exception(f"OpenAI API error: {response.status}")
 
-        return response.data[0].url
-
-    except openai.error.InvalidRequestError as e:
-        logger.error(f"OpenAI invalid request error: {e}")
-        if "image" in str(e).lower() or "mimetype" in str(e).lower():
-            raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
-        else:
-            raise e
     except Exception as e:
-        logger.error(f"Unexpected error in image editing: {e}")
+        logger.error(f"Error in image editing: {e}")
         raise e
 
 
