@@ -2997,6 +2997,8 @@ def run_bot() -> None:
     # ДОБАВЛЯЕМ ОБРАБОТЧИК ДЛЯ ФОТО - ВАЖНО!
     application.add_handler(MessageHandler(filters.PHOTO & user_filter,
                                            message_handlers.photo_message_handle))
+    application.add_handler(MessageHandler(filters.ATTACHMENT & user_filter,
+                                           message_handlers.photo_message_handle))
 
     # Добавляем обработчики подписок
     application.add_handler(
