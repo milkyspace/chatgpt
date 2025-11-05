@@ -2131,7 +2131,7 @@ class AdminHandlers(BotHandlers):
             await self.register_user_if_not_exists(update, context, user)
             user_id = user.id
 
-            if user_id not in config.roles.get('admin', []):
+            if str(user_id) not in config.roles.get('admin', []):
                 if update.message:
                     await update.message.reply_text("❌ У вас нет доступа к этой команде.")
                 elif update.callback_query:
