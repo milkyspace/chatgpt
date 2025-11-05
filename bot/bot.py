@@ -2099,7 +2099,7 @@ class AdminHandlers(BotHandlers):
         user_id = update.message.from_user.id
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if user_id not in config.roles.get('admin', []):
+        if str(user_id) not in config.roles.get('admin', []):
             await update.message.reply_text("❌ У вас нет доступа к этой команде.")
             return
 
