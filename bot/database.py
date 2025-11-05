@@ -3,7 +3,8 @@ import pymongo
 import uuid
 from datetime import datetime, timedelta
 import config
-from subscription import SubscriptionType, SUBSCRIPTION_PRICES, SUBSCRIPTION_DURATIONS
+from subscription import SubscriptionType
+from subscription_config import SubscriptionConfig
 
 
 class Database:
@@ -279,22 +280,29 @@ class Database:
 
         # Если у пользователя активная подписка, используем её лимиты
         if subscription_info["is_active"]:
-            # Проверяем лимиты подписки для разных типов действий
+            subscription_type = SubscriptionType(subscription_info["type"])
+
+            # Используем централизованную конфигурацию для проверки лимитов
             if action_type in ['gpt-3.5-turbo', 'gpt-3.5-turbo-16k', 'gpt-4', 'gpt-4-1106-preview',
                                'gpt-4-vision-preview', 'text-davinci-003', 'gpt-4-turbo-2024-04-09',
                                "gpt-4o", "claude-3-opus-20240229", "claude-3-sonnet-20240229",
                                "claude-3-haiku-20240307", 'whisper']:
 
-                # Для Pro Lite проверяем лимит запросов
-                if subscription_info["type"] == SubscriptionType.FREE and subscription_info["requests_used"] >= 10:
-                    # Лимит исчерпан, списываем с баланса
-                    return  # Переходим к списанию с баланса
-                elif subscription_info["type"] == SubscriptionType.PRO_LITE and subscription_info["requests_used"] >= 1000:
+                if not SubscriptionConfig.can_make_request(subscription_type, subscription_info["requests_used"]):
                     # Лимит исчерпан, списываем с баланса
                     return  # Переходим к списанию с баланса
                 else:
                     # Обновляем использование подписки
                     self.update_subscription_usage(user_id, request_used=True)
+                    return  # Не списываем средства с баланса
+
+            elif action_type in ['dalle-2', 'dalle-3']:
+                if not SubscriptionConfig.can_generate_image(subscription_type, subscription_info["images_used"]):
+                    # Лимит исчерпан, списываем с баланса
+                    pass  # Переходим к списанию с баланса
+                else:
+                    # Обновляем использование подписки
+                    self.update_subscription_usage(user_id, image_used=True)
                     return  # Не списываем средства с баланса
 
             elif action_type in ['dalle-2', 'dalle-3']:

@@ -33,7 +33,8 @@ import config
 import database
 import openai_utils
 from keyboards import BotKeyboards
-from subscription import SubscriptionType, SUBSCRIPTION_PRICES, SUBSCRIPTION_DURATIONS
+from subscription import SubscriptionType
+from subscription_config import SubscriptionConfig
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -207,21 +208,19 @@ class BotHandlers:
         return await self._check_subscription_limits(subscription_info, update)
 
     async def _check_subscription_limits(self, subscription_info: Dict[str, Any], update: Update) -> bool:
-        """Проверяет лимиты подписки."""
-        subscription_limits = {
-            "free": 15,
-            "pro_lite": 1000
-        }
+        """Проверяет лимиты подписки используя централизованную конфигурацию."""
+        subscription_type = SubscriptionType(subscription_info["type"])
 
-        subscription_type = subscription_info["type"]
-        if subscription_type in subscription_limits:
-            if subscription_info["requests_used"] >= subscription_limits[subscription_type]:
-                await update.message.reply_text(
-                    f"❌ Лимит запросов подписки {subscription_type} исчерпан. "
-                    "Пожалуйста, обновите подписку через /subscription",
-                    parse_mode=ParseMode.HTML
-                )
-                return False
+        # Проверяем лимит запросов
+        if not SubscriptionConfig.can_make_request(subscription_type, subscription_info["requests_used"]):
+            description = SubscriptionConfig.get_description(subscription_type)
+            await update.message.reply_text(
+                f"❌ Лимит запросов подписки {description['name']} исчерпан. "
+                "Пожалуйста, обновите подписку через /subscription",
+                parse_mode=ParseMode.HTML
+            )
+            return False
+
         return True
 
 
@@ -1530,64 +1529,47 @@ class SubscriptionHandlers(BotHandlers):
         return text
 
     def _format_usage_info(self, subscription_info: Dict[str, Any]) -> str:
-        """Форматирует информацию об использовании."""
-        usage_limits = {
-            "free": (15, 3),
-            "pro_lite": (1000, 20)
-        }
+        """Форматирует информацию об использовании используя централизованную конфигурацию."""
+        subscription_type = SubscriptionType(subscription_info["type"])
+        limits = SubscriptionConfig.get_usage_limits(subscription_type)
 
-        subscription_type = subscription_info["type"]
-        if subscription_type in usage_limits:
-            max_requests, max_images = usage_limits[subscription_type]
-            return (
-                f"📊 <b>Запросы использовано:</b> {subscription_info['requests_used']}/{max_requests}\n"
-                f"🎨 <b>Изображения использовано:</b> {subscription_info['images_used']}/{max_images}"
-            )
-        return ""
+        max_requests = limits.get("max_requests", 0)
+        max_images = limits.get("max_images", 0)
+
+        # Для безлимитных подписок показываем соответствующий текст
+        requests_text = f"{subscription_info['requests_used']}/{max_requests}" if max_requests != float(
+            'inf') else f"{subscription_info['requests_used']} (безлимитно)"
+        images_text = f"{subscription_info['images_used']}/{max_images}" if max_images != float(
+            'inf') else f"{subscription_info['images_used']} (безлимитно)"
+
+        return (
+            f"📊 <b>Запросы использовано:</b> {requests_text}\n"
+            f"🎨 <b>Изображения использовано:</b> {images_text}"
+        )
 
     def _format_available_subscriptions(self) -> str:
-        """Форматирует информацию о доступных подписках."""
-        subscriptions = [
-            {
-                "name": "Pro Lite",
-                "type": SubscriptionType.PRO_LITE,
-                "price": 10,
-                "duration": "10 дней",
-                "features": "1000 запросов • 20 генераций изображений • До 4000 символов"
-            },
-            {
-                "name": "Pro Plus",
-                "type": SubscriptionType.PRO_PLUS,
-                "price": 10,
-                "duration": "1 месяц",
-                "features": "Безлимитные запросы • До 32000 символов"
-            },
-            {
-                "name": "Pro Premium",
-                "type": SubscriptionType.PRO_PREMIUM,
-                "price": 10,
-                "duration": "3 месяца",
-                "features": "Безлимитные запросы • До 32000 символов"
-            }
-        ]
-
+        """Форматирует информацию о доступных подписках используя централизованную конфигурацию."""
         text = ""
-        for sub in subscriptions:
-            text += f"<b>{sub['name']}</b> - {sub['price']}₽ / {sub['duration']}\n"
-            text += f"   {sub['features']}\n\n"
+
+        for sub_type in SubscriptionConfig.get_all_paid_subscriptions():
+            description = SubscriptionConfig.get_description(sub_type)
+            price = SubscriptionConfig.get_price(sub_type)
+            duration = SubscriptionConfig.get_duration(sub_type)
+
+            text += f"<b>{description['name']}</b> - {price}₽ / {duration.days} дней\n"
+            text += f"   {description['features']}\n\n"
 
         return text
 
     def _create_subscription_keyboard(self):
-        """Создает клавиатуру для выбора подписки."""
-        subscriptions = [
-            ("Pro Lite - 10₽", SubscriptionType.PRO_LITE),
-            ("Pro Plus - 10₽", SubscriptionType.PRO_PLUS),
-            ("Pro Premium - 10₽", SubscriptionType.PRO_PREMIUM)
-        ]
-
+        """Создает клавиатуру для выбора подписки используя централизованную конфигурацию."""
         keyboard = []
-        for name, sub_type in subscriptions:
+
+        for sub_type in SubscriptionConfig.get_all_paid_subscriptions():
+            description = SubscriptionConfig.get_description(sub_type)
+            price = SubscriptionConfig.get_price(sub_type)
+
+            name = f"{description['name']} - {price}₽"
             callback_data = f"subscribe|{sub_type.value}"
             keyboard.append([InlineKeyboardButton(name, callback_data=callback_data)])
 
@@ -1665,14 +1647,16 @@ class SubscriptionHandlers(BotHandlers):
             )
 
     def _format_payment_message(self, subscription_type: SubscriptionType) -> str:
-        """Форматирует сообщение об оплате."""
-        price = SUBSCRIPTION_PRICES[subscription_type]
-        duration = SUBSCRIPTION_DURATIONS[subscription_type]
+        """Форматирует сообщение об оплате используя централизованную конфигурацию."""
+        price = SubscriptionConfig.get_price(subscription_type)
+        duration = SubscriptionConfig.get_duration(subscription_type)
+        description = SubscriptionConfig.get_description(subscription_type)
 
         return (
-            f"💳 <b>Оформление подписки {subscription_type.name.replace('_', ' ').title()}</b>\n\n"
+            f"💳 <b>Оформление подписки {description['name']}</b>\n\n"
             f"Стоимость: <b>{price}₽</b>\n"
-            f"Период: <b>{duration.days} дней</b>\n\n"
+            f"Период: <b>{duration.days} дней</b>\n"
+            f"Возможности: {description['features']}\n\n"
             "Нажмите кнопку ниже для оплаты. После успешной оплаты подписка активируется автоматически!"
         )
 
@@ -1839,12 +1823,13 @@ class ImageHandlers(BotHandlers):
 async def create_subscription_yookassa_payment(user_id: int, subscription_type: SubscriptionType,
                                                context: CallbackContext) -> str:
     """
-    Создает платеж в Yookassa для подписки.
+    Создает платеж в Yookassa для подписки используя централизованную конфигурацию.
     """
-    price = SUBSCRIPTION_PRICES[subscription_type]
+    price = SubscriptionConfig.get_price(subscription_type)
+    description_config = SubscriptionConfig.get_description(subscription_type)
 
     try:
-        description = f"Подписка {subscription_type.name.replace('_', ' ').title()}"
+        description = f"Подписка {description_config['name']}"
         payment = Payment.create({
             "amount": {"value": price, "currency": "RUB"},
             "confirmation": {"type": "redirect", "return_url": "https://t.me/gptducksbot"},
@@ -1876,7 +1861,7 @@ async def create_subscription_yookassa_payment(user_id: int, subscription_type: 
             payment_id=payment.id,
             amount=price,
             payment_type="subscription",
-            description=f"Подписка {subscription_type.name.replace('_', ' ').title()}"
+            description=description
         )
 
         return payment.confirmation.confirmation_url
@@ -1888,7 +1873,7 @@ async def create_subscription_yookassa_payment(user_id: int, subscription_type: 
 
 async def process_successful_payment(payment_info: Any, user_id: int) -> None:
     """
-    Обрабатывает успешный платеж.
+    Обрабатывает успешный платеж используя централизованную конфигурацию.
     """
     try:
         metadata = payment_info.metadata
@@ -1898,7 +1883,7 @@ async def process_successful_payment(payment_info: Any, user_id: int) -> None:
 
         if subscription_type:
             subscription_type_enum = SubscriptionType(subscription_type)
-            duration_days = SUBSCRIPTION_DURATIONS[subscription_type_enum].days
+            duration_days = SubscriptionConfig.get_duration(subscription_type_enum).days
 
             db.add_subscription(user_id, subscription_type_enum, duration_days)
             await send_subscription_confirmation(user_id, subscription_type_enum)
@@ -1915,7 +1900,7 @@ async def send_subscription_confirmation(user_id: int, subscription_type: Subscr
     user = db.user_collection.find_one({"_id": user_id})
     if user:
         chat_id = user["chat_id"]
-        duration_days = SUBSCRIPTION_DURATIONS[subscription_type].days
+        duration_days = SubscriptionConfig.get_duration(subscription_type).days
 
         message = (
             f"🎉 Подписка *{subscription_type.name.replace('_', ' ').title()}* активирована!\n"
