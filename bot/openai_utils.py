@@ -602,9 +602,8 @@ async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
 async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
                      model: str = "dall-e-2") -> Optional[str]:
     """
-    Редактирует изображение с помощью DALL-E.
+    Редактирует изображение с помощью DALL-E используя aiohttp FormData.
     """
-    temp_file = None
     try:
         # DALL-E 2 поддерживает редактирование, DALL-E 3 пока нет
         if model == "dall-e-3":
@@ -621,39 +620,58 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
         if png_size > 4 * 1024 * 1024:  # 4MB limit for DALL-E
             raise ValueError("Изображение слишком большое после конвертации")
 
-        # Создаем временный файл с правильным расширением
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
-            temp_file.write(png_buffer.getvalue())
-            temp_file_path = temp_file.name
+        # Создаем FormData
+        form_data = aiohttp.FormData()
+        form_data.add_field('image',
+                           png_buffer.getvalue(),
+                           filename='image.png',
+                           content_type='image/png')
+        form_data.add_field('prompt', prompt)
+        form_data.add_field('size', size)
+        form_data.add_field('n', '1')
+        form_data.add_field('model', model)
 
-        try:
-            # Открываем файл в бинарном режиме для передачи в OpenAI
-            with open(temp_file_path, 'rb') as file_obj:
-                # Выполняем редактирование
-                response = await openai.Image.acreate_edit(
-                    image=file_obj,
-                    prompt=prompt,
-                    size=size,
-                    n=1,
-                    model=model
-                )
+        headers = {
+            "Authorization": f"Bearer {openai.api_key}",
+        }
 
-            return response.data[0].url
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                'https://api.openai.com/v1/images/edits',
+                headers=headers,
+                data=form_data
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    return result['data'][0]['url']
+                else:
+                    error_text = await response.text()
+                    logger.error(f"OpenAI API error: {response.status} - {error_text}")
+                    if "unsupported_file_mimetype" in error_text:
+                        raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
+                    else:
+                        raise Exception(f"OpenAI API error: {response.status}")
 
-        finally:
-            # Удаляем временный файл
-            if os.path.exists(temp_file_path):
-                os.unlink(temp_file_path)
-
-    except openai.error.InvalidRequestError as e:
-        logger.error(f"OpenAI invalid request error: {e}")
-        if "image" in str(e).lower() or "mimetype" in str(e).lower():
-            raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
-        else:
-            raise e
     except Exception as e:
-        logger.error(f"Unexpected error in image editing: {e}")
-        raise e
+        logger.error(f"Error in photo editing: {e}")
+        # Для новой версии OpenAI используем правильные исключения
+        try:
+            import openai
+            if isinstance(e, openai.BadRequestError):
+                error_msg = str(e)
+                if "unsupported_file_mimetype" in error_msg or "image" in error_msg.lower():
+                    raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
+                else:
+                    raise e
+            else:
+                raise e
+        except ImportError:
+            # Если не удалось импортировать openai, используем общую обработку
+            error_msg = str(e)
+            if "unsupported_file_mimetype" in error_msg or "image" in error_msg.lower():
+                raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
+            else:
+                raise e
 
 
 async def create_image_variation(image: BytesIO, size: str = "1024x1024",
