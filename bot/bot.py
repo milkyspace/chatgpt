@@ -410,15 +410,15 @@ class MessageHandlers(BotHandlers):
             await self.admin_handlers.admin_panel_handle(update, context)  # Используем admin_handlers
         elif text == emoji.emojize("Назад :right_arrow_curving_left:"):
             await self._handle_back(update, context)
-        elif text == emoji.emojize(":busts_in_silhouette: Вывести пользователей"):
+        elif text == emoji.emojize("Вывести пользователей"):
             await self.admin_handlers.show_users_handle(update, context)
-        elif text == emoji.emojize(":lower_left_fountain_pen: Редактировать пользователя"):
+        elif text == emoji.emojize("Редактировать пользователя"):
             await self.admin_handlers.edit_user_handle(update, context)
-        elif text == emoji.emojize(":loudspeaker: Отправить рассылку"):
+        elif text == emoji.emojize("Отправить рассылку"):
             await self.admin_handlers.broadcast_handle(update, context)
-        elif text == emoji.emojize(":left_arrow_curving_right: Назад в админ-панель"):
+        elif text == emoji.emojize("Назад в админ-панель"):
             await self.admin_handlers.handle_admin_panel_back(update, context)
-        elif text == emoji.emojize("Главное меню :right_arrow_curving_left:"):
+        elif text == emoji.emojize("Главное меню"):
             await self.admin_handlers.handle_main_menu_back(update, context)
         elif emoji.emojize(":green_circle:") in text or emoji.emojize(":red_circle:") in text:
             await self.subscription_handlers.subscription_handle(update, context)

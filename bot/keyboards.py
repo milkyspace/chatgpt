@@ -128,10 +128,10 @@ class BotKeyboards:
             ReplyKeyboardMarkup: Клавиатура админ-панели
         """
         keyboard = [
-            [KeyboardButton(emoji.emojize(":busts_in_silhouette: Вывести пользователей"))],
-            [KeyboardButton(emoji.emojize(":lower_left_fountain_pen: Редактировать пользователя"))],
-            [KeyboardButton(emoji.emojize(":loudspeaker: Отправить рассылку"))],
-            [KeyboardButton(emoji.emojize("Главное меню :right_arrow_curving_left:"))]
+            [KeyboardButton(emoji.emojize("Вывести пользователей"))],
+            [KeyboardButton(emoji.emojize("Редактировать пользователя"))],
+            [KeyboardButton(emoji.emojize("Отправить рассылку"))],
+            [KeyboardButton(emoji.emojize("Главное меню"))]
         ]
 
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
