@@ -13,6 +13,7 @@ import io
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Tuple, Union
 from abc import ABC, abstractmethod
+from PIL import Image
 
 import requests
 import emoji
@@ -342,10 +343,27 @@ class PhotoEditorMixin(BaseHandler):
 
         buf = io.BytesIO()
         await photo_file.download_to_memory(buf)
-        buf.name = "photo_to_edit.jpg"
+
+        # Важно: устанавливаем правильное имя файла с расширением
+        buf.name = "photo_to_edit.png"  # Изменяем на PNG для OpenAI
         buf.seek(0)
 
-        context.user_data['photo_to_edit'] = buf.getvalue()
+        # Конвертируем в PNG если нужно
+        try:
+            image = Image.open(buf)
+            if image.format != 'PNG':
+                # Конвертируем в PNG
+                png_buf = io.BytesIO()
+                image.save(png_buf, format='PNG')
+                png_buf.name = "photo_to_edit.png"
+                png_buf.seek(0)
+                context.user_data['photo_to_edit'] = png_buf.getvalue()
+            else:
+                context.user_data['photo_to_edit'] = buf.getvalue()
+        except ImportError:
+            # Если PIL не установлен, используем оригинальный буфер
+            logger.warning("PIL not available, using original image format")
+            context.user_data['photo_to_edit'] = buf.getvalue()
 
         if edit_description:
             await self._perform_photo_editing(update, context, edit_description)
@@ -408,7 +426,7 @@ class PhotoEditorMixin(BaseHandler):
         try:
             photo_data = context.user_data['photo_to_edit']
             photo_buffer = io.BytesIO(photo_data)
-            photo_buffer.name = "image.jpg"
+            photo_buffer.name = "image.png"  # Обязательно .png для OpenAI
 
             logger.info(f"Starting photo editing with prompt: {edit_description}")
 
@@ -443,6 +461,7 @@ class PhotoEditorMixin(BaseHandler):
                 message_id=placeholder_message.message_id,
                 parse_mode=ParseMode.HTML
             )
+
 
     def _get_user_friendly_error(self, error: Exception) -> str:
         """Возвращает понятное пользователю сообщение об ошибке."""
