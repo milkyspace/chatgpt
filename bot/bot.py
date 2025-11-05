@@ -185,7 +185,7 @@ class BotHandlers:
         user_id = update.message.from_user.id
 
         if user_semaphores[user_id].locked():
-            text = "⏳ Please <b>wait</b> for a reply to the previous message\nOr you can /cancel it"
+            text = "⏳ Пожалуйста, <b>подождите</b> ответ на предыдущее сообщение\nИли отмените его командой /cancel"
             await update.message.reply_text(text, reply_to_message_id=update.message.id, parse_mode=ParseMode.HTML)
             return True
         return False
@@ -486,7 +486,7 @@ class MessageHandlers(BotHandlers):
         try:
             await task
         except asyncio.CancelledError:
-            await update.message.reply_text("✅ Canceled", parse_mode=ParseMode.HTML)
+            await update.message.reply_text("✅ Приостановлено", parse_mode=ParseMode.HTML)
         finally:
             if user_id in user_tasks:
                 del user_tasks[user_id]
