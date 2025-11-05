@@ -389,6 +389,7 @@ class MessageHandlers(BotHandlers):
             emoji.emojize("Назад :right_arrow_curving_left:"),
             emoji.emojize("Вывести пользователей"),
             emoji.emojize("Редактировать пользователя"),
+            emoji.emojize("Данные пользователя"),
             emoji.emojize("Отправить рассылку"),
             emoji.emojize("Назад в админ-панель"),
             emoji.emojize("Главное меню"),
@@ -419,6 +420,8 @@ class MessageHandlers(BotHandlers):
             await self.admin_handlers.show_users_handle(update, context)
         elif text == emoji.emojize("Редактировать пользователя"):
             await self.admin_handlers.edit_user_handle(update, context)
+        elif text == emoji.emojize("Данные пользователя"):
+            await self.admin_handlers.get_user_data_handle(update, context)
         elif text == emoji.emojize("Отправить рассылку"):
             await self.admin_handlers.broadcast_handle(update, context)
         elif text == emoji.emojize("Назад в админ-панель"):
@@ -2090,6 +2093,150 @@ class AdminHandlers(BotHandlers):
 
             await query.edit_message_text(result_text, parse_mode=ParseMode.HTML)
 
+    async def get_user_data_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает запрос на получение данных пользователя."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        user_id = update.message.from_user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        if user_id not in config.roles.get('admin', []):
+            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+            return
+
+        text = (
+            "👤 <b>Получение данных пользователя</b>\n\n"
+            "Для получения данных отправьте команду в формате:\n"
+            "<code>/user_data USER_ID</code>\n\n"
+            "Пример:\n"
+            "<code>/user_data 123456789</code>\n\n"
+            "Или отправьте username пользователя:\n"
+            "<code>/user_data @username</code>"
+        )
+
+        reply_markup = BotKeyboards.get_back_to_admin_keyboard()
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+
+    async def get_user_data_command(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает команду /user_data."""
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        user_id = update.message.from_user.id
+
+        if user_id not in config.roles.get('admin', []):
+            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+            return
+
+        if not context.args:
+            await update.message.reply_text(
+                "❌ Неправильный формат команды.\n"
+                "Используйте: /user_data USER_ID\n"
+                "Пример: /user_data 123456789"
+            )
+            return
+
+        user_identifier = context.args[0]
+
+        try:
+            # Пытаемся найти пользователя по ID или username
+            target_user = None
+
+            if user_identifier.startswith('@'):
+                # Поиск по username
+                username = user_identifier[1:]  # Убираем @
+                target_user = self.db.find_user_by_username(username)
+            else:
+                # Поиск по ID
+                target_user_id = int(user_identifier)
+                target_user = self.db.get_user_by_id(target_user_id)
+
+            if not target_user:
+                await update.message.reply_text(f"❌ Пользователь '{user_identifier}' не найден.")
+                return
+
+            # Формируем подробную информацию о пользователе
+            user_info = await self._format_user_details(target_user)
+
+            await update.message.reply_text(user_info, parse_mode=ParseMode.HTML)
+
+        except ValueError:
+            await update.message.reply_text("❌ ID пользователя должен быть числом.")
+        except Exception as e:
+            logger.error(f"Error getting user data: {e}")
+            await update.message.reply_text("❌ Произошла ошибка при получении данных пользователя.")
+
+    async def _format_user_details(self, user_data: Dict[str, Any]) -> str:
+        """Форматирует подробную информацию о пользователе."""
+        user_id = user_data['_id']
+
+        # Основная информация
+        text = f"👤 <b>Данные пользователя</b>\n\n"
+        text += f"<b>ID:</b> <code>{user_id}</code>\n"
+        text += f"<b>Username:</b> @{user_data.get('username', 'не указан')}\n"
+        text += f"<b>Имя:</b> {user_data.get('first_name', 'не указано')}\n"
+        text += f"<b>Фамилия:</b> {user_data.get('last_name', 'не указана')}\n"
+        text += f"<b>Chat ID:</b> <code>{user_data.get('chat_id', 'не указан')}</code>\n"
+        text += f"<b>Роль:</b> {user_data.get('role', 'не указана')}\n\n"
+
+        # Информация о подписке
+        subscription_info = self.db.get_user_subscription_info(user_id)
+        if subscription_info["is_active"]:
+            expires_at = subscription_info["expires_at"].strftime("%d.%m.%Y %H:%M")
+            text += f"<b>Подписка:</b> {subscription_info['type']}\n"
+            text += f"<b>Действует до:</b> {expires_at}\n"
+            text += f"<b>Запросов использовано:</b> {subscription_info['requests_used']}\n"
+            text += f"<b>Изображений использовано:</b> {subscription_info['images_used']}\n\n"
+        else:
+            text += "<b>Подписка:</b> не активна\n\n"
+
+        # Статистика использования
+        text += "<b>Статистика использования:</b>\n"
+
+        # Токены
+        n_used_tokens = user_data.get('n_used_tokens', {})
+        if n_used_tokens:
+            for model, tokens in n_used_tokens.items():
+                input_tokens = tokens.get('n_input_tokens', 0)
+                output_tokens = tokens.get('n_output_tokens', 0)
+                text += f"  {model}: {input_tokens} ввод / {output_tokens} вывод\n"
+        else:
+            text += "  Токены: не использовались\n"
+
+        # Изображения
+        n_generated_images = user_data.get('n_generated_images', 0)
+        text += f"  Сгенерировано изображений: {n_generated_images}\n"
+
+        # Аудио
+        n_transcribed_seconds = user_data.get('n_transcribed_seconds', 0)
+        text += f"  Расшифровано аудио: {n_transcribed_seconds} сек.\n\n"
+
+        # Финансовая информация
+        financials = self.db.get_user_financials(user_id)
+        text += "<b>Финансовая информация:</b>\n"
+        text += f"  Баланс RUB: {user_data.get('rub_balance', 0)}₽\n"
+        text += f"  Баланс EUR: {user_data.get('euro_balance', 0)}€\n"
+        text += f"  Всего пополнено: {financials.get('total_topup', 0)}₽\n"
+        text += f"  Всего потрачено: {user_data.get('total_spent', 0)}₽\n"
+        text += f"  Пожертвовано: {financials.get('total_donated', 0)}₽\n\n"
+
+        # Информация о активности
+        first_seen = user_data.get('first_seen', 'неизвестно')
+        last_interaction = user_data.get('last_interaction', 'неизвестно')
+
+        if isinstance(first_seen, datetime):
+            first_seen = first_seen.strftime("%d.%m.%Y %H:%M")
+        if isinstance(last_interaction, datetime):
+            last_interaction = last_interaction.strftime("%d.%m.%Y %H:%M")
+
+        text += f"<b>Первое посещение:</b> {first_seen}\n"
+        text += f"<b>Последняя активность:</b> {last_interaction}\n"
+
+        # Текущие настройки
+        current_model = user_data.get('current_model', 'не указана')
+        current_chat_mode = user_data.get('current_chat_mode', 'не указан')
+        text += f"<b>Текущая модель:</b> {current_model}\n"
+        text += f"<b>Режим чата:</b> {current_chat_mode}\n"
+
+        return text
+
 
 # Функции для работы с платежами
 async def create_subscription_yookassa_payment(user_id: int, subscription_type: SubscriptionType,
@@ -2337,6 +2484,7 @@ def run_bot() -> None:
     # Добавляем обработчики команд админ-панели
     application.add_handler(CommandHandler("edit_user", admin_handlers.edit_user_command, filters=user_filter))
     application.add_handler(CommandHandler("broadcast", admin_handlers.broadcast_command, filters=user_filter))
+    application.add_handler(CommandHandler("user_data", admin_handlers.get_user_data_command, filters=user_filter))
 
     # Добавляем обработчики сообщений (включая кнопки админ-панели)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & user_filter,

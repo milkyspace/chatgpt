@@ -130,6 +130,7 @@ class BotKeyboards:
         keyboard = [
             [KeyboardButton(emoji.emojize("Вывести пользователей"))],
             [KeyboardButton(emoji.emojize("Редактировать пользователя"))],
+            [KeyboardButton(emoji.emojize("Данные пользователя"))],
             [KeyboardButton(emoji.emojize("Отправить рассылку"))],
             [KeyboardButton(emoji.emojize("Главное меню"))]
         ]
