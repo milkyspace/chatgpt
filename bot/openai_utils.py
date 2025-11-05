@@ -529,6 +529,7 @@ async def is_content_acceptable(prompt):
     r = await openai.Moderation.acreate(input=prompt)
     return not all(r.results[0].categories.values())
 
+
 async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
     """
     Конвертирует изображение в PNG формат с улучшенной обработкой.
@@ -581,6 +582,8 @@ async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
         png_buffer = BytesIO()
         image.save(png_buffer, format='PNG', optimize=True)
         png_buffer.seek(0)
+
+        # Устанавливаем правильное имя файла
         png_buffer.name = "image.png"
 
         logger.info(f"Image successfully converted to PNG: {image.size}, mode: {image.mode}")
@@ -613,9 +616,16 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
         if png_size > 4 * 1024 * 1024:  # 4MB limit for DALL-E
             raise ValueError("Изображение слишком большое после конвертации")
 
+        # Создаем файловый объект с правильным именем и MIME-типом
+        from io import BufferedReader
+        png_buffer.name = "image.png"
+
+        # Используем BufferedReader для правильной обработки файла
+        file_obj = BufferedReader(png_buffer)
+
         # Выполняем редактирование
         response = await openai.Image.acreate_edit(
-            image=png_buffer,
+            image=file_obj,
             prompt=prompt,
             size=size,
             n=1,
@@ -626,13 +636,14 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
 
     except openai.error.InvalidRequestError as e:
         logger.error(f"OpenAI invalid request error: {e}")
-        if "image" in str(e).lower():
+        if "image" in str(e).lower() or "mimetype" in str(e).lower():
             raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
         else:
             raise e
     except Exception as e:
         logger.error(f"Unexpected error in image editing: {e}")
         raise e
+
 
 async def create_image_variation(image: BytesIO, size: str = "1024x1024",
                                  n: int = 1, model: str = "dall-e-2") -> List[str]:
