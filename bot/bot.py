@@ -419,7 +419,7 @@ class PhotoEditorMixin(BaseHandler):
             return
 
         placeholder_message = await update.message.reply_text(
-            "🎨 <i>Редактирую фото...</i>",
+            "🎨 <i>Редактирую фото... Это может занять до 2х минут</i>",
             parse_mode=ParseMode.HTML
         )
 

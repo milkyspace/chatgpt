@@ -499,8 +499,7 @@ async def transcribe_audio(audio_file) -> str:
 
 
 async def generate_images(prompt, model="dall-e-2", n_images=4, size="1024x1024", quality="standard"):
-    """Generate images using OpenAI's specified model, including DALL-E 3."""
-    #redundancy to make sure the api call isnt made wrong
+    """Generate images using OpenAI's specified model with increased timeouts."""
     if model=="dalle-2":
         model="dall-e-2"
         quality="standard"
@@ -508,18 +507,25 @@ async def generate_images(prompt, model="dall-e-2", n_images=4, size="1024x1024"
     if model=="dalle-3":
         model="dall-e-3"
         n_images=1
-    # Make the API call to generate images using the specified model
-    response = await openai.Image.acreate(
-        model=model,
-        prompt=prompt,
-        n=n_images,
-        size=size,
-        quality=quality
-    )
 
-    # Extract image URLs from the response
-    image_urls = [item.url for item in response.data]
-    return image_urls
+    try:
+        # Увеличиваем таймаут для генерации изображений
+        response = await openai.Image.acreate(
+            model=model,
+            prompt=prompt,
+            n=n_images,
+            size=size,
+            quality=quality,
+            timeout=60.0  # 60 секунд для генерации
+        )
+
+        # Extract image URLs from the response
+        image_urls = [item.url for item in response.data]
+        return image_urls
+
+    except Exception as e:
+        logger.error(f"Error generating images: {e}")
+        raise e
 
 
 async def is_content_acceptable(prompt):
@@ -529,18 +535,10 @@ async def is_content_acceptable(prompt):
 
 async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
     """
-    Конвертирует изображение в PNG формат с улучшенной обработкой.
-    Конвертирует в RGBA формат, который требуется OpenAI для редактирования изображений.
+    Конвертирует изображение в PNG формат с RGBA каналами для OpenAI.
     """
     try:
         # Сбрасываем позицию буфера
-        image_buffer.seek(0)
-
-        # Определяем формат изображения
-        image_format = imghdr.what(image_buffer)
-        logger.info(f"Detected image format: {image_format}")
-
-        # Снова сбрасываем позицию после проверки формата
         image_buffer.seek(0)
 
         # Открываем изображение с помощью PIL
@@ -553,25 +551,22 @@ async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
         # Логируем информацию об изображении
         logger.info(f"Original image: size={image.size}, mode={image.mode}, format={image.format}")
 
-        # Конвертируем в RGBA формат, который требуется OpenAI для редактирования
+        # Конвертируем в RGBA формат (требуется OpenAI для редактирования с масками)
         if image.mode != 'RGBA':
             logger.info(f"Converting image from {image.mode} to RGBA")
-            if image.mode in ('RGBA', 'LA'):
-                # Уже прозрачное изображение - оставляем как есть
-                pass
-            elif image.mode == 'P':
-                # Палитровое изображение - конвертируем в RGBA
-                image = image.convert('RGBA')
-            elif image.mode == 'L':
-                # Градации серого - конвертируем в LA (L с альфа-каналом)
-                image = image.convert('LA')
+
+            if image.mode == 'RGB':
+                # Создаем RGBA из RGB - добавляем полностью непрозрачный альфа-канал
+                rgba_image = Image.new('RGBA', image.size)
+                rgba_image.paste(image, (0, 0, image.size[0], image.size[1]))
+                image = rgba_image
             else:
-                # RGB и другие форматы - конвертируем в RGBA
+                # Для других форматов используем стандартную конвертацию
                 image = image.convert('RGBA')
 
         logger.info(f"After conversion: size={image.size}, mode={image.mode}")
 
-        # Ограничиваем максимальный размер (DALL-E имеет ограничения)
+        # Ограничиваем максимальный размер
         max_size = (1024, 1024)
         if image.size[0] > max_size[0] or image.size[1] > max_size[1]:
             image.thumbnail(max_size, Image.Resampling.LANCZOS)
@@ -580,11 +575,11 @@ async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
         # Создаем новый буфер для PNG
         png_buffer = BytesIO()
 
-        # Сохраняем с максимальным качеством
+        # Сохраняем с настройками для лучшей совместимости
         image.save(png_buffer, format='PNG', optimize=True)
         png_buffer.seek(0)
 
-        # Проверяем, что сохранение прошло успешно
+        # Проверяем результат
         if len(png_buffer.getvalue()) == 0:
             raise ValueError("Не удалось сохранить изображение в PNG формате")
 
@@ -601,10 +596,10 @@ async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
 async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
                      model: str = "dall-e-2") -> Optional[str]:
     """
-    Редактирует изображение с помощью DALL-E с повторными попытками при ошибках сервера.
+    Редактирует изображение с помощью DALL-E с использованием маски.
     """
     max_retries = 3
-    retry_delay = 2  # секунды
+    retry_delay = 5  # увеличиваем задержку между попытками
 
     for attempt in range(max_retries):
         try:
@@ -623,13 +618,19 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
             if png_size > 4 * 1024 * 1024:  # 4MB limit for DALL-E
                 raise ValueError("Изображение слишком большое после конвертации")
 
+            # СОЗДАЕМ МАСКУ ДЛЯ РЕДАКТИРОВАНИЯ
+            mask_buffer = await _create_edit_mask(png_buffer)
+            logger.info(f"Mask created, size: {len(mask_buffer.getvalue())} bytes")
+
             # Используем синхронный запрос с requests
             headers = {
                 "Authorization": f"Bearer {openai.api_key}",
             }
 
+            # ДОБАВЛЯЕМ МАСКУ В ФАЙЛЫ
             files = {
                 'image': ('image.png', png_buffer.getvalue(), 'image/png'),
+                'mask': ('mask.png', mask_buffer.getvalue(), 'image/png'),
             }
 
             data = {
@@ -639,14 +640,17 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
                 'model': model
             }
 
-            logger.info(f"Attempt {attempt + 1}/{max_retries}: Sending image edit request to OpenAI")
+            logger.info(f"Attempt {attempt + 1}/{max_retries}: Sending image edit request to OpenAI with mask")
 
+            # УВЕЛИЧИВАЕМ ТАЙМАУТЫ:
+            # - connect timeout: 10 секунд на установку соединения
+            # - read timeout: 120 секунд на обработку изображения (2 минуты)
             response = requests.post(
                 'https://api.openai.com/v1/images/edits',
                 headers=headers,
                 files=files,
                 data=data,
-                timeout=30  # добавляем таймаут
+                timeout=(10, 120)  # (connect_timeout, read_timeout)
             )
 
             if response.status_code == 200:
@@ -676,6 +680,12 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
                     raise ValueError("Проблема с форматом изображения. Требуется изображение с прозрачностью.")
                 elif "safety system" in error_text.lower():
                     raise ValueError("Запрос не соответствует политикам безопасности OpenAI.")
+                elif "mask" in error_text.lower():
+                    # Если проблема с маской, пробуем без маски как fallback
+                    logger.warning("Mask error, trying without mask")
+                    if attempt == max_retries - 1:
+                        return await _edit_without_mask(png_buffer, prompt, size, model)
+                    continue
                 else:
                     raise Exception(f"OpenAI API error: {response.status_code} - {error_text}")
 
@@ -688,6 +698,16 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
                 continue
             else:
                 raise Exception("Request timeout after multiple attempts")
+
+        except requests.exceptions.ConnectionError:
+            logger.warning(f"Connection error (attempt {attempt + 1})")
+            if attempt < max_retries - 1:
+                logger.info(f"Retrying in {retry_delay} seconds...")
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 2
+                continue
+            else:
+                raise Exception("Connection error after multiple attempts")
 
         except Exception as e:
             logger.error(f"Error in photo editing (attempt {attempt + 1}): {e}")
@@ -709,6 +729,83 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
                 retry_delay *= 2
 
     return None
+
+
+async def _create_edit_mask(original_image_buffer: BytesIO) -> BytesIO:
+    """
+    Создает маску для редактирования изображения.
+    Маска определяет, какие области изображения можно редактировать.
+    """
+    try:
+        # Открываем оригинальное изображение
+        original_image_buffer.seek(0)
+        image = Image.open(original_image_buffer)
+
+        # Создаем маску - полностью прозрачное изображение того же размера
+        # Прозрачные области в маске означают, что эти части изображения можно редактировать
+        # Непрозрачные области остаются неизменными
+        mask = Image.new('RGBA', image.size, (0, 0, 0, 0))  # Полностью прозрачная маска
+
+        # Сохраняем маску
+        mask_buffer = BytesIO()
+        mask.save(mask_buffer, format='PNG', optimize=True)
+        mask_buffer.seek(0)
+
+        logger.info(f"Created edit mask: size={mask.size}, mode={mask.mode}")
+        return mask_buffer
+
+    except Exception as e:
+        logger.error(f"Error creating edit mask: {e}")
+        # В случае ошибки создаем простую прозрачную маску
+        simple_mask = Image.new('RGBA', (1024, 1024), (0, 0, 0, 0))
+        mask_buffer = BytesIO()
+        simple_mask.save(mask_buffer, format='PNG')
+        mask_buffer.seek(0)
+        return mask_buffer
+
+
+async def _edit_without_mask(image_buffer: BytesIO, prompt: str, size: str, model: str) -> Optional[str]:
+    """
+    Fallback метод: пытается редактировать без маски.
+    """
+    try:
+        logger.warning("Trying image editing without mask")
+
+        headers = {
+            "Authorization": f"Bearer {openai.api_key}",
+        }
+
+        files = {
+            'image': ('image.png', image_buffer.getvalue(), 'image/png'),
+        }
+
+        data = {
+            'prompt': prompt,
+            'size': size,
+            'n': 1,
+            'model': model
+        }
+
+        response = requests.post(
+            'https://api.openai.com/v1/images/edits',
+            headers=headers,
+            files=files,
+            data=data,
+            timeout=(10, 120)
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            logger.info("Image editing without mask successful")
+            return result['data'][0]['url']
+        else:
+            error_text = response.text
+            logger.error(f"OpenAI API error without mask: {response.status_code} - {error_text}")
+            raise Exception(f"Image editing failed even without mask: {response.status_code}")
+
+    except Exception as e:
+        logger.error(f"Error in edit without mask: {e}")
+        raise e
 
 
 async def create_image_variation(image: BytesIO, size: str = "1024x1024",
