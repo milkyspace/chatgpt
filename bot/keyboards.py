@@ -90,7 +90,7 @@ class BotKeyboards:
         logger.warning(config.roles.get('admin', []))
         logger.warning("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
-        if user_id in config.roles.get('admin', []):
+        if str(user_id) in config.roles.get('admin', []):
             keyboard.append([KeyboardButton(emoji.emojize("Админ-панель :smiling_face_with_sunglasses:"))])
 
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
