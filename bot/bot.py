@@ -1849,7 +1849,7 @@ class AdminHandlers(BotHandlers):
         user_id = update.message.from_user.id
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if user_id not in config.roles.get('admin', []):
+        if str(user_id) not in config.roles.get('admin', []):
             await update.message.reply_text("❌ У вас нет доступа к этой команде.")
             return
 
@@ -1887,7 +1887,7 @@ class AdminHandlers(BotHandlers):
         user_id = update.message.from_user.id
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if user_id not in config.roles.get('admin', []):
+        if str(user_id) not in config.roles.get('admin', []):
             await update.message.reply_text("❌ У вас нет доступа к этой команде.")
             return
 
@@ -1909,7 +1909,7 @@ class AdminHandlers(BotHandlers):
         user_id = update.message.from_user.id
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if user_id not in config.roles.get('admin', []):
+        if str(user_id) not in config.roles.get('admin', []):
             await update.message.reply_text("❌ У вас нет доступа к этой команде.")
             return
 
@@ -1954,7 +1954,7 @@ class AdminHandlers(BotHandlers):
         await self.register_user_if_not_exists(update, context, update.message.from_user)
         user_id = update.message.from_user.id
 
-        if user_id not in config.roles.get('admin', []):
+        if str(user_id) not in config.roles.get('admin', []):
             await update.message.reply_text("❌ У вас нет доступа к этой команде.")
             return
 
@@ -2001,7 +2001,7 @@ class AdminHandlers(BotHandlers):
         await self.register_user_if_not_exists(update, context, update.message.from_user)
         user_id = update.message.from_user.id
 
-        if user_id not in config.roles.get('admin', []):
+        if str(user_id) not in config.roles.get('admin', []):
             await update.message.reply_text("❌ У вас нет доступа к этой команде.")
             return
 
@@ -2038,7 +2038,7 @@ class AdminHandlers(BotHandlers):
         await query.answer()
 
         user_id = query.from_user.id
-        if user_id not in config.roles.get('admin', []):
+        if str(user_id) not in config.roles.get('admin', []):
             await query.edit_message_text("❌ У вас нет доступа к этой команде.")
             return
 
