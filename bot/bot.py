@@ -1950,6 +1950,146 @@ class AdminHandlers(BotHandlers):
         await self._show_admin_panel(update, context)
 
 
+async def edit_user_command(self, update: Update, context: CallbackContext) -> None:
+    """Обрабатывает команду /edit_user."""
+    await self.register_user_if_not_exists(update, context, update.message.from_user)
+    user_id = update.message.from_user.id
+
+    if user_id not in config.roles.get('admin', []):
+        await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        return
+
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text(
+            "❌ Неправильный формат команды.\n"
+            "Используйте: /edit_user USER_ID ROLE\n"
+            "Пример: /edit_user 123456789 admin"
+        )
+        return
+
+    try:
+        target_user_id = int(context.args[0])
+        new_role = context.args[1]
+
+        # Проверяем существование пользователя
+        if not self.db.check_if_user_exists(target_user_id):
+            await update.message.reply_text(f"❌ Пользователь с ID {target_user_id} не найден.")
+            return
+
+        # Проверяем валидность роли
+        valid_roles = ['admin', 'beta_tester', 'friend', 'regular_user', 'trial_user']
+        if new_role not in valid_roles:
+            await update.message.reply_text(
+                f"❌ Неверная роль. Допустимые роли: {', '.join(valid_roles)}"
+            )
+            return
+
+        # Обновляем роль пользователя
+        self.db.set_user_attribute(target_user_id, "role", new_role)
+
+        await update.message.reply_text(
+            f"✅ Роль пользователя {target_user_id} успешно изменена на '{new_role}'"
+        )
+
+    except ValueError:
+        await update.message.reply_text("❌ ID пользователя должен быть числом.")
+    except Exception as e:
+        logger.error(f"Error editing user: {e}")
+        await update.message.reply_text("❌ Произошла ошибка при изменении роли пользователя.")
+
+
+async def broadcast_command(self, update: Update, context: CallbackContext) -> None:
+    """Обрабатывает команду /broadcast."""
+    await self.register_user_if_not_exists(update, context, update.message.from_user)
+    user_id = update.message.from_user.id
+
+    if user_id not in config.roles.get('admin', []):
+        await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Неправильный формат команды.\n"
+            "Используйте: /broadcast ТЕКСТ_СООБЩЕНИЯ\n"
+            "Пример: /broadcast Всем привет! Это тестовая рассылка."
+        )
+        return
+
+    message_text = ' '.join(context.args)
+
+    # Подтверждение рассылки
+    confirmation_text = (
+        f"📢 <b>Подтверждение рассылки</b>\n\n"
+        f"Текст сообщения:\n{message_text}\n\n"
+        f"Отправить это сообщение всем пользователям?"
+    )
+
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Да, отправить", callback_data=f"confirm_broadcast|{message_text}"),
+            InlineKeyboardButton("❌ Отмена", callback_data="cancel_broadcast")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(confirmation_text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+
+
+async def broadcast_confirmation_handler(self, update: Update, context: CallbackContext) -> None:
+    """Обрабатывает подтверждение рассылки."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if user_id not in config.roles.get('admin', []):
+        await query.edit_message_text("❌ У вас нет доступа к этой команде.")
+        return
+
+    data = query.data
+
+    if data == "cancel_broadcast":
+        await query.edit_message_text("❌ Рассылка отменена.")
+        return
+
+    if data.startswith("confirm_broadcast|"):
+        message_text = data.split("|", 1)[1]
+
+        await query.edit_message_text("🔄 Начинаю рассылку...")
+
+        # Получаем всех пользователей
+        all_user_ids = self.db.get_all_user_ids()
+        success_count = 0
+        fail_count = 0
+
+        for target_user_id in all_user_ids:
+            try:
+                user_data = self.db.get_user_by_id(target_user_id)
+                if user_data and 'chat_id' in user_data:
+                    await context.bot.send_message(
+                        chat_id=user_data['chat_id'],
+                        text=f"📢 <b>Рассылка от администратора:</b>\n\n{message_text}",
+                        parse_mode=ParseMode.HTML
+                    )
+                    success_count += 1
+                else:
+                    fail_count += 1
+            except Exception as e:
+                logger.error(f"Error sending broadcast to {target_user_id}: {e}")
+                fail_count += 1
+
+            # Небольшая задержка чтобы не превысить лимиты Telegram
+            await asyncio.sleep(0.1)
+
+        result_text = (
+            f"✅ <b>Рассылка завершена</b>\n\n"
+            f"✅ Успешно: {success_count}\n"
+            f"❌ Не удалось: {fail_count}\n"
+            f"📊 Всего: {len(all_user_ids)}"
+        )
+
+        await query.edit_message_text(result_text, parse_mode=ParseMode.HTML)
+
+
 # Функции для работы с платежами
 async def create_subscription_yookassa_payment(user_id: int, subscription_type: SubscriptionType,
                                                context: CallbackContext) -> str:
@@ -2166,7 +2306,7 @@ def run_bot() -> None:
     image_handlers = ImageHandlers(db)
     chat_mode_handlers = ChatModeHandlers(db)
     settings_handlers = SettingsHandlers(db)
-    admin_handlers = AdminHandlers(db)
+    admin_handlers = AdminHandlers(db)  # Создаем обработчик админ-панели
     message_handlers = MessageHandlers(db, subscription_handlers, chat_mode_handlers, admin_handlers)
 
     # Настраиваем фильтр пользователей
@@ -2177,43 +2317,56 @@ def run_bot() -> None:
         user_ids = [x for x in any_ids if x > 0]
         group_ids = [x for x in any_ids if x < 0]
         user_filter = (filters.User(username=usernames) |
-                      filters.User(user_id=user_ids) |
-                      filters.Chat(chat_id=group_ids))
+                       filters.User(user_id=user_ids) |
+                       filters.Chat(chat_id=group_ids))
 
     # Добавляем обработчики команд
     application.add_handler(CommandHandler("start", message_handlers.start_handle, filters=user_filter))
     application.add_handler(CommandHandler("help", message_handlers.help_handle, filters=user_filter))
-    application.add_handler(CommandHandler("help_group_chat", message_handlers.help_group_chat_handle, filters=user_filter))
+    application.add_handler(
+        CommandHandler("help_group_chat", message_handlers.help_group_chat_handle, filters=user_filter))
     application.add_handler(CommandHandler("retry", message_handlers.retry_handle, filters=user_filter))
     application.add_handler(CommandHandler("new", message_handlers.new_dialog_handle, filters=user_filter))
     application.add_handler(CommandHandler("cancel", message_handlers.cancel_handle, filters=user_filter))
     application.add_handler(CommandHandler("mode", chat_mode_handlers.show_chat_modes_handle, filters=user_filter))
     application.add_handler(CommandHandler("settings", settings_handlers.settings_handle, filters=user_filter))
-    application.add_handler(CommandHandler("my_payments", subscription_handlers.my_payments_handle, filters=user_filter))
+    application.add_handler(
+        CommandHandler("my_payments", subscription_handlers.my_payments_handle, filters=user_filter))
 
-    # Добавляем обработчики сообщений
+    # Добавляем обработчики команд админ-панели
+    application.add_handler(CommandHandler("edit_user", admin_handlers.edit_user_command, filters=user_filter))
+    application.add_handler(CommandHandler("broadcast", admin_handlers.broadcast_command, filters=user_filter))
+
+    # Добавляем обработчики сообщений (включая кнопки админ-панели)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & user_filter,
-                                         message_handlers.message_handle))
+                                           message_handlers.message_handle))
     application.add_handler(MessageHandler(filters.VOICE & user_filter,
-                                         message_handlers.voice_message_handle))
+                                           message_handlers.voice_message_handle))
 
     # Добавляем обработчики подписок
-    application.add_handler(CommandHandler("subscription", subscription_handlers.subscription_handle, filters=user_filter))
+    application.add_handler(
+        CommandHandler("subscription", subscription_handlers.subscription_handle, filters=user_filter))
     application.add_handler(CallbackQueryHandler(subscription_handlers.subscription_callback_handle,
-                                               pattern='^subscribe\\|'))
+                                                 pattern='^subscribe\\|'))
     application.add_handler(CallbackQueryHandler(subscription_handlers.subscription_handle,
-                                               pattern='^subscription_back$'))
+                                                 pattern='^subscription_back$'))
 
     # Добавляем обработчики режимов чата
     application.add_handler(CallbackQueryHandler(chat_mode_handlers.show_chat_modes_callback_handle,
-                                               pattern="^show_chat_modes"))
+                                                 pattern="^show_chat_modes"))
     application.add_handler(CallbackQueryHandler(chat_mode_handlers.set_chat_mode_handle,
-                                               pattern="^set_chat_mode"))
+                                                 pattern="^set_chat_mode"))
 
     # Добавляем обработчики настроек
     application.add_handler(CallbackQueryHandler(settings_handlers.set_settings_handle, pattern="^set_settings"))
     application.add_handler(CallbackQueryHandler(settings_handlers.model_settings_handler, pattern='^model-'))
     application.add_handler(CallbackQueryHandler(settings_handlers.model_settings_handler, pattern='^claude-model-'))
+
+    # Добавляем обработчики админ-панели (callback)
+    application.add_handler(CallbackQueryHandler(admin_handlers.broadcast_confirmation_handler,
+                                                 pattern="^confirm_broadcast\\|"))
+    application.add_handler(CallbackQueryHandler(admin_handlers.broadcast_confirmation_handler,
+                                                 pattern="^cancel_broadcast"))
 
     # Добавляем обработчик ошибок
     application.add_error_handler(error_handle)
