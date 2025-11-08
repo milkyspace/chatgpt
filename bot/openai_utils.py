@@ -534,71 +534,11 @@ async def is_content_acceptable(prompt):
     return not all(r.results[0].categories.values())
 
 
-async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
-    """
-    Конвертирует изображение в PNG формат с RGBA каналами для OpenAI.
-    """
-    try:
-        # Сбрасываем позицию буфера
-        image_buffer.seek(0)
-
-        # Открываем изображение с помощью PIL
-        try:
-            image = Image.open(image_buffer)
-        except Exception as e:
-            logger.error(f"Error opening image with PIL: {e}")
-            raise ValueError(f"Не удалось открыть изображение: {str(e)}")
-
-        # Логируем информацию об изображении
-        logger.info(f"Original image: size={image.size}, mode={image.mode}, format={image.format}")
-
-        # Конвертируем в RGBA формат (требуется OpenAI для редактирования с масками)
-        if image.mode != 'RGBA':
-            logger.info(f"Converting image from {image.mode} to RGBA")
-
-            if image.mode == 'RGB':
-                # Создаем RGBA из RGB - добавляем полностью непрозрачный альфа-канал
-                rgba_image = Image.new('RGBA', image.size)
-                rgba_image.paste(image, (0, 0, image.size[0], image.size[1]))
-                image = rgba_image
-            else:
-                # Для других форматов используем стандартную конвертацию
-                image = image.convert('RGBA')
-
-        logger.info(f"After conversion: size={image.size}, mode={image.mode}")
-
-        # Ограничиваем максимальный размер
-        max_size = (1024, 1024)
-        if image.size[0] > max_size[0] or image.size[1] > max_size[1]:
-            image.thumbnail(max_size, Image.Resampling.LANCZOS)
-            logger.info(f"Resized image to: {image.size}")
-
-        # Создаем новый буфер для PNG
-        png_buffer = BytesIO()
-
-        # Сохраняем с настройками для лучшей совместимости
-        image.save(png_buffer, format='PNG', optimize=True)
-        png_buffer.seek(0)
-
-        # Проверяем результат
-        if len(png_buffer.getvalue()) == 0:
-            raise ValueError("Не удалось сохранить изображение в PNG формате")
-
-        logger.info(
-            f"Image successfully converted to PNG: {image.size}, mode: {image.mode}, size: {len(png_buffer.getvalue())} bytes")
-
-        return png_buffer
-
-    except Exception as e:
-        logger.error(f"Error converting image to PNG: {e}")
-        raise ValueError(f"Не удалось обработать изображение: {str(e)}")
-
-
 async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
                      model: str = "dall-e-2") -> Optional[str]:
     """
     Редактирует изображение с помощью DALL-E с использованием маски.
-    Обновленная версия для нового OpenAI API.
+    Полностью обновленная версия для нового OpenAI API.
     """
     max_retries = 3
     retry_delay = 5
@@ -623,12 +563,18 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
             mask_buffer.seek(0)
 
             # Используем новый API клиент
-            client = openai.AsyncClient(api_key=config.openai_api_key)
+            if config.openai_api_base is not None:
+                edit_client = AsyncOpenAI(api_key=config.openai_api_key, base_url=config.openai_api_base)
+            else:
+                edit_client = AsyncOpenAI(api_key=config.openai_api_key)
 
-            response = await client.images.edit(
+            logger.info(f"Using model: {model}, size: {size}, prompt: {prompt}")
+
+            # ВАЖНО: используем правильный метод нового API
+            response = await edit_client.images.edit(
                 model=model,
-                image=png_buffer,
-                mask=mask_buffer,
+                image=("image.png", png_buffer.read(), "image/png"),
+                mask=("mask.png", mask_buffer.read(), "image/png"),
                 prompt=prompt,
                 size=size,
                 n=1
@@ -644,13 +590,17 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
             error_str = str(e).lower()
 
             if "unsupported" in error_str and "image" in error_str:
-                raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
+                if attempt == max_retries - 1:
+                    raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
             elif "invalid" in error_str and "image" in error_str:
-                raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
+                if attempt == max_retries - 1:
+                    raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
             elif "safety" in error_str:
-                raise ValueError("Запрос не соответствует политикам безопасности OpenAI.")
+                if attempt == max_retries - 1:
+                    raise ValueError("Запрос не соответствует политикам безопасности OpenAI.")
             elif "size" in error_str:
-                raise ValueError("Изображение слишком большое. Попробуйте фото меньшего размера.")
+                if attempt == max_retries - 1:
+                    raise ValueError("Изображение слишком большое. Попробуйте фото меньшего размера.")
 
             # Если это не последняя попытка, повторяем
             if attempt < max_retries - 1:
@@ -659,23 +609,58 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
                 retry_delay *= 2
             else:
                 # На последней попытке возвращаем понятное сообщение об ошибке
-                raise Exception("Не удалось отредактировать фото после нескольких попыток. Попробуйте позже.")
+                logger.error(f"All attempts failed: {e}")
+                return None
 
     return None
+
+
+async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
+    """
+    Конвертирует изображение в PNG формат с RGBA каналами для OpenAI.
+    """
+    try:
+        image_buffer.seek(0)
+        image = Image.open(image_buffer)
+
+        logger.info(f"Original image: size={image.size}, mode={image.mode}, format={image.format}")
+
+        # Конвертируем в RGBA формат
+        if image.mode != 'RGBA':
+            logger.info(f"Converting image from {image.mode} to RGBA")
+            image = image.convert('RGBA')
+
+        logger.info(f"After conversion: size={image.size}, mode={image.mode}")
+
+        # Ограничиваем максимальный размер
+        max_size = (1024, 1024)
+        if image.size[0] > max_size[0] or image.size[1] > max_size[1]:
+            image.thumbnail(max_size, Image.Resampling.LANCZOS)
+            logger.info(f"Resized image to: {image.size}")
+
+        # Создаем новый буфер для PNG
+        png_buffer = BytesIO()
+        image.save(png_buffer, format='PNG', optimize=True)
+        png_buffer.seek(0)
+
+        logger.info(
+            f"Image successfully converted to PNG: {image.size}, mode: {image.mode}, size: {len(png_buffer.getvalue())} bytes")
+        return png_buffer
+
+    except Exception as e:
+        logger.error(f"Error converting image to PNG: {e}")
+        raise ValueError(f"Не удалось обработать изображение: {str(e)}")
 
 
 async def _create_edit_mask(original_image_buffer: BytesIO) -> BytesIO:
     """
     Создает маску для редактирования изображения.
-    Маска определяет, какие области изображения можно редактировать.
     """
     try:
-        # Открываем оригинальное изображение
         original_image_buffer.seek(0)
         image = Image.open(original_image_buffer)
 
-        # Создаем полностью прозрачную маску (альфа-канал = 0)
-        # Это позволяет редактировать все области изображения
+        # Создаем полностью прозрачную маску
         mask = Image.new('RGBA', image.size, (0, 0, 0, 0))
 
         # Сохраняем маску
@@ -688,7 +673,6 @@ async def _create_edit_mask(original_image_buffer: BytesIO) -> BytesIO:
 
     except Exception as e:
         logger.error(f"Error creating edit mask: {e}")
-        # В случае ошибки создаем простую прозрачную маску
         simple_mask = Image.new('RGBA', (1024, 1024), (0, 0, 0, 0))
         mask_buffer = BytesIO()
         simple_mask.save(mask_buffer, format='PNG')
