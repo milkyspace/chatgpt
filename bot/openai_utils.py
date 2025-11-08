@@ -468,26 +468,40 @@ async def is_content_acceptable(prompt):
 
 
 async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024") -> Optional[str]:
-    """Создает вариацию изображения вместо редактирования с маской."""
-    try:
-        # Конвертируем в PNG
-        png_buffer = await _convert_image_to_png(image)
+    """Создает вариацию изображения на основе исходного."""
+    max_retries = 3
+    retry_delay = 5
 
-        # Используем создание вариаций вместо редактирования
-        response = await openai_client.images.create_variation(
-            image=png_buffer,
-            prompt=prompt,  # Описание желаемого результата
-            size=size,
-            n=1,
-            model="dall-e-2"
-        )
+    for attempt in range(max_retries):
+        try:
+            # Конвертируем в PNG
+            png_buffer = await _convert_image_to_png(image)
 
-        logger.info("Image variation created successfully")
-        return response.data[0].url
+            logger.info(f"Attempt {attempt + 1}/{max_retries}: Creating image variation")
 
-    except Exception as e:
-        logger.error(f"Error creating image variation: {e}")
-        return None
+            # Используем создание вариаций БЕЗ prompt
+            response = await openai_client.images.create_variation(
+                image=png_buffer,
+                size=size,
+                n=1,
+                model="dall-e-2"
+            )
+
+            logger.info("Image variation created successfully")
+            return response.data[0].url
+
+        except Exception as e:
+            logger.error(f"Error in photo editing (attempt {attempt + 1}): {e}")
+
+            if attempt < max_retries - 1:
+                logger.info(f"Retrying in {retry_delay} seconds...")
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                logger.error(f"All attempts failed: {e}")
+                return None
+
+    return None
 
 
 async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
