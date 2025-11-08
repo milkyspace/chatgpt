@@ -463,24 +463,30 @@ class PhotoEditorMixin(BaseHandler):
                 parse_mode=ParseMode.HTML
             )
 
-
     def _get_user_friendly_error(self, error: Exception) -> str:
         """Возвращает понятное пользователю сообщение об ошибке."""
         error_str = str(error).lower()
 
         error_messages = {
             "unsupported mimetype": "❌ Формат изображения не поддерживается. Попробуйте другое фото (JPEG, PNG).",
-            "invalid image": "❌ Формат изображения не поддерживается. Попробуйте другое фото (JPEG, PNG).",
+            "invalid image": "❌ Не удалось обработать изображение. Попробуйте другое фото.",
             "safety system": "❌ Запрос не соответствует политикам безопасности OpenAI. Попробуйте другое описание.",
             "billing": "❌ Проблемы с биллингом OpenAI. Обратитесь к администратору.",
-            "size": "❌ Изображение слишком большое. Попробуйте фото меньшего размера."
+            "size": "❌ Изображение слишком большое. Попробуйте фото меньшего размера.",
+            "mask": "❌ Проблема с обработкой изображения. Попробуйте другое фото.",
+            "edit": "❌ Не удалось отредактировать фото. Попробуйте другое описание или изображение."
         }
 
         for key, message in error_messages.items():
             if key in error_str:
                 return message
 
-        return f"❌ Ошибка при редактировании фото: {str(error)}"
+        # Для ошибок OpenAI API
+        if hasattr(error, 'code'):
+            if error.code == 'billing_hard_limit_reached':
+                return "❌ Лимит расходов OpenAI исчерпан. Обратитесь к администратору."
+
+        return "❌ Произошла ошибка при редактировании фото. Пожалуйста, попробуйте еще раз."
 
     def _cleanup_photo_context(self, context: CallbackContext) -> None:
         """Очищает временные данные фото из контекста."""
@@ -2591,6 +2597,42 @@ def run_bot() -> None:
                                                  pattern="^show_chat_modes"))
     application.add_handler(CallbackQueryHandler(chat_mode_handlers.set_chat_mode_handle,
                                                  pattern="^set_chat_mode"))
+
+    # Добавляем обработчики для настроек
+    application.add_handler(CallbackQueryHandler(
+        settings_handlers.model_settings_handler,
+        pattern="^model-"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        settings_handlers.set_settings_handle,
+        pattern="^model-set_settings\\|"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        settings_handlers.set_settings_handle,
+        pattern="^claude-model-set_settings\\|"
+    ))
+
+    # Обработчики для настроек художника
+    application.add_handler(CallbackQueryHandler(
+        settings_handlers.model_settings_handler,
+        pattern="^model-artist"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        settings_handlers.model_settings_handler,
+        pattern="^model-artist-set_model\\|"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        settings_handlers.model_settings_handler,
+        pattern="^model-artist-set_images\\|"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        settings_handlers.model_settings_handler,
+        pattern="^model-artist-set_resolution\\|"
+    ))
+    application.add_handler(CallbackQueryHandler(
+        settings_handlers.model_settings_handler,
+        pattern="^model-artist-set_quality\\|"
+    ))
 
     # Добавляем обработчики админ-панели (callback)
     application.add_handler(CallbackQueryHandler(admin_handlers.broadcast_confirmation_handler,

@@ -467,61 +467,27 @@ async def is_content_acceptable(prompt):
         return True
 
 
-async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
-                     model: str = "dall-e-2") -> Optional[str]:
-    """
-    Редактирует изображение с помощью DALL-E с использованием маски.
-    """
-    max_retries = 3
-    retry_delay = 5
+async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024") -> Optional[str]:
+    """Создает вариацию изображения вместо редактирования с маской."""
+    try:
+        # Конвертируем в PNG
+        png_buffer = await _convert_image_to_png(image)
 
-    for attempt in range(max_retries):
-        try:
-            if model == "dall-e-3":
-                logger.warning("DALL-E 3 doesn't support image editing yet, using DALL-E 2")
-                model = "dall-e-2"
+        # Используем создание вариаций вместо редактирования
+        response = await openai_client.images.create_variation(
+            image=png_buffer,
+            prompt=prompt,  # Описание желаемого результата
+            size=size,
+            n=1,
+            model="dall-e-2"
+        )
 
-            # Конвертируем изображение в PNG с RGBA форматом
-            png_buffer = await _convert_image_to_png(image)
+        logger.info("Image variation created successfully")
+        return response.data[0].url
 
-            # Создаем маску для редактирования
-            mask_buffer = await _create_edit_mask(png_buffer)
-
-            logger.info(f"Attempt {attempt + 1}/{max_retries}: Sending image edit request to OpenAI")
-
-            # Подготавливаем файлы для загрузки с правильными MIME-типами
-            png_buffer.seek(0)
-            mask_buffer.seek(0)
-
-            # Создаем файловые объекты с явным указанием MIME-типа
-            image_file = ("image.png", png_buffer, "image/png")
-            mask_file = ("mask.png", mask_buffer, "image/png")
-
-            # Исправленный вызов с правильными файловыми объектами
-            response = await openai_client.images.edit(
-                image=image_file,
-                mask=mask_file,
-                prompt=prompt,
-                size=size,
-                n=1,
-                model=model
-            )
-
-            logger.info("Image editing successful")
-            return response.data[0].url
-
-        except Exception as e:
-            logger.error(f"Error in photo editing (attempt {attempt + 1}): {e}")
-
-            if attempt < max_retries - 1:
-                logger.info(f"Retrying in {retry_delay} seconds...")
-                await asyncio.sleep(retry_delay)
-                retry_delay *= 2
-            else:
-                logger.error(f"All attempts failed: {e}")
-                return None
-
-    return None
+    except Exception as e:
+        logger.error(f"Error creating image variation: {e}")
+        return None
 
 
 async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
