@@ -16,11 +16,11 @@ import requests
 openai_api_key = config.openai_api_key
 anthropic_api_key = config.anthropic_api_key
 
+# Инициализация клиента для нового API
 if config.openai_api_base is not None:
-    # Для нового API база URL настраивается по-другому
-    client = AsyncOpenAI(api_key=openai_api_key, base_url=config.openai_api_base)
+    openai_client = AsyncOpenAI(api_key=openai_api_key, base_url=config.openai_api_base)
 else:
-    client = AsyncOpenAI(api_key=openai_api_key)
+    openai_client = AsyncOpenAI(api_key=openai_api_key)
 
 OPENAI_COMPLETION_OPTIONS = {
     "temperature": 0.7,
@@ -32,6 +32,7 @@ OPENAI_COMPLETION_OPTIONS = {
 
 logger = logging.getLogger(__name__)
 
+
 def configure_logging():
     if config.enable_detailed_logging:
         logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
@@ -39,28 +40,25 @@ def configure_logging():
         logging.basicConfig(level=logging.CRITICAL, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
     logger.setLevel(logging.getLogger().level)
 
-configure_logging()
 
 configure_logging()
 
-def validate_payload(payload): #maybe comment out
-    # Example validation: Ensure all messages have content that is a string
+
+def validate_payload(payload):
     for message in payload.get("messages", []):
         if not isinstance(message.get("content"), str):
             logger.error("Invalid message content: Not a string")
             raise ValueError("Message content must be a string")
 
-        
+
 class ChatGPT:
     def __init__(self, model="gpt-4-1106-preview"):
-        assert model in {"text-davinci-003", "gpt-3.5-turbo-16k", "gpt-3.5-turbo", "gpt-4", "gpt-4-1106-preview", "gpt-4-vision-preview", "gpt-4-turbo-2024-04-09", "gpt-4o", "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"}, f"Unknown model: {model}"
+        assert model in {"text-davinci-003", "gpt-3.5-turbo-16k", "gpt-3.5-turbo", "gpt-4", "gpt-4-1106-preview",
+                         "gpt-4-vision-preview", "gpt-4-turbo-2024-04-09", "gpt-4o", "claude-3-opus-20240229",
+                         "claude-3-sonnet-20240229", "claude-3-haiku-20240307"}, f"Unknown model: {model}"
         self.model = model
         self.is_claude_model = model.startswith("claude")
         self.logger = logging.getLogger(__name__)
-        self.headers = {
-            "Authorization": f"Bearer {config.anthropic_api_key if self.is_claude_model else config.openai_api_key}",
-            "Content-Type": "application/json",
-        }
 
     async def send_message(self, message, dialog_messages=[], chat_mode="assistant"):
         if chat_mode not in config.chat_modes.keys():
@@ -97,46 +95,38 @@ class ChatGPT:
 
                     n_input_tokens, n_output_tokens = self._count_tokens_from_messages([], answer, model=self.model)
                 else:
-                    if self.model in {"gpt-3.5-turbo-16k", "gpt-3.5-turbo", "gpt-4", "gpt-4-1106-preview", "gpt-4-vision-preview", "gpt-4-turbo-2024-04-09", "gpt-4o"}:
+                    # ИСПРАВЛЕНО: используем новый API для OpenAI моделей
+                    if self.model in {"gpt-3.5-turbo-16k", "gpt-3.5-turbo", "gpt-4", "gpt-4-1106-preview",
+                                      "gpt-4-vision-preview", "gpt-4-turbo-2024-04-09", "gpt-4o"}:
                         messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
-                        #GPT HELP 2
+
                         validate_payload({
                             "model": self.model,
                             "messages": messages,
                             **OPENAI_COMPLETION_OPTIONS
                         })
-                        #GPT HELP 2
-                        r = await openai.ChatCompletion.acreate(
+
+                        # НОВЫЙ API
+                        response = await openai_client.chat.completions.create(
                             model=self.model,
                             messages=messages,
                             **OPENAI_COMPLETION_OPTIONS
                         )
-                        answer = r.choices[0].message["content"]
+                        answer = response.choices[0].message.content
+                        n_input_tokens, n_output_tokens = response.usage.prompt_tokens, response.usage.completion_tokens
+
                     elif self.model == "text-davinci-003":
+                        # Для старых моделей используем старый API через requests
                         prompt = self._generate_prompt(message, dialog_messages, chat_mode)
-
-                        #GPT HELP 2
-                        validate_payload({
-                            "model": self.model,
-                            "messages": messages,
-                            **OPENAI_COMPLETION_OPTIONS
-                        })
-                        #GPT HELP 2
-
-                        r = await openai.Completion.acreate(
-                            engine=self.model,
-                            prompt=prompt,
-                            **OPENAI_COMPLETION_OPTIONS
-                        )
-                        answer = r.choices[0].text
+                        answer, n_input_tokens, n_output_tokens = await self._send_legacy_completion(prompt)
                     else:
                         raise ValueError(f"Unknown model: {self.model}")
 
                 answer = self._postprocess_answer(answer)
-                n_input_tokens, n_output_tokens = r.usage.prompt_tokens, r.usage.completion_tokens
-            except openai.error.InvalidRequestError as e:  # too many tokens
+            except Exception as e:  # Убрана специфичная проверка на InvalidRequestError
                 if len(dialog_messages) == 0:
-                    raise ValueError("Dialog messages is reduced to zero, but still has too many tokens to make completion") from e
+                    raise ValueError(
+                        "Dialog messages is reduced to zero, but still has too many tokens to make completion") from e
 
                 # forget first message in dialog_messages
                 dialog_messages = dialog_messages[1:]
@@ -144,6 +134,40 @@ class ChatGPT:
         n_first_dialog_messages_removed = n_dialog_messages_before - len(dialog_messages)
 
         return answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
+
+    async def _send_legacy_completion(self, prompt):
+        """Отправка запросов для устаревших моделей через старый API"""
+        try:
+            # Используем requests для старых моделей
+            headers = {
+                "Authorization": f"Bearer {config.openai_api_key}",
+                "Content-Type": "application/json"
+            }
+
+            data = {
+                "model": "text-davinci-003",
+                "prompt": prompt,
+                **OPENAI_COMPLETION_OPTIONS
+            }
+
+            if config.openai_api_base:
+                url = f"{config.openai_api_base}/completions"
+            else:
+                url = "https://api.openai.com/v1/completions"
+
+            response = requests.post(url, headers=headers, json=data, timeout=60)
+            response.raise_for_status()
+
+            result = response.json()
+            answer = result['choices'][0]['text']
+            n_input_tokens = result['usage']['prompt_tokens']
+            n_output_tokens = result['usage']['completion_tokens']
+
+            return answer, n_input_tokens, n_output_tokens
+
+        except Exception as e:
+            logger.error(f"Error in legacy completion: {e}")
+            raise e
 
     async def send_message_stream(self, message, dialog_messages=[], chat_mode="assistant"):
         if chat_mode not in config.chat_modes.keys():
@@ -160,109 +184,81 @@ class ChatGPT:
 
                     if not prompt.strip():
                         raise ValueError("Generated prompt is empty")
-                    
+
                     client = anthropic.AsyncAnthropic(api_key=config.anthropic_api_key)
 
                     async with client.messages.stream(
-                        model=self.model,
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=1000,
-                        temperature=0.0#0.7
+                            model=self.model,
+                            messages=[{"role": "user", "content": prompt}],
+                            max_tokens=1000,
+                            temperature=0.0
                     ) as stream:
                         async for event in stream.text_stream:
-                            #self.logger.debug(f"Event: {event}")
                             if event:
                                 if isinstance(event, str):
                                     if answer is None:
                                         answer = event
                                     else:
                                         answer += event
-                                    n_input_tokens, n_output_tokens = self._count_tokens_from_messages([], answer, model=self.model)
-                                    yield "not_finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
-   
+                                    n_input_tokens, n_output_tokens = self._count_tokens_from_messages([], answer,
+                                                                                                       model=self.model)
+                                    yield "not_finished", answer, (
+                                    n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
+
                     if not answer.strip():
                         raise ValueError("Received empty response from Claude API.")
 
-
                 else:
-
                     if self.model in {"gpt-3.5-turbo-16k", "gpt-3.5-turbo", "gpt-4", "gpt-4-1106-preview",
                                       "gpt-4-turbo-2024-04-09", "gpt-4o"}:
 
                         messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
 
-                        r_gen = await openai.ChatCompletion.acreate(
-
+                        # НОВЫЙ API для streaming
+                        response = await openai_client.chat.completions.create(
                             model=self.model,
-
                             messages=messages,
-
                             stream=True,
-
                             **OPENAI_COMPLETION_OPTIONS
-
                         )
 
                         answer = ""
-
-                        async for r_item in r_gen:
-
-                            delta = r_item.choices[0].delta
-
-                            if "content" in delta:
-                                answer += delta.content
-
+                        async for chunk in response:
+                            if chunk.choices[0].delta.content is not None:
+                                answer += chunk.choices[0].delta.content
                                 n_input_tokens, n_output_tokens = self._count_tokens_from_messages(messages, answer,
                                                                                                    model=self.model)
-
                                 n_first_dialog_messages_removed = n_dialog_messages_before - len(dialog_messages)
-
                                 yield "not_finished", answer, (
                                 n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
-                        # Финальный yield с полным ответом
-
                         yield "finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
-
 
                     elif self.model == "text-davinci-003":
                         prompt = self._generate_prompt(message, dialog_messages, chat_mode)
-                        r_gen = await openai.Completion.acreate(
-                            engine=self.model,
-                            prompt=prompt,
-                            stream=True,
-                            **OPENAI_COMPLETION_OPTIONS
-                        )
-
+                        # Для streaming старых моделей используем синхронный подход
                         answer = ""
-                        async for r_item in r_gen:
-                            answer += r_item.choices[0].text
-                            n_input_tokens, n_output_tokens = self._count_tokens_from_prompt(prompt, answer, model=self.model)
-                            n_first_dialog_messages_removed = n_dialog_messages_before - len(dialog_messages)
-                            yield "not_finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
+                        # Упрощенная реализация без streaming для старых моделей
+                        answer, n_input_tokens, n_output_tokens = await self._send_legacy_completion(prompt)
+                        yield "finished", answer, (n_input_tokens, n_output_tokens), 0
 
                 answer = self._postprocess_answer(answer)
 
-
-            except openai.error.InvalidRequestError as e:  # too many tokens
-
+            except Exception as e:
                 if len(dialog_messages) == 0:
                     raise e
 
-                # forget first message in dialog_messages
-
                 dialog_messages = dialog_messages[1:]
-
                 n_first_dialog_messages_removed = n_dialog_messages_before - len(dialog_messages)
 
-        yield "finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed  # sending final answer
+        yield "finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
     async def send_vision_message(
-        self,
-        message,
-        dialog_messages=[],
-        chat_mode="assistant",
-        image_buffer: BytesIO = None,
+            self,
+            message,
+            dialog_messages=[],
+            chat_mode="assistant",
+            image_buffer: BytesIO = None,
     ):
         n_dialog_messages_before = len(dialog_messages)
         answer = None
@@ -272,32 +268,27 @@ class ChatGPT:
                     messages = self._generate_prompt_messages(
                         message, dialog_messages, chat_mode, image_buffer
                     )
-                    r = await openai.ChatCompletion.acreate(
+                    # НОВЫЙ API для vision
+                    response = await openai_client.chat.completions.create(
                         model=self.model,
                         messages=messages,
                         **OPENAI_COMPLETION_OPTIONS
                     )
-                    answer = r.choices[0].message.content
+                    answer = response.choices[0].message.content
+                    n_input_tokens, n_output_tokens = response.usage.prompt_tokens, response.usage.completion_tokens
                 else:
                     raise ValueError(f"Unsupported model: {self.model}")
 
                 answer = self._postprocess_answer(answer)
-                n_input_tokens, n_output_tokens = (
-                    r.usage.prompt_tokens,
-                    r.usage.completion_tokens,
-                )
-            except openai.error.InvalidRequestError as e:  # too many tokens
+            except Exception as e:
                 if len(dialog_messages) == 0:
                     raise ValueError(
                         "Dialog messages is reduced to zero, but still has too many tokens to make completion"
                     ) from e
 
-                # forget first message in dialog_messages
                 dialog_messages = dialog_messages[1:]
 
-        n_first_dialog_messages_removed = n_dialog_messages_before - len(
-            dialog_messages
-        )
+        n_first_dialog_messages_removed = n_dialog_messages_before - len(dialog_messages)
 
         return (
             answer,
@@ -306,11 +297,11 @@ class ChatGPT:
         )
 
     async def send_vision_message_stream(
-        self,
-        message,
-        dialog_messages=[],
-        chat_mode="assistant",
-        image_buffer: BytesIO = None,
+            self,
+            message,
+            dialog_messages=[],
+            chat_mode="assistant",
+            image_buffer: BytesIO = None,
     ):
         n_dialog_messages_before = len(dialog_messages)
         answer = None
@@ -320,8 +311,9 @@ class ChatGPT:
                     messages = self._generate_prompt_messages(
                         message, dialog_messages, chat_mode, image_buffer
                     )
-                    
-                    r_gen = await openai.ChatCompletion.acreate(
+
+                    # НОВЫЙ API для vision streaming
+                    response = await openai_client.chat.completions.create(
                         model=self.model,
                         messages=messages,
                         stream=True,
@@ -329,51 +321,35 @@ class ChatGPT:
                     )
 
                     answer = ""
-                    async for r_item in r_gen:
-                        delta = r_item.choices[0].delta
-                        if "content" in delta:
-                            answer += delta.content
-                            (
-                                n_input_tokens,
-                                n_output_tokens,
-                            ) = self._count_tokens_from_messages(
-                                messages, answer, model=self.model
-                            )
-                            n_first_dialog_messages_removed = (
-                                n_dialog_messages_before - len(dialog_messages)
-                            )
+                    async for chunk in response:
+                        if chunk.choices[0].delta.content is not None:
+                            answer += chunk.choices[0].delta.content
+                            n_input_tokens, n_output_tokens = self._count_tokens_from_messages(messages, answer,
+                                                                                               model=self.model)
+                            n_first_dialog_messages_removed = n_dialog_messages_before - len(dialog_messages)
                             yield "not_finished", answer, (
-                                n_input_tokens,
-                                n_output_tokens,
-                            ), n_first_dialog_messages_removed
+                            n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
                 answer = self._postprocess_answer(answer)
 
-            except openai.error.InvalidRequestError as e:  # too many tokens
+            except Exception as e:
                 if len(dialog_messages) == 0:
                     raise e
-                # forget first message in dialog_messages
                 dialog_messages = dialog_messages[1:]
 
-        yield "finished", answer, (
-            n_input_tokens,
-            n_output_tokens,
-        ), n_first_dialog_messages_removed
-    
+        yield "finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
-
+    # Остальные методы класса (_generate_prompt, _encode_image, и т.д.) остаются без изменений
     def _generate_prompt(self, message, dialog_messages, chat_mode):
         prompt = config.chat_modes[chat_mode]["prompt_start"]
         prompt += "\n\n"
 
-        # add chat context
         if len(dialog_messages) > 0:
             prompt += "Chat:\n"
             for dialog_message in dialog_messages:
                 prompt += f"User: {dialog_message['user']}\n"
                 prompt += f"Assistant: {dialog_message['bot']}\n"
 
-        # current message
         prompt += f"User: {message}\n"
         prompt += "Assistant: "
 
@@ -384,9 +360,7 @@ class ChatGPT:
 
     def _generate_prompt_messages(self, message, dialog_messages, chat_mode, image_buffer: BytesIO = None):
         prompt = config.chat_modes[chat_mode]["prompt_start"]
-
-        #messages = [{"role": "system", "content": config.chat_modes[chat_mode]["prompt_start"]}]
-        messages = [{"role": "system", "content": prompt}] #repo commit
+        messages = [{"role": "system", "content": prompt}]
 
         for dialog_message in dialog_messages:
             messages.append({"role": "user", "content": dialog_message["user"]})
@@ -395,7 +369,7 @@ class ChatGPT:
         if image_buffer is not None:
             messages.append(
                 {
-                    "role": "user", 
+                    "role": "user",
                     "content": [
                         {
                             "type": "text",
@@ -407,7 +381,6 @@ class ChatGPT:
                         }
                     ]
                 }
-                
             )
         else:
             messages.append({"role": "user", "content": message})
@@ -437,7 +410,6 @@ class ChatGPT:
         return answer
 
     def _count_tokens_from_messages(self, messages, answer, model="gpt-4-1106-preview"):
-
         if model.startswith("claude"):
             encoding = tiktoken.encoding_for_model("gpt-4o")
         else:
@@ -447,18 +419,17 @@ class ChatGPT:
         tokens_per_name = 1
 
         if model.startswith("gpt-3"):
-            tokens_per_message = 4 # every message follows <im_start>{role/name}\n{content}<im_end>\n
-            tokens_per_name = -1 # if there's a name, the role is omitted
+            tokens_per_message = 4
+            tokens_per_name = -1
         elif model.startswith("gpt-4"):
             tokens_per_message = 3
-            tokens_per_name = 1 
+            tokens_per_name = 1
         elif model.startswith("claude"):
             tokens_per_message = 3
-            tokens_per_name = 1 
+            tokens_per_name = 1
         else:
             raise ValueError(f"Unknown model: {model}")
 
-        # input
         n_input_tokens = 0
         for message in messages:
             n_input_tokens += tokens_per_message
@@ -477,8 +448,6 @@ class ChatGPT:
                         pass
 
         n_input_tokens += 2
-
-        # output
         n_output_tokens = 1 + len(encoding.encode(answer))
 
         return n_input_tokens, n_output_tokens
@@ -493,34 +462,41 @@ class ChatGPT:
         n_output_tokens = len(encoding.encode(answer))
 
         return n_input_tokens, n_output_tokens
-    
+
+
 async def transcribe_audio(audio_file) -> str:
-    r = await openai.Audio.atranscribe("whisper-1", audio_file)
-    return r["text"] or ""
+    try:
+        # НОВЫЙ API для транскрипции
+        transcript = await openai_client.audio.transcriptions.create(
+            file=audio_file,
+            model="whisper-1"
+        )
+        return transcript.text or ""
+    except Exception as e:
+        logger.error(f"Error transcribing audio: {e}")
+        return ""
 
 
 async def generate_images(prompt, model="dall-e-2", n_images=4, size="1024x1024", quality="standard"):
-    """Generate images using OpenAI's specified model with increased timeouts."""
-    if model=="dalle-2":
-        model="dall-e-2"
-        quality="standard"
+    """Generate images using OpenAI's specified model."""
+    if model == "dalle-2":
+        model = "dall-e-2"
+        quality = "standard"
 
-    if model=="dalle-3":
-        model="dall-e-3"
-        n_images=1
+    if model == "dalle-3":
+        model = "dall-e-3"
+        n_images = 1
 
     try:
-        # Увеличиваем таймаут для генерации изображений
-        response = await openai.Image.acreate(
+        # НОВЫЙ API для генерации изображений
+        response = await openai_client.images.generate(
             model=model,
             prompt=prompt,
             n=n_images,
             size=size,
-            quality=quality,
-            timeout=60.0  # 60 секунд для генерации
+            quality=quality
         )
 
-        # Extract image URLs from the response
         image_urls = [item.url for item in response.data]
         return image_urls
 
@@ -530,22 +506,25 @@ async def generate_images(prompt, model="dall-e-2", n_images=4, size="1024x1024"
 
 
 async def is_content_acceptable(prompt):
-    r = await openai.Moderation.acreate(input=prompt)
-    return not all(r.results[0].categories.values())
+    try:
+        # НОВЫЙ API для модерации
+        response = await openai_client.moderations.create(input=prompt)
+        return not all(response.results[0].categories.values())
+    except Exception as e:
+        logger.error(f"Error in content moderation: {e}")
+        return True
 
 
 async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
                      model: str = "dall-e-2") -> Optional[str]:
     """
     Редактирует изображение с помощью DALL-E с использованием маски.
-    Полностью обновленная версия для нового OpenAI API.
     """
     max_retries = 3
     retry_delay = 5
 
     for attempt in range(max_retries):
         try:
-            # DALL-E 2 поддерживает редактирование, DALL-E 3 пока нет
             if model == "dall-e-3":
                 logger.warning("DALL-E 3 doesn't support image editing yet, using DALL-E 2")
                 model = "dall-e-2"
@@ -556,59 +535,33 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
             # Создаем маску для редактирования
             mask_buffer = await _create_edit_mask(png_buffer)
 
-            logger.info(f"Attempt {attempt + 1}/{max_retries}: Sending image edit request to OpenAI with new API")
+            logger.info(f"Attempt {attempt + 1}/{max_retries}: Sending image edit request to OpenAI")
 
             # Подготавливаем файлы для загрузки
             png_buffer.seek(0)
             mask_buffer.seek(0)
 
-            # Используем новый API клиент
-            if config.openai_api_base is not None:
-                edit_client = AsyncOpenAI(api_key=config.openai_api_key, base_url=config.openai_api_base)
-            else:
-                edit_client = AsyncOpenAI(api_key=config.openai_api_key)
-
-            logger.info(f"Using model: {model}, size: {size}, prompt: {prompt}")
-
-            # ВАЖНО: используем правильный метод нового API
-            response = await edit_client.images.edit(
+            # НОВЫЙ API для редактирования изображений
+            response = await openai_client.images.edit(
                 model=model,
-                image=("image.png", png_buffer.read(), "image/png"),
-                mask=("mask.png", mask_buffer.read(), "image/png"),
+                image=png_buffer,
+                mask=mask_buffer,
                 prompt=prompt,
                 size=size,
                 n=1
             )
 
-            logger.info("Image editing successful with new API")
+            logger.info("Image editing successful")
             return response.data[0].url
 
         except Exception as e:
-            logger.error(f"Error in photo editing with new API (attempt {attempt + 1}): {e}")
+            logger.error(f"Error in photo editing (attempt {attempt + 1}): {e}")
 
-            # Проверяем тип ошибки для лучшего сообщения пользователю
-            error_str = str(e).lower()
-
-            if "unsupported" in error_str and "image" in error_str:
-                if attempt == max_retries - 1:
-                    raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
-            elif "invalid" in error_str and "image" in error_str:
-                if attempt == max_retries - 1:
-                    raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
-            elif "safety" in error_str:
-                if attempt == max_retries - 1:
-                    raise ValueError("Запрос не соответствует политикам безопасности OpenAI.")
-            elif "size" in error_str:
-                if attempt == max_retries - 1:
-                    raise ValueError("Изображение слишком большое. Попробуйте фото меньшего размера.")
-
-            # Если это не последняя попытка, повторяем
             if attempt < max_retries - 1:
                 logger.info(f"Retrying in {retry_delay} seconds...")
                 await asyncio.sleep(retry_delay)
                 retry_delay *= 2
             else:
-                # На последней попытке возвращаем понятное сообщение об ошибке
                 logger.error(f"All attempts failed: {e}")
                 return None
 
@@ -616,35 +569,25 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
 
 
 async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
-    """
-    Конвертирует изображение в PNG формат с RGBA каналами для OpenAI.
-    """
+    """Конвертирует изображение в PNG формат с RGBA каналами."""
     try:
         image_buffer.seek(0)
         image = Image.open(image_buffer)
 
-        logger.info(f"Original image: size={image.size}, mode={image.mode}, format={image.format}")
+        logger.info(f"Original image: size={image.size}, mode={image.mode}")
 
-        # Конвертируем в RGBA формат
         if image.mode != 'RGBA':
-            logger.info(f"Converting image from {image.mode} to RGBA")
             image = image.convert('RGBA')
 
-        logger.info(f"After conversion: size={image.size}, mode={image.mode}")
-
-        # Ограничиваем максимальный размер
         max_size = (1024, 1024)
         if image.size[0] > max_size[0] or image.size[1] > max_size[1]:
             image.thumbnail(max_size, Image.Resampling.LANCZOS)
-            logger.info(f"Resized image to: {image.size}")
 
-        # Создаем новый буфер для PNG
         png_buffer = BytesIO()
         image.save(png_buffer, format='PNG', optimize=True)
         png_buffer.seek(0)
 
-        logger.info(
-            f"Image successfully converted to PNG: {image.size}, mode: {image.mode}, size: {len(png_buffer.getvalue())} bytes")
+        logger.info(f"Image converted to PNG: {image.size}, size: {len(png_buffer.getvalue())} bytes")
         return png_buffer
 
     except Exception as e:
@@ -653,22 +596,17 @@ async def _convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
 
 
 async def _create_edit_mask(original_image_buffer: BytesIO) -> BytesIO:
-    """
-    Создает маску для редактирования изображения.
-    """
+    """Создает маску для редактирования изображения."""
     try:
         original_image_buffer.seek(0)
         image = Image.open(original_image_buffer)
 
-        # Создаем полностью прозрачную маску
         mask = Image.new('RGBA', image.size, (0, 0, 0, 0))
-
-        # Сохраняем маску
         mask_buffer = BytesIO()
         mask.save(mask_buffer, format='PNG', optimize=True)
         mask_buffer.seek(0)
 
-        logger.info(f"Created edit mask: size={mask.size}, mode={mask.mode}")
+        logger.info(f"Created edit mask: size={mask.size}")
         return mask_buffer
 
     except Exception as e:
@@ -680,66 +618,14 @@ async def _create_edit_mask(original_image_buffer: BytesIO) -> BytesIO:
         return mask_buffer
 
 
-async def _edit_without_mask(image_buffer: BytesIO, prompt: str, size: str, model: str) -> Optional[str]:
-    """
-    Fallback метод: пытается редактировать без маски.
-    """
-    try:
-        logger.warning("Trying image editing without mask")
-
-        headers = {
-            "Authorization": f"Bearer {openai.api_key}",
-        }
-
-        files = {
-            'image': ('image.png', image_buffer.getvalue(), 'image/png'),
-        }
-
-        data = {
-            'prompt': prompt,
-            'size': size,
-            'n': 1,
-            'model': model
-        }
-
-        response = requests.post(
-            'https://api.openai.com/v1/images/edits',
-            headers=headers,
-            files=files,
-            data=data,
-            timeout=(10, 120)
-        )
-
-        if response.status_code == 200:
-            result = response.json()
-            logger.info("Image editing without mask successful")
-            return result['data'][0]['url']
-        else:
-            error_text = response.text
-            logger.error(f"OpenAI API error without mask: {response.status_code} - {error_text}")
-            raise Exception(f"Image editing failed even without mask: {response.status_code}")
-
-    except Exception as e:
-        logger.error(f"Error in edit without mask: {e}")
-        raise e
-
-
 async def create_image_variation(image: BytesIO, size: str = "1024x1024",
                                  n: int = 1, model: str = "dall-e-2") -> List[str]:
     """
     Создает вариации изображения.
-
-    Args:
-        image: BytesIO объект с исходным изображением
-        size: Размер выходных изображений
-        n: Количество вариаций
-        model: Модель DALL-E
-
-    Returns:
-        Список URL вариаций изображения
     """
     try:
-        response = await openai.Image.acreate_variation(
+        # НОВЫЙ API для вариаций изображений
+        response = await openai_client.images.create_variation(
             image=image,
             size=size,
             n=n,
