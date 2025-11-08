@@ -1,6 +1,6 @@
-from PIL import Image  # Добавляем импорт для работы с изображениями
+from PIL import Image
 from io import BytesIO
-from typing import Optional, List  # Добавляем импорты типов
+from typing import Optional, List
 import config
 import imghdr
 import tiktoken
@@ -9,16 +9,18 @@ from openai import AsyncOpenAI
 import anthropic
 import logging
 import base64
-from typing import Optional
 import asyncio
 import requests
 
 # setup openai
-openai.api_key = config.openai_api_key
-anthropic.api_key = config.anthropic_api_key
+openai_api_key = config.openai_api_key
+anthropic_api_key = config.anthropic_api_key
 
 if config.openai_api_base is not None:
-    openai.api_base = config.openai_api_base
+    # Для нового API база URL настраивается по-другому
+    client = AsyncOpenAI(api_key=openai_api_key, base_url=config.openai_api_base)
+else:
+    client = AsyncOpenAI(api_key=openai_api_key)
 
 OPENAI_COMPLETION_OPTIONS = {
     "temperature": 0.7,
@@ -26,20 +28,18 @@ OPENAI_COMPLETION_OPTIONS = {
     "top_p": 1,
     "frequency_penalty": 0,
     "presence_penalty": 0,
-    "request_timeout": 60.0,
 }
 
 logger = logging.getLogger(__name__)
 
 def configure_logging():
-    # Configure logging based on the enable_detailed_logging value
     if config.enable_detailed_logging:
         logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
     else:
         logging.basicConfig(level=logging.CRITICAL, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
-
-    # Set the logger level based on configuration
     logger.setLevel(logging.getLogger().level)
+
+configure_logging()
 
 configure_logging()
 
