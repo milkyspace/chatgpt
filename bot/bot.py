@@ -10,16 +10,13 @@ import html
 import json
 import base64
 import io
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List, Tuple, Union
-from abc import ABC, abstractmethod
-from PIL import Image
-from openai import OpenAIError, BadRequestError, RateLimitError, APITimeoutError
+from datetime import datetime
+from typing import Optional, Dict, Any, List, Tuple
+from abc import ABC
+from io import BytesIO
 
 import requests
 import emoji
-import pytz
-import openai
 import telegram
 from telegram import (
     Update, User, InlineKeyboardButton, InlineKeyboardMarkup,
