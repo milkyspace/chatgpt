@@ -598,7 +598,7 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
                      model: str = "dall-e-2") -> Optional[str]:
     """
     Редактирует изображение с помощью DALL-E с использованием маски.
-    Обновленная версия для openai>=1.0.0
+    Обновленная версия для нового OpenAI API.
     """
     max_retries = 3
     retry_delay = 5
@@ -616,83 +616,50 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
             # Создаем маску для редактирования
             mask_buffer = await _create_edit_mask(png_buffer)
 
-            logger.info(f"Attempt {attempt + 1}/{max_retries}: Sending image edit request to OpenAI")
-
-            # Используем новый API клиент OpenAI
-            client = openai.AsyncOpenAI(api_key=config.openai_api_key)
+            logger.info(f"Attempt {attempt + 1}/{max_retries}: Sending image edit request to OpenAI with new API")
 
             # Подготавливаем файлы для загрузки
             png_buffer.seek(0)
             mask_buffer.seek(0)
 
-            # Создаем файловые объекты для нового API
-            image_file = png_buffer
-            mask_file = mask_buffer
+            # Используем новый API клиент
+            client = openai.AsyncClient(api_key=config.openai_api_key)
 
             response = await client.images.edit(
                 model=model,
-                image=image_file,
-                mask=mask_file,
+                image=png_buffer,
+                mask=mask_buffer,
                 prompt=prompt,
                 size=size,
                 n=1
             )
 
-            logger.info("Image editing successful")
+            logger.info("Image editing successful with new API")
             return response.data[0].url
 
-        except openai.BadRequestError as e:
-            error_msg = str(e)
-            logger.error(f"OpenAI BadRequest error (attempt {attempt + 1}): {error_msg}")
-
-            if "unsupported_file_mimetype" in error_msg:
-                raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
-            elif "Invalid input image" in error_msg:
-                raise ValueError("Проблема с форматом изображения. Требуется изображение с прозрачностью.")
-            elif "safety system" in error_msg.lower():
-                raise ValueError("Запрос не соответствует политикам безопасности OpenAI.")
-            else:
-                if attempt == max_retries - 1:
-                    raise Exception(f"OpenAI API error: {error_msg}")
-
-        except openai.RateLimitError:
-            logger.warning(f"Rate limit exceeded (attempt {attempt + 1})")
-            if attempt < max_retries - 1:
-                logger.info(f"Retrying in {retry_delay} seconds...")
-                await asyncio.sleep(retry_delay)
-                retry_delay *= 2
-                continue
-            else:
-                raise Exception("Rate limit exceeded after multiple attempts")
-
-        except openai.APITimeoutError:
-            logger.warning(f"API timeout (attempt {attempt + 1})")
-            if attempt < max_retries - 1:
-                logger.info(f"Retrying in {retry_delay} seconds...")
-                await asyncio.sleep(retry_delay)
-                retry_delay *= 2
-                continue
-            else:
-                raise Exception("API timeout after multiple attempts")
-
-        except openai.APIConnectionError:
-            logger.warning(f"API connection error (attempt {attempt + 1})")
-            if attempt < max_retries - 1:
-                logger.info(f"Retrying in {retry_delay} seconds...")
-                await asyncio.sleep(retry_delay)
-                retry_delay *= 2
-                continue
-            else:
-                raise Exception("API connection error after multiple attempts")
-
         except Exception as e:
-            logger.error(f"Unexpected error in photo editing (attempt {attempt + 1}): {e}")
-            if attempt == max_retries - 1:
-                raise e
-            else:
+            logger.error(f"Error in photo editing with new API (attempt {attempt + 1}): {e}")
+
+            # Проверяем тип ошибки для лучшего сообщения пользователю
+            error_str = str(e).lower()
+
+            if "unsupported" in error_str and "image" in error_str:
+                raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
+            elif "invalid" in error_str and "image" in error_str:
+                raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
+            elif "safety" in error_str:
+                raise ValueError("Запрос не соответствует политикам безопасности OpenAI.")
+            elif "size" in error_str:
+                raise ValueError("Изображение слишком большое. Попробуйте фото меньшего размера.")
+
+            # Если это не последняя попытка, повторяем
+            if attempt < max_retries - 1:
                 logger.info(f"Retrying in {retry_delay} seconds...")
                 await asyncio.sleep(retry_delay)
                 retry_delay *= 2
+            else:
+                # На последней попытке возвращаем понятное сообщение об ошибке
+                raise Exception("Не удалось отредактировать фото после нескольких попыток. Попробуйте позже.")
 
     return None
 
