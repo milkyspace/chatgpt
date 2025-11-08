@@ -38,6 +38,7 @@ def configure_logging():
         logging.basicConfig(level=logging.CRITICAL, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
     logger.setLevel(logging.getLogger().level)
 
+
 configure_logging()
 
 
@@ -64,7 +65,8 @@ class ChatGPT:
         return answer, (response.usage.prompt_tokens, response.usage.completion_tokens), 0
 
     # ✅ CHAT + VISION + IMAGE GENERATION (как chatgpt.com)
-    async def send_vision_message(self, message, dialog_messages=[], chat_mode="assistant", image_buffer: BytesIO = None):
+    async def send_vision_message(self, message, dialog_messages=[], chat_mode="assistant",
+                                  image_buffer: BytesIO = None):
         messages = self._generate_prompt_messages(message, dialog_messages, chat_mode, image_buffer=image_buffer)
 
         response = await openai_client.chat.completions.create(
@@ -166,10 +168,8 @@ async def generate_photo(image, prompt: str) -> Optional[str]:
         response = await openai_client.images.generate(
             model="gpt-image-1",
             prompt=prompt,
-            image=base64_img,
             size="1024x1024",
-            quality="high",
-            n=1
+            referenced_images=[base64_img],  # ← изображение подаётся сюда!
         )
 
         return response.data[0].url
@@ -177,6 +177,7 @@ async def generate_photo(image, prompt: str) -> Optional[str]:
     except Exception as e:
         logger.error(f"Error generating photo with face: {e}")
         return None
+
 
 # ---------------------------- ✅ Util: PNG conversion ----------------------------
 async def convert_image_to_png(image_buffer):
@@ -192,6 +193,7 @@ async def convert_image_to_png(image_buffer):
         raise TypeError(
             f"convert_image_to_png(): image_buffer must be BytesIO or bytes or coroutine, got {type(image_buffer)}"
         )
+
 
 # ---------------------------- ✅ Moderation ----------------------------
 async def is_content_acceptable(prompt):
