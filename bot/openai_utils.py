@@ -489,18 +489,22 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
 
             logger.info(f"Attempt {attempt + 1}/{max_retries}: Sending image edit request to OpenAI")
 
-            # Подготавливаем файлы для загрузки
+            # Подготавливаем файлы для загрузки с правильными MIME-типами
             png_buffer.seek(0)
             mask_buffer.seek(0)
 
-            # Исправленный код для OpenAI API версии 1.0.0+
+            # Создаем файловые объекты с явным указанием MIME-типа
+            image_file = ("image.png", png_buffer, "image/png")
+            mask_file = ("mask.png", mask_buffer, "image/png")
+
+            # Исправленный вызов с правильными файловыми объектами
             response = await openai_client.images.edit(
-                image=png_buffer,
-                mask=mask_buffer,
+                image=image_file,
+                mask=mask_file,
                 prompt=prompt,
                 size=size,
                 n=1,
-                model=model  # model передается как параметр
+                model=model
             )
 
             logger.info("Image editing successful")
@@ -553,6 +557,7 @@ async def _create_edit_mask(original_image_buffer: BytesIO) -> BytesIO:
         original_image_buffer.seek(0)
         image = Image.open(original_image_buffer)
 
+        # Создаем полностью прозрачную маску (альфа-канал = 0)
         mask = Image.new('RGBA', image.size, (0, 0, 0, 0))
         mask_buffer = BytesIO()
         mask.save(mask_buffer, format='PNG', optimize=True)
@@ -563,6 +568,7 @@ async def _create_edit_mask(original_image_buffer: BytesIO) -> BytesIO:
 
     except Exception as e:
         logger.error(f"Error creating edit mask: {e}")
+        # Создаем простую маску в случае ошибки
         simple_mask = Image.new('RGBA', (1024, 1024), (0, 0, 0, 0))
         mask_buffer = BytesIO()
         simple_mask.save(mask_buffer, format='PNG')
