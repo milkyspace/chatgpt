@@ -296,18 +296,8 @@ class Database:
                     self.update_subscription_usage(user_id, request_used=True)
                     return  # Не списываем средства с баланса
 
-            elif action_type in ['dalle-2', 'dalle-3']:
+            elif action_type in ['dalle-2', 'dalle-3', 'photo_edit']:
                 if not SubscriptionConfig.can_generate_image(subscription_type, subscription_info["images_used"]):
-                    # Лимит исчерпан, списываем с баланса
-                    pass  # Переходим к списанию с баланса
-                else:
-                    # Обновляем использование подписки
-                    self.update_subscription_usage(user_id, image_used=True)
-                    return  # Не списываем средства с баланса
-
-            elif action_type in ['dalle-2', 'dalle-3']:
-                # Для Pro Lite проверяем лимит изображений
-                if subscription_info["type"] == "pro_lite" and subscription_info["images_used"] >= 20:
                     # Лимит исчерпан, списываем с баланса
                     pass  # Переходим к списанию с баланса
                 else:
