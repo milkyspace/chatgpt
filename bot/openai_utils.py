@@ -2,9 +2,7 @@ from PIL import Image
 from io import BytesIO
 from typing import Optional, List
 import config
-import imghdr
 import tiktoken
-import openai
 from openai import AsyncOpenAI
 import anthropic
 import logging
@@ -12,15 +10,11 @@ import base64
 import asyncio
 import requests
 
-# setup openai
-openai_api_key = config.openai_api_key
-anthropic_api_key = config.anthropic_api_key
-
-# Инициализация клиента для нового API
+# Инициализация клиента OpenAI
 if config.openai_api_base is not None:
-    openai_client = AsyncOpenAI(api_key=openai_api_key, base_url=config.openai_api_base)
+    openai_client = AsyncOpenAI(api_key=config.openai_api_key, base_url=config.openai_api_base)
 else:
-    openai_client = AsyncOpenAI(api_key=openai_api_key)
+    openai_client = AsyncOpenAI(api_key=config.openai_api_key)
 
 OPENAI_COMPLETION_OPTIONS = {
     "temperature": 0.7,
@@ -42,13 +36,6 @@ def configure_logging():
 
 
 configure_logging()
-
-
-def validate_payload(payload):
-    for message in payload.get("messages", []):
-        if not isinstance(message.get("content"), str):
-            logger.error("Invalid message content: Not a string")
-            raise ValueError("Message content must be a string")
 
 
 class ChatGPT:
@@ -95,18 +82,10 @@ class ChatGPT:
 
                     n_input_tokens, n_output_tokens = self._count_tokens_from_messages([], answer, model=self.model)
                 else:
-                    # ИСПРАВЛЕНО: используем новый API для OpenAI моделей
                     if self.model in {"gpt-3.5-turbo-16k", "gpt-3.5-turbo", "gpt-4", "gpt-4-1106-preview",
                                       "gpt-4-vision-preview", "gpt-4-turbo-2024-04-09", "gpt-4o"}:
                         messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
 
-                        validate_payload({
-                            "model": self.model,
-                            "messages": messages,
-                            **OPENAI_COMPLETION_OPTIONS
-                        })
-
-                        # НОВЫЙ API
                         response = await openai_client.chat.completions.create(
                             model=self.model,
                             messages=messages,
@@ -114,31 +93,25 @@ class ChatGPT:
                         )
                         answer = response.choices[0].message.content
                         n_input_tokens, n_output_tokens = response.usage.prompt_tokens, response.usage.completion_tokens
-
                     elif self.model == "text-davinci-003":
-                        # Для старых моделей используем старый API через requests
                         prompt = self._generate_prompt(message, dialog_messages, chat_mode)
                         answer, n_input_tokens, n_output_tokens = await self._send_legacy_completion(prompt)
                     else:
                         raise ValueError(f"Unknown model: {self.model}")
 
                 answer = self._postprocess_answer(answer)
-            except Exception as e:  # Убрана специфичная проверка на InvalidRequestError
+            except Exception as e:
                 if len(dialog_messages) == 0:
                     raise ValueError(
                         "Dialog messages is reduced to zero, but still has too many tokens to make completion") from e
-
-                # forget first message in dialog_messages
                 dialog_messages = dialog_messages[1:]
 
         n_first_dialog_messages_removed = n_dialog_messages_before - len(dialog_messages)
-
         return answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
     async def _send_legacy_completion(self, prompt):
-        """Отправка запросов для устаревших моделей через старый API"""
+        """Для устаревших моделей используем requests"""
         try:
-            # Используем requests для старых моделей
             headers = {
                 "Authorization": f"Bearer {config.openai_api_key}",
                 "Content-Type": "application/json"
@@ -214,7 +187,6 @@ class ChatGPT:
 
                         messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
 
-                        # НОВЫЙ API для streaming
                         response = await openai_client.chat.completions.create(
                             model=self.model,
                             messages=messages,
@@ -236,9 +208,6 @@ class ChatGPT:
 
                     elif self.model == "text-davinci-003":
                         prompt = self._generate_prompt(message, dialog_messages, chat_mode)
-                        # Для streaming старых моделей используем синхронный подход
-                        answer = ""
-                        # Упрощенная реализация без streaming для старых моделей
                         answer, n_input_tokens, n_output_tokens = await self._send_legacy_completion(prompt)
                         yield "finished", answer, (n_input_tokens, n_output_tokens), 0
 
@@ -247,7 +216,6 @@ class ChatGPT:
             except Exception as e:
                 if len(dialog_messages) == 0:
                     raise e
-
                 dialog_messages = dialog_messages[1:]
                 n_first_dialog_messages_removed = n_dialog_messages_before - len(dialog_messages)
 
@@ -268,7 +236,6 @@ class ChatGPT:
                     messages = self._generate_prompt_messages(
                         message, dialog_messages, chat_mode, image_buffer
                     )
-                    # НОВЫЙ API для vision
                     response = await openai_client.chat.completions.create(
                         model=self.model,
                         messages=messages,
@@ -285,16 +252,10 @@ class ChatGPT:
                     raise ValueError(
                         "Dialog messages is reduced to zero, but still has too many tokens to make completion"
                     ) from e
-
                 dialog_messages = dialog_messages[1:]
 
         n_first_dialog_messages_removed = n_dialog_messages_before - len(dialog_messages)
-
-        return (
-            answer,
-            (n_input_tokens, n_output_tokens),
-            n_first_dialog_messages_removed,
-        )
+        return answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
     async def send_vision_message_stream(
             self,
@@ -312,7 +273,6 @@ class ChatGPT:
                         message, dialog_messages, chat_mode, image_buffer
                     )
 
-                    # НОВЫЙ API для vision streaming
                     response = await openai_client.chat.completions.create(
                         model=self.model,
                         messages=messages,
@@ -339,7 +299,7 @@ class ChatGPT:
 
         yield "finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
 
-    # Остальные методы класса (_generate_prompt, _encode_image, и т.д.) остаются без изменений
+    # Остальные методы остаются без изменений
     def _generate_prompt(self, message, dialog_messages, chat_mode):
         prompt = config.chat_modes[chat_mode]["prompt_start"]
         prompt += "\n\n"
@@ -352,7 +312,6 @@ class ChatGPT:
 
         prompt += f"User: {message}\n"
         prompt += "Assistant: "
-
         return prompt
 
     def _encode_image(self, image_buffer: BytesIO) -> bytes:
@@ -438,14 +397,10 @@ class ChatGPT:
                     if "type" in sub_message:
                         if sub_message["type"] == "text":
                             n_input_tokens += len(encoding.encode(sub_message["text"]))
-                        elif sub_message["type"] == "image_url":
-                            pass
             else:
                 if "type" in message:
                     if message["type"] == "text":
                         n_input_tokens += len(encoding.encode(message["text"]))
-                    elif message["type"] == "image_url":
-                        pass
 
         n_input_tokens += 2
         n_output_tokens = 1 + len(encoding.encode(answer))
@@ -466,7 +421,6 @@ class ChatGPT:
 
 async def transcribe_audio(audio_file) -> str:
     try:
-        # НОВЫЙ API для транскрипции
         transcript = await openai_client.audio.transcriptions.create(
             file=audio_file,
             model="whisper-1"
@@ -488,7 +442,6 @@ async def generate_images(prompt, model="dall-e-2", n_images=4, size="1024x1024"
         n_images = 1
 
     try:
-        # НОВЫЙ API для генерации изображений
         response = await openai_client.images.generate(
             model=model,
             prompt=prompt,
@@ -507,7 +460,6 @@ async def generate_images(prompt, model="dall-e-2", n_images=4, size="1024x1024"
 
 async def is_content_acceptable(prompt):
     try:
-        # НОВЫЙ API для модерации
         response = await openai_client.moderations.create(input=prompt)
         return not all(response.results[0].categories.values())
     except Exception as e:
@@ -541,7 +493,6 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
             png_buffer.seek(0)
             mask_buffer.seek(0)
 
-            # НОВЫЙ API для редактирования изображений
             response = await openai_client.images.edit(
                 model=model,
                 image=png_buffer,
@@ -624,7 +575,6 @@ async def create_image_variation(image: BytesIO, size: str = "1024x1024",
     Создает вариации изображения.
     """
     try:
-        # НОВЫЙ API для вариаций изображений
         response = await openai_client.images.create_variation(
             image=image,
             size=size,
