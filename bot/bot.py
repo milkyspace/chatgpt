@@ -338,46 +338,33 @@ class PhotoEditorMixin(BaseHandler):
         """Обрабатывает фото для редактирования."""
         user_id = update.message.from_user.id
 
-        # Сохраняем фото
+        # ✅ Получаем файл
         photo = update.message.photo[-1]
         photo_file = await context.bot.get_file(photo.file_id)
 
+        # ✅ Скачиваем в память
         buf = io.BytesIO()
         await photo_file.download_to_memory(buf)
-
-        # Важно: устанавливаем правильное имя файла с расширением
-        buf.name = "photo_to_edit.png"  # Изменяем на PNG для OpenAI
         buf.seek(0)
 
-        # Конвертируем в PNG если нужно
-        try:
-            image = Image.open(buf)
-            if image.format != 'PNG':
-                # Конвертируем в PNG
-                png_buf = io.BytesIO()
-                image.save(png_buf, format='PNG')
-                png_buf.name = "photo_to_edit.png"
-                png_buf.seek(0)
-                context.user_data['photo_to_edit'] = openai_utils.convert_image_to_png(png_buf)
-            else:
-                context.user_data['photo_to_edit'] = buf.getvalue()
-        except ImportError:
-            # Если PIL не установлен, используем оригинальный буфер
-            logger.warning("PIL not available, using original image format")
-            context.user_data['photo_to_edit'] = buf.getvalue()
+        # ✅ Сохраняем сразу байты без конвертации
+        context.user_data['photo_to_edit'] = buf.getvalue()
 
+        # ✅ Если есть описание — редактируем фото
         if edit_description:
             await self._perform_photo_editing(update, context, edit_description)
-        else:
-            context.user_data['waiting_for_edit_description'] = True
+            return
 
-            await update.message.reply_text(
-                "📸 <b>Фото получено!</b>\n\n"
-                "Теперь опишите что нужно изменить на фото:\n"
-                "• Что добавить\n• Что убрать\n• Какие изменения сделать\n\n"
-                "<i>Пример: \"Добавь кота на диван\" или \"Поменяй цвет стены на синий\"</i>",
-                parse_mode=ParseMode.HTML
-            )
+        # ✅ Иначе спрашиваем описание
+        context.user_data['waiting_for_edit_description'] = True
+
+        await update.message.reply_text(
+            "📸 <b>Фото получено!</b>\n\n"
+            "Теперь опишите что нужно изменить на фото:\n"
+            "• Что добавить\n• Что убрать\n• Какие изменения сделать\n\n"
+            "<i>Пример: \"Добавь кота на диван\" или \"Поменяй цвет стены на синий\"</i>",
+            parse_mode=ParseMode.HTML
+        )
 
     async def _request_photo_for_editing(self, update: Update, context: CallbackContext,
                                          message: Optional[str] = None) -> None:
@@ -425,15 +412,12 @@ class PhotoEditorMixin(BaseHandler):
         )
 
         try:
-            photo_data = context.user_data['photo_to_edit']
-            photo_buffer = io.BytesIO(photo_data)
-            photo_buffer.name = "image.png"  # Обязательно .png для OpenAI
-
-            logger.info(f"Starting photo editing with prompt: {edit_description}")
+            image_bytes = context.user_data['photo_to_edit']
+            image_buf = BytesIO(image_bytes)
 
             edited_image_url = await openai_utils.generate_photo(
-                image=photo_buffer,
-                prompt=edit_description,
+                image=image_buf,
+                prompt=edit_description
             )
 
             if edited_image_url:
