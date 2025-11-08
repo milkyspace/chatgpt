@@ -358,7 +358,7 @@ class PhotoEditorMixin(BaseHandler):
                 image.save(png_buf, format='PNG')
                 png_buf.name = "photo_to_edit.png"
                 png_buf.seek(0)
-                context.user_data['photo_to_edit'] = png_buf.getvalue()
+                context.user_data['photo_to_edit'] = openai_utils.convert_image_to_png(png_buf)
             else:
                 context.user_data['photo_to_edit'] = buf.getvalue()
         except ImportError:
@@ -431,10 +431,9 @@ class PhotoEditorMixin(BaseHandler):
 
             logger.info(f"Starting photo editing with prompt: {edit_description}")
 
-            edited_image_url = await openai_utils.edit_image(
+            edited_image_url = await openai_utils.generate_photo(
                 image=photo_buffer,
                 prompt=edit_description,
-                size="1024x1024"
             )
 
             if edited_image_url:
