@@ -133,12 +133,38 @@ async def generate_images(prompt: str, model: str = "gpt-image-1", size: str = "
 
 
 # ✅ Полноценная генерация с использованием фото (как chatgpt.com)
-async def generate_photo(image: BytesIO, prompt: str) -> Optional[str]:
+async def generate_photo(image, prompt: str) -> Optional[str]:
+    """
+    Полноценная фотогенерация: учитывает исходное фото и prompt.
+    Принимает:
+    - BytesIO
+    - bytes
+    - coroutine -> BytesIO
+    """
+
+    import inspect
     try:
+        # ✅ Если функция получила coroutine — await
+        if inspect.iscoroutine(image):
+            image = await image
+
+        # ✅ Если bytes → превращаем в BytesIO
+        if isinstance(image, bytes):
+            image = BytesIO(image)
+
+        # ✅ Проверка на корректный тип
+        if not isinstance(image, BytesIO):
+            raise TypeError(
+                f"generate_photo(): image must be BytesIO or bytes or coroutine, got {type(image)}"
+            )
+
+        # ✅ Reset pointer for read()
+        image.seek(0)
+
         base64_img = base64.b64encode(image.read()).decode()
 
         response = await openai_client.images.generate(
-            model="gpt-image-1",  # лучший режим для фотогенерации
+            model="gpt-image-1",
             prompt=prompt,
             image=base64_img,
             size="1024x1024",
@@ -153,26 +179,19 @@ async def generate_photo(image: BytesIO, prompt: str) -> Optional[str]:
         return None
 
 # ---------------------------- ✅ Util: PNG conversion ----------------------------
-async def convert_image_to_png(image_buffer: BytesIO) -> BytesIO:
-    try:
-        image_buffer.seek(0)
-        image = Image.open(image_buffer)
+async def convert_image_to_png(image_buffer):
+    import inspect
 
-        if image.mode != "RGBA":
-            image = image.convert("RGBA")
+    if inspect.iscoroutine(image_buffer):
+        image_buffer = await image_buffer
 
-        max_size = (1024, 1024)
-        if image.size[0] > max_size[0] or image.size[1] > max_size[1]:
-            image.thumbnail(max_size, Image.Resampling.LANCZOS)
+    if isinstance(image_buffer, bytes):
+        image_buffer = BytesIO(image_buffer)
 
-        png_buffer = BytesIO()
-        image.save(png_buffer, format="PNG", optimize=True)
-        png_buffer.seek(0)
-        return png_buffer
-
-    except Exception as e:
-        logger.error(f"Error converting image: {e}")
-        raise ValueError(f"Не удалось обработать изображение: {str(e)}")
+    if not isinstance(image_buffer, BytesIO):
+        raise TypeError(
+            f"convert_image_to_png(): image_buffer must be BytesIO or bytes or coroutine, got {type(image_buffer)}"
+        )
 
 # ---------------------------- ✅ Moderation ----------------------------
 async def is_content_acceptable(prompt):
