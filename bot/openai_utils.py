@@ -493,13 +493,14 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
             png_buffer.seek(0)
             mask_buffer.seek(0)
 
+            # Исправленный код для OpenAI API версии 1.0.0+
             response = await openai_client.images.edit(
-                model=model,
                 image=png_buffer,
                 mask=mask_buffer,
                 prompt=prompt,
                 size=size,
-                n=1
+                n=1,
+                model=model  # model передается как параметр
             )
 
             logger.info("Image editing successful")
