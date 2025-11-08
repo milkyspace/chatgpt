@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Tuple, Union
 from abc import ABC, abstractmethod
 from PIL import Image
+from openai import OpenAIError, BadRequestError, RateLimitError, APITimeoutError
 
 import requests
 import emoji
@@ -1551,7 +1552,7 @@ class ImageHandlers(BaseHandler):
             image_urls = await self._generate_images(user_id, prompt)
             await self._send_generated_images(update, context, prompt, image_urls, placeholder_message)
 
-        except openai.error.InvalidRequestError as e:
+        except Exception as e:
             await self._handle_image_generation_error(update, e)
         except Exception as e:
             await self._handle_image_generation_error(update, e, is_unexpected=True)
