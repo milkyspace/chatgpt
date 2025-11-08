@@ -5,6 +5,7 @@ import config
 import imghdr
 import tiktoken
 import openai
+from openai import AsyncOpenAI
 import anthropic
 import logging
 import base64
@@ -597,10 +598,10 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
                      model: str = "dall-e-2") -> Optional[str]:
     """
     Редактирует изображение с помощью DALL-E с использованием маски.
+    Обновленная версия для openai>=1.0.0
     """
-    max_retries = 10
-    retry_delay = 5  # увеличиваем задержку между попытками
-    exponential_backoff = 1
+    max_retries = 3
+    retry_delay = 5
 
     for attempt in range(max_retries):
         try:
@@ -612,118 +613,82 @@ async def edit_image(image: BytesIO, prompt: str, size: str = "1024x1024",
             # Конвертируем изображение в PNG с RGBA форматом
             png_buffer = await _convert_image_to_png(image)
 
-            # Проверяем размер файла после конвертации
-            png_size = len(png_buffer.getvalue())
-            logger.info(f"PNG file size: {png_size} bytes")
-
-            if png_size > 4 * 1024 * 1024:  # 4MB limit for DALL-E
-                raise ValueError("Изображение слишком большое после конвертации")
-
-            # СОЗДАЕМ МАСКУ ДЛЯ РЕДАКТИРОВАНИЯ
+            # Создаем маску для редактирования
             mask_buffer = await _create_edit_mask(png_buffer)
-            logger.info(f"Mask created, size: {len(mask_buffer.getvalue())} bytes")
 
-            # Используем синхронный запрос с requests
-            headers = {
-                "Authorization": f"Bearer {openai.api_key}",
-            }
+            logger.info(f"Attempt {attempt + 1}/{max_retries}: Sending image edit request to OpenAI")
 
-            # ДОБАВЛЯЕМ МАСКУ В ФАЙЛЫ
-            files = {
-                'image': ('image.png', png_buffer.getvalue(), 'image/png'),
-                'mask': ('mask.png', mask_buffer.getvalue(), 'image/png'),
-            }
+            # Используем новый API клиент OpenAI
+            client = openai.AsyncOpenAI(api_key=config.openai_api_key)
 
-            data = {
-                'prompt': prompt,
-                'size': size,
-                'n': 1,
-                'model': model
-            }
+            # Подготавливаем файлы для загрузки
+            png_buffer.seek(0)
+            mask_buffer.seek(0)
 
-            logger.info(f"Attempt {attempt + 1}/{max_retries}: Sending image edit request to OpenAI with mask")
+            # Создаем файловые объекты для нового API
+            image_file = png_buffer
+            mask_file = mask_buffer
 
-            # УВЕЛИЧИВАЕМ ТАЙМАУТЫ:
-            # - connect timeout: 10 секунд на установку соединения
-            # - read timeout: 120 секунд на обработку изображения (2 минуты)
-            response = requests.post(
-                'https://api.openai.com/v1/images/edits',
-                headers=headers,
-                files=files,
-                data=data,
-                timeout=(10, 120)  # (connect_timeout, read_timeout)
+            response = await client.images.edit(
+                model=model,
+                image=image_file,
+                mask=mask_file,
+                prompt=prompt,
+                size=size,
+                n=1
             )
 
-            if response.status_code == 200:
-                result = response.json()
-                logger.info("Image editing successful")
-                return result['data'][0]['url']
-            elif response.status_code == 500:
-                # Серверная ошибка - пробуем повторить
-                error_text = response.text
-                logger.warning(f"OpenAI server error (attempt {attempt + 1}): {response.status_code}")
+            logger.info("Image editing successful")
+            return response.data[0].url
 
-                if attempt < max_retries - 1:
-                    logger.info(f"Retrying in {retry_delay} seconds...")
-                    await asyncio.sleep(retry_delay)
-                    retry_delay *= exponential_backoff  # exponential backoff
-                    continue
-                else:
-                    raise Exception(f"OpenAI server error after {max_retries} attempts: {response.status_code}")
+        except openai.BadRequestError as e:
+            error_msg = str(e)
+            logger.error(f"OpenAI BadRequest error (attempt {attempt + 1}): {error_msg}")
+
+            if "unsupported_file_mimetype" in error_msg:
+                raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
+            elif "Invalid input image" in error_msg:
+                raise ValueError("Проблема с форматом изображения. Требуется изображение с прозрачностью.")
+            elif "safety system" in error_msg.lower():
+                raise ValueError("Запрос не соответствует политикам безопасности OpenAI.")
             else:
-                error_text = response.text
-                logger.error(f"OpenAI API error: {response.status_code} - {error_text}")
+                if attempt == max_retries - 1:
+                    raise Exception(f"OpenAI API error: {error_msg}")
 
-                # Более точная обработка ошибок
-                if "unsupported_file_mimetype" in error_text:
-                    raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
-                elif "Invalid input image" in error_text and "RGBA" in error_text:
-                    raise ValueError("Проблема с форматом изображения. Требуется изображение с прозрачностью.")
-                elif "safety system" in error_text.lower():
-                    raise ValueError("Запрос не соответствует политикам безопасности OpenAI.")
-                elif "mask" in error_text.lower():
-                    # Если проблема с маской, пробуем без маски как fallback
-                    logger.warning("Mask error, trying without mask")
-                    if attempt == max_retries - 1:
-                        return await _edit_without_mask(png_buffer, prompt, size, model)
-                    continue
-                else:
-                    raise Exception(f"OpenAI API error: {response.status_code} - {error_text}")
-
-        except requests.exceptions.Timeout:
-            logger.warning(f"Request timeout (attempt {attempt + 1})")
+        except openai.RateLimitError:
+            logger.warning(f"Rate limit exceeded (attempt {attempt + 1})")
             if attempt < max_retries - 1:
                 logger.info(f"Retrying in {retry_delay} seconds...")
                 await asyncio.sleep(retry_delay)
                 retry_delay *= 2
                 continue
             else:
-                raise Exception("Request timeout after multiple attempts")
+                raise Exception("Rate limit exceeded after multiple attempts")
 
-        except requests.exceptions.ConnectionError:
-            logger.warning(f"Connection error (attempt {attempt + 1})")
+        except openai.APITimeoutError:
+            logger.warning(f"API timeout (attempt {attempt + 1})")
             if attempt < max_retries - 1:
                 logger.info(f"Retrying in {retry_delay} seconds...")
                 await asyncio.sleep(retry_delay)
                 retry_delay *= 2
                 continue
             else:
-                raise Exception("Connection error after multiple attempts")
+                raise Exception("API timeout after multiple attempts")
+
+        except openai.APIConnectionError:
+            logger.warning(f"API connection error (attempt {attempt + 1})")
+            if attempt < max_retries - 1:
+                logger.info(f"Retrying in {retry_delay} seconds...")
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 2
+                continue
+            else:
+                raise Exception("API connection error after multiple attempts")
 
         except Exception as e:
-            logger.error(f"Error in photo editing (attempt {attempt + 1}): {e}")
-
-            # Если это последняя попытка, пробрасываем ошибку дальше
+            logger.error(f"Unexpected error in photo editing (attempt {attempt + 1}): {e}")
             if attempt == max_retries - 1:
-                error_msg = str(e)
-                if "unsupported_file_mimetype" in error_msg or "image" in error_msg.lower() or "RGBA" in error_msg:
-                    raise ValueError("Проблема с форматом изображения. Попробуйте другое фото.")
-                elif "safety system" in error_msg.lower():
-                    raise ValueError("Запрос не соответствует политикам безопасности OpenAI.")
-                elif "server_error" in error_msg.lower():
-                    raise Exception("Временная ошибка сервера OpenAI. Пожалуйста, попробуйте позже.")
-                else:
-                    raise e
+                raise e
             else:
                 logger.info(f"Retrying in {retry_delay} seconds...")
                 await asyncio.sleep(retry_delay)
@@ -742,10 +707,9 @@ async def _create_edit_mask(original_image_buffer: BytesIO) -> BytesIO:
         original_image_buffer.seek(0)
         image = Image.open(original_image_buffer)
 
-        # Создаем маску - полностью прозрачное изображение того же размера
-        # Прозрачные области в маске означают, что эти части изображения можно редактировать
-        # Непрозрачные области остаются неизменными
-        mask = Image.new('RGBA', image.size, (0, 0, 0, 0))  # Полностью прозрачная маска
+        # Создаем полностью прозрачную маску (альфа-канал = 0)
+        # Это позволяет редактировать все области изображения
+        mask = Image.new('RGBA', image.size, (0, 0, 0, 0))
 
         # Сохраняем маску
         mask_buffer = BytesIO()

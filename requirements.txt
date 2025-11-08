@@ -1,5 +1,5 @@
 python-telegram-bot[rate-limiter]==20.1
-openai #chatgpt library
+openai>=1.0.0
 tiktoken>=0.3.0 #tokenizer
 PyYAML==6.0 #configs
 pymongo==4.3.3 #database
