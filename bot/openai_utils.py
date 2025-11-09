@@ -1,6 +1,9 @@
+from typing import List
+
 import openai
 from openai import OpenAI
 import logging
+import config
 
 logger = logging.getLogger(__name__)
 
