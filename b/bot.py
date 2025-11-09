@@ -15,6 +15,7 @@ logging.basicConfig(
 )
 
 async def main():
+    print(cfg.bot_token)
     bot = Bot(cfg.bot_token, parse_mode=ParseMode.HTML)
     dp = Dispatcher()
     dp.include_router(public_router)
