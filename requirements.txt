@@ -8,5 +8,6 @@ redis>=5.0.0
 aioredis>=2.0.0
 yookassa==2.4.0
 emoji==2.8.0
+Pillow>=10.0.0
 aiohttp>=3.8.0
 requests==2.31.0
