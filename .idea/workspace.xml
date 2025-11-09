@@ -6,10 +6,7 @@
   <component name="ChangeListManager">
     <list default="true" id="c49b2697-deab-421e-88ce-4ba8723f2a80" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/bot.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/bot.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/bot/image_handlers.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/image_handlers.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/message_handlers.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/message_handlers.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/openai_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/openai_utils.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
