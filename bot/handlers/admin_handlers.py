@@ -1,7 +1,7 @@
 """
 Обработчики админ-панели.
 """
-
+import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, Any, Optional, List
@@ -12,7 +12,7 @@ from telegram.ext import CallbackContext
 from telegram.constants import ParseMode
 
 import config
-from keyboards import BotKeyboards
+from ..keyboards import BotKeyboards
 from .base_handler import BaseHandler
 
 logger = logging.getLogger(__name__)

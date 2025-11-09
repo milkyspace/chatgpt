@@ -2,36 +2,26 @@
 Главный модуль для запуска Telegram бота.
 """
 
-import logging
 import asyncio
-from datetime import datetime
-from typing import Dict, Any, List
+import logging
+from typing import Dict, List
 
-import telegram
 from telegram import Update
 from telegram.ext import (
     Application, ApplicationBuilder, CallbackContext, CommandHandler,
     MessageHandler, CallbackQueryHandler, AIORateLimiter, filters
 )
-from telegram.constants import ParseMode
 
 import config
 import database
-from keyboards import BotKeyboards
-from subscription_config import SubscriptionConfig
-
-# Импорт обработчиков
-from handlers.base_handler import BaseHandler
-from handlers.message_handlers import MessageHandlers
-from handlers.subscription_handlers import SubscriptionHandlers
+from handlers.admin_handlers import AdminHandlers
 from handlers.chat_mode_handlers import ChatModeHandlers
 from handlers.image_handlers import ImageHandlers
+# Импорт обработчиков
+from handlers.message_handlers import MessageHandlers
 from handlers.settings_handlers import SettingsHandlers
-from handlers.admin_handlers import AdminHandlers
-
+from handlers.subscription_handlers import SubscriptionHandlers
 from utils.payment_utils import (
-    create_subscription_yookassa_payment,
-    process_successful_payment,
     check_pending_payments
 )
 
