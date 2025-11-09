@@ -44,6 +44,7 @@ class ImageHandlers(BaseHandler):
         )
 
         try:
+            # Этот вызов должен быть с await
             image_urls = await self._generate_images(user_id, prompt)
 
             await self._send_generated_images(

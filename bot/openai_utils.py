@@ -178,14 +178,12 @@ async def transcribe_audio(audio_file) -> str:
         return ""
 
 
-async def generate_images(prompt: str, model: str = "dall-e-3", n_images: int = 1, size: str = "1024x1024") -> List[
-    str]:
+async def generate_images(prompt: str, model: str = "dall-e-3", n_images: int = 1, size: str = "1024x1024") -> List[str]:
     """Генерирует изображения по текстовому описанию."""
     try:
         # DALL-E 3 поддерживает только 1 изображение за запрос
         if model == "dall-e-3":
             n_images = 1
-            # DALL-E 3 имеет фиксированный размер 1024x1024, 1792x1024, или 1024x1792
             if size not in ["1024x1024", "1792x1024", "1024x1792"]:
                 size = "1024x1024"
 
@@ -193,13 +191,13 @@ async def generate_images(prompt: str, model: str = "dall-e-3", n_images: int = 
         elif model == "dall-e-2":
             if size not in ["256x256", "512x512", "1024x1024"]:
                 size = "1024x1024"
-            n_images = min(n_images, 10)  # Максимум 10 изображений для DALL-E 2
+            n_images = min(n_images, 10)
 
         image_urls = []
 
         # Для DALL-E 3 делаем один запрос
         if model == "dall-e-3":
-            response = await openai.images.generate(
+            response = await openai_client.images.generate(
                 model=model,
                 prompt=prompt,
                 size=size,
@@ -210,7 +208,7 @@ async def generate_images(prompt: str, model: str = "dall-e-3", n_images: int = 
 
         # Для DALL-E 2 можем сгенерировать несколько изображений
         elif model == "dall-e-2":
-            response = await openai.images.generate(
+            response = await openai_client.images.generate(
                 model=model,
                 prompt=prompt,
                 size=size,
@@ -225,22 +223,20 @@ async def generate_images(prompt: str, model: str = "dall-e-3", n_images: int = 
         raise
 
 
-async def generate_image_with_input(prompt: str, image_bytes: bytes) -> bytes:
-    response = await openai_client.images.edit(
-        model="gpt-image-1",
-        prompt=prompt,
-        image=[
-            {
-                "name": "input.png",
-                "bytes": image_bytes
-            }
-        ],
-        size="1024x1024"
-    )
+async def generate_image_with_input(prompt: str, image_bytes: bytes) -> str:
+    """Генерирует изображение на основе входного изображения."""
+    try:
+        response = await openai_client.images.edit(
+            model="dall-e-2",  # Проверьте правильное название модели
+            prompt=prompt,
+            image=image_bytes,
+            size="1024x1024"
+        )
+        return response.data[0].url  # Возвращаем URL, а не bytes
+    except Exception as e:
+        logger.error(f"Error generating image with input: {e}")
+        raise
 
-    # Достаём base64
-    b64 = response.data[0].b64_json
-    return base64.b64decode(b64)
 
 
 async def generate_image(prompt: str) -> str:
