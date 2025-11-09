@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy import update
 
 from config import cfg
+from config import ADMINS
 from db import AsyncSessionMaker
 from keyboards import plan_buy_keyboard
 from keyboards import top_panel, keyboards_for_modes
@@ -131,12 +132,11 @@ async def panel_help(cq: CallbackQuery):
 
 @router.callback_query(F.data == "panel:admin")
 async def panel_admin(cq: CallbackQuery):
+    if cq.from_user.id not in ADMINS:
+        await cq.answer("🚫 Нет доступа", show_alert=True)
+        return
     await cq.message.edit_text(
-        "🛡 <b>Админ-панель</b>\n\n"
-        "— Управление пользователями\n"
-        "— Отправка рассылок\n"
-        "— Проверка платежей\n\n"
-        "⚠️ Доступ только администраторам.",
+        "🛡 <b>Админ-панель</b>\n\nФункции управления ботом.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")]
         ])
@@ -408,7 +408,17 @@ async def cmd_help(m: TgMessage):
 
 @router.message(Command("admin"))
 async def cmd_admin(m: TgMessage):
-    await m.answer("🛡 <b>Админ-панель</b>.\n\nФункции: управление пользователями, рассылки, проверка подписок.",
-                   reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                       [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")]
-                   ]))
+    if m.from_user.id not in ADMINS:
+        await m.answer("🚫 У вас нет доступа к админ-панели.")
+        return
+
+    await m.answer(
+        "🛡 <b>Админ-панель</b>\n\n"
+        "1️⃣ Управление пользователями\n"
+        "2️⃣ Рассылки\n"
+        "3️⃣ Проверка платежей\n\n"
+        "⚙️ Доступ только для администраторов.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")]
+        ])
+    )

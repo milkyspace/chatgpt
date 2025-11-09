@@ -16,7 +16,7 @@ class PlanConfig(BaseModel):
 
 class AppConfig(BaseModel):
     # Telegram
-    print(os.getenv("BOT_TOKEN", ""))
+    admins = [os.getenv("ADMIN_IDS", "")]
     bot_token: str = os.getenv("BOT_TOKEN", "")
     admin_ids: set[int] = set(map(int, os.getenv("ADMIN_IDS", "0").split(","))) if os.getenv("ADMIN_IDS") else set()
 

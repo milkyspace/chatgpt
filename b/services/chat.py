@@ -7,9 +7,8 @@ class ChatService:
         self.provider = provider or OpenAIChatProvider(model="gpt-4o")
 
     async def handle_user_message(self, message: str, bot, chat_id: int):
-        """Обрабатывает текст от пользователя с потоковой генерацией."""
+        """Асинхронный потоковый ответ GPT."""
         sent = await bot.send_message(chat_id, "🤔 Думаю…")
-
         full_text = ""
         async for delta in self.provider.stream_chat([{"role": "user", "content": message}]):
             full_text += delta
@@ -20,5 +19,9 @@ class ChatService:
                     text=f"💬 {full_text}"
                 )
             except Exception:
-                pass  # при rate limit Telegram просто пропускаем шаг
-        return full_text
+                pass
+        await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=sent.message_id,
+            text=f"💬 {full_text}"
+        )

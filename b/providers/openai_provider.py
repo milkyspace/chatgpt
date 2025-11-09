@@ -6,33 +6,37 @@ import httpx
 
 
 class OpenAIChatProvider:
-    """OpenAI GPT с поддержкой потокового вывода."""
+    """OpenAI GPT с поддержкой потокового вывода и кастомным httpx-клиентом."""
+
     def __init__(self, model: str = "gpt-4o"):
         self.model = model
         self.http_client = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0))
         self.client = AsyncOpenAI(
             api_key=cfg.openai_api_key,
             base_url=cfg.openai_api_base,
-            http_client=self.http_client,  # <-- ключевой фикс
+            http_client=self.http_client
         )
 
     async def stream_chat(
-        self, messages: Sequence[dict[str, str]], max_tokens: int = 800, temperature: float = 0.7
+            self, messages: Sequence[dict[str, str]], max_tokens: int = 800, temperature: float = 0.7
     ) -> AsyncGenerator[str, None]:
-        stream = await self.client.chat.completions.stream(
-            model=self.model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        async for chunk in stream:
-            delta = chunk.choices[0].delta.content or ""
-            if delta:
-                yield delta
+        """Асинхронный стриминг OpenAI GPT-4o."""
+        async with self.client.chat.completions.stream(
+                model=self.model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+        ) as stream:
+            async for event in stream:
+                if event.type == "message.delta":
+                    delta = event.delta.content or ""
+                    if delta:
+                        yield delta
 
 
 class OpenAIImageProvider:
     """Провайдер изображений через gpt-image-1 с кастомным httpx-клиентом."""
+
     def __init__(self, model: str = "gpt-image-1"):
         self.model = model
         self.http_client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
