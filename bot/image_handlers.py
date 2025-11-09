@@ -44,6 +44,8 @@ class ImageHandlers(BaseHandler):
 
         try:
             image_urls = await self._generate_images(user_id, prompt)
+            logger.critical("сгенерировали")
+            logger.critical(image_urls)
 
             await self._send_generated_images(
                 update,

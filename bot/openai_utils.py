@@ -182,6 +182,10 @@ async def generate_images(prompt: str, model: str = "dall-e-3", n_images: int = 
     str]:
     """Генерирует изображения по текстовому описанию."""
     try:
+
+        logger.critical(prompt)
+        logger.critical(model)
+
         # DALL-E 3 поддерживает только 1 изображение за запрос
         if model == "dall-e-3":
             n_images = 1
