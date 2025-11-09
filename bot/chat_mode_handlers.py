@@ -1,7 +1,5 @@
-import asyncio
 import logging
 from datetime import datetime
-from typing import Dict
 
 import telegram
 from telegram import (
@@ -13,17 +11,10 @@ from telegram.ext import (
 )
 
 import config
-import database
 from base_handler import BaseHandler
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
-
-# Глобальные переменные
-db = database.Database()
-bot_instance = None
-user_semaphores: Dict[int, asyncio.Semaphore] = {}
-user_tasks: Dict[int, asyncio.Task] = {}
 
 
 class ChatModeHandlers(BaseHandler):

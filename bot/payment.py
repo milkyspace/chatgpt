@@ -1,3 +1,17 @@
+import logging
+from typing import Any
+
+from telegram.ext import (
+    CallbackContext
+)
+from yookassa import Payment
+
+from subscription_config import SubscriptionConfig, SubscriptionType
+from utils import db, bot_instance
+
+# Настройка логирования
+logger = logging.getLogger(__name__)
+
 # Функции для работы с платежами
 async def create_subscription_yookassa_payment(user_id: int, subscription_type: SubscriptionType,
                                                context: CallbackContext) -> str:
