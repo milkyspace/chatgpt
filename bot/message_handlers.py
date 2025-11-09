@@ -183,10 +183,7 @@ class MessageHandlers(MessageProcessor):
         chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
 
         # Обработка специальных режимов
-        if chat_mode == "photo_editor":
-            await self.photo_editor_handle(update, context, message=message)
-            return
-        elif chat_mode == "artist":
+        if chat_mode == "artist":
             await self.generate_image_handle(update, context, message=message)
             return
         elif chat_mode == "stenographer":
@@ -664,9 +661,7 @@ class MessageHandlers(MessageProcessor):
         chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
         logger.info(f"Photo received in chat mode: {chat_mode}")
 
-        if chat_mode == "photo_editor":
-            await self.photo_editor_handle(update, context)
-        elif chat_mode == "artist":
+        if chat_mode == "artist":
             caption = update.message.caption or "Создай изображение похожее на это фото"
             await self.generate_image_handle(update, context, message=caption)
         else:
