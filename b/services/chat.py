@@ -1,6 +1,6 @@
 from __future__ import annotations
-from b.providers.openai_provider import OpenAIChatProvider
-from b.services.safety import SafetyGuard
+from providers.openai_provider import OpenAIChatProvider
+from services.safety import SafetyGuard
 
 class ChatService:
     """Фасад для чатов. Можно подменять провайдер через DI."""

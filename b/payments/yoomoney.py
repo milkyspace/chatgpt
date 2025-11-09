@@ -1,5 +1,5 @@
 from __future__ import annotations
-from b.config import cfg
+from config import cfg
 from yookassa import Configuration, Payment as YooPayment
 import uuid
 

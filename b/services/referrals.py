@@ -2,8 +2,8 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import timedelta, datetime
-from b.config import cfg
-from b.models import UserSubscription
+from config import cfg
+from models import UserSubscription
 
 async def apply_referral_bonus(session: AsyncSession, referrer_user_id: int) -> None:
     """Дарим рефереру +N дней к текущей подписке."""

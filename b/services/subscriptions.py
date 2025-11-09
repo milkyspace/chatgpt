@@ -2,8 +2,8 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timedelta, timezone
-from b.config import cfg
-from b.models import User, UserSubscription, Usage
+from config import cfg
+from models import User, UserSubscription, Usage
 
 async def ensure_user(session: AsyncSession, tg_user_id: int, username: str | None, first_name: str | None, last_name: str | None, referred_by_code: str | None = None) -> User:
     """Создаёт пользователя, подписку trial и usage при первом входе."""

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from openai import AsyncOpenAI
 from typing import AsyncGenerator, Sequence
-from b.config import cfg
+from config import cfg
 import base64
 
 

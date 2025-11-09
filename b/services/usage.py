@@ -1,8 +1,8 @@
 from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from b.models import Usage
-from b.services.subscriptions import get_limits
+from models import Usage
+from services.subscriptions import get_limits
 
 async def can_spend_request(session: AsyncSession, user_id: int) -> bool:
     max_req, _, _ = await get_limits(session, user_id)

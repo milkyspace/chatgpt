@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from sqlalchemy import select, update
-from b.db import AsyncSessionMaker
-from b.models import Payment, User
-from b.payments.yoomoney import YooMoneyProvider
-from b.services.subscriptions import activate_paid_plan
-from b.services.referrals import apply_referral_bonus
+from db import AsyncSessionMaker
+from models import Payment, User
+from payments.yoomoney import YooMoneyProvider
+from services.subscriptions import activate_paid_plan
+from services.referrals import apply_referral_bonus
 
 logger = logging.getLogger(__name__)
 

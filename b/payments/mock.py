@@ -1,5 +1,5 @@
 from __future__ import annotations
-from b.payments.base import PaymentProvider
+from payments.base import PaymentProvider
 
 class MockPaymentProvider(PaymentProvider):
     async def create_invoice(self, user_id: int, plan_code: str, amount_rub: int, description: str) -> str:
