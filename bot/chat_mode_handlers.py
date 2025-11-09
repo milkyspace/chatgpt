@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class ChatModeHandlers(BaseHandler):
     """Класс для обработки режимов чата."""
 
-    @staticmethod
+
     def get_chat_mode_menu(page_index: int):
         """Создает меню выбора режима чата."""
         n_chat_modes_per_page = config.n_chat_modes_per_page

@@ -60,7 +60,7 @@ class MessageHandlers(MessageProcessor):
         reply_markup = await BotKeyboards.get_main_keyboard(user_id)
         await update.message.reply_text(reply_text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
-    @staticmethod
+
     def _get_welcome_message() -> str:
         """Возвращает приветственное сообщение."""
         return (
@@ -74,7 +74,7 @@ class MessageHandlers(MessageProcessor):
                 + HELP_MESSAGE
         )
 
-    @staticmethod
+
     def _get_no_subscription_message() -> str:
         """Возвращает сообщение об отсутствии подписки."""
         return (
@@ -330,7 +330,7 @@ class MessageHandlers(MessageProcessor):
                 text = f"✍️ <i>Note:</i> Your current dialog is too long, so <b>{n_first_dialog_messages_removed} first messages</b> were removed from the context.\n Send /new command to start new dialog"
             await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
-    @staticmethod
+
     async def _get_non_streaming_response(chatgpt_instance: openai_utils.ChatGPT, message: str,
                                           dialog_messages: List[Dict], chat_mode: str) -> Tuple[str, int, int]:
         """Получает непотоковый ответ от ChatGPT."""
@@ -538,7 +538,7 @@ class MessageHandlers(MessageProcessor):
 
         return transcribed_text
 
-    @staticmethod
+
     async def edited_message_handle(update: Update, context: CallbackContext) -> None:
         """Обрабатывает редактированные сообщения."""
         if update.edited_message.chat.type == "private":
@@ -556,7 +556,7 @@ class MessageHandlers(MessageProcessor):
         else:
             await update.message.reply_text("<i>Нечего отменять...</i>", parse_mode=ParseMode.HTML)
 
-    @staticmethod
+
     async def _is_main_menu_button(text: str) -> bool:
         """Проверяет, является ли текст кнопкой главного меню."""
         main_menu_buttons = [
@@ -604,7 +604,7 @@ class MessageHandlers(MessageProcessor):
         elif emoji.emojize(":green_circle:") in text or emoji.emojize(":red_circle:") in text:
             await self.subscription_handlers.subscription_handle(update, context)
 
-    @staticmethod
+
     async def _handle_invite(update: Update, context: CallbackContext) -> None:
         """Обрабатывает кнопку приглашения друзей."""
         await update.message.reply_text(
@@ -628,7 +628,7 @@ class MessageHandlers(MessageProcessor):
             parse_mode=ParseMode.HTML
         )
 
-    @staticmethod
+
     def _process_message_text(update: Update, context: CallbackContext, message: Optional[str]) -> str:
         """Обрабатывает текст сообщения."""
         _message = message or update.message.text
