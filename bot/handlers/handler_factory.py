@@ -1,14 +1,16 @@
 import logging
 import asyncio
 from typing import Dict, Any
+
+from bot import database
+from bot.handlers.subscription_handlers import SubscriptionHandlers
+
 import bot.subscription_handlers as SubscriptionHandlers
 import bot.image_handlers as ImageHandlers
 import bot.chat_mode_handlers as ChatModeHandlers
 import bot.admin_handlers as AdminHandlers
 import bot.settings_handlers as SettingsHandlers
 import bot.message_handlers as MessageHandlers
-
-from bot import database
 
 # Глобальные переменные
 db = database.Database()
