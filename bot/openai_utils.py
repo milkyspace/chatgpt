@@ -42,39 +42,55 @@ class ChatGPT:
         self.is_claude_model = model.startswith("claude")
         self.logger = logging.getLogger(__name__)
 
-    async def send_message(self, message, dialog_messages=[], chat_mode="assistant"):
+    async def send_message_stream(self, message, dialog_messages=[], chat_mode="assistant"):
+        """Потоковая отправка сообщения с использованием OpenAI API."""
+        if chat_mode not in config.chat_modes.keys():
+            raise ValueError(f"Chat mode {chat_mode} is not supported")
+
+        messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
+
         try:
-            logger.info(f"=== OPENAI API CALL ===")
-            logger.info(f"Model: {self.model}")
-            logger.info(f"Chat mode: {chat_mode}")
-            logger.info(f"Message length: {len(message)}")
-            logger.info(f"Dialog messages count: {len(dialog_messages)}")
-
-            if chat_mode not in config.chat_modes.keys():
-                raise ValueError(f"Chat mode {chat_mode} is not supported")
-
-            messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
-            logger.info(f"Generated {len(messages)} messages for API")
-
-            logger.info("Sending request to OpenAI...")
             response = await openai_client.chat.completions.create(
                 model=self.model,
                 messages=messages,
+                stream=True,  # Включаем потоковую передачу
                 **OPENAI_COMPLETION_OPTIONS
             )
-            logger.info("Received response from OpenAI")
 
-            answer = response.choices[0].message.content
-            tokens_used = (response.usage.prompt_tokens, response.usage.completion_tokens)
-            logger.info(f"Answer length: {len(answer)}, Tokens: {tokens_used}")
+            full_answer = ""
+            n_input_tokens, n_output_tokens = 0, 0
 
-            return answer, tokens_used, 0
+            async for chunk in response:
+                if chunk.choices and chunk.choices[0].delta.content is not None:
+                    chunk_content = chunk.choices[0].delta.content
+                    full_answer += chunk_content
+
+                    # Эмулируем подсчет токенов (в потоковом режиме точный подсчет сложен)
+                    if len(full_answer) % 100 == 0:  # Обновляем каждые ~100 символов
+                        yield "streaming", full_answer, (n_input_tokens, n_output_tokens), 0
+
+            # Финальный результат
+            yield "finished", full_answer, (n_input_tokens, n_output_tokens), 0
 
         except Exception as e:
-            logger.error(f"=== OPENAI API ERROR ===", exc_info=True)
-            logger.error(f"API Error type: {type(e)}")
-            logger.error(f"API Error message: {str(e)}")
+            self.logger.error(f"Error in streaming message: {e}")
             raise e
+
+    async def send_message(self, message, dialog_messages=[], chat_mode="assistant"):
+        if chat_mode not in config.chat_modes.keys():
+            raise ValueError(f"Chat mode {chat_mode} is not supported")
+
+        messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
+
+        response = await openai_client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            **OPENAI_COMPLETION_OPTIONS
+        )
+
+        answer = response.choices[0].message.content
+        return answer, (response.usage.prompt_tokens, response.usage.completion_tokens), 0
+
 
     # ✅ CHAT + VISION + IMAGE GENERATION (как chatgpt.com)
     async def send_vision_message(self, message, dialog_messages=[], chat_mode="assistant",
