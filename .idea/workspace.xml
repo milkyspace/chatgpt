@@ -5,7 +5,14 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="c49b2697-deab-421e-88ce-4ba8723f2a80" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/bot/message_processor.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/bot/admin_handlers.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/bot/chat_mode_handlers.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/bot/image_handlers.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/bot/message_handlers.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/bot/payment.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/bot/settings_handlers.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/bot/subscription_handlers.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/bot/utils.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/bot/bot.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/bot.py" afterDir="false" />
     </list>
