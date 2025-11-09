@@ -1,36 +1,54 @@
-import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, Any
 
 import telegram
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
-from telegram.ext import (
-    CallbackContext
-)
+from telegram.ext import CallbackContext
 
-import database
 from base_handler import BaseHandler
+from payment import create_subscription_yookassa_payment
 from subscription import SubscriptionType
 from subscription_config import SubscriptionConfig
-from payment import create_subscription_yookassa_payment
 from utils import HELP_MESSAGE
 
-# Настройка логирования
 logger = logging.getLogger(__name__)
 
 
 class SubscriptionHandlers(BaseHandler):
     """Класс для обработки подписок и платежей."""
 
+    # Константы для эмодзи и текста
+    _EMOJI_MAP = {
+        "current_sub": "📋",
+        "expires": "📅",
+        "usage": "📊",
+        "images": "🎨",
+        "subscriptions": "🔔",
+        "payment": "💳",
+        "back": "⬅️",
+        "error": "❌",
+        "pending": "⏳",
+        "waiting": "🔄",
+        "success": "✅",
+        "canceled": "❌",
+        "unknown": "❓"
+    }
+
+    _STATUS_EMOJI = {
+        "pending": _EMOJI_MAP["pending"],
+        "waiting_for_capture": _EMOJI_MAP["waiting"],
+        "succeeded": _EMOJI_MAP["success"],
+        "canceled": _EMOJI_MAP["canceled"]
+    }
+
     async def subscription_handle(self, update: Update, context: CallbackContext) -> None:
         """Показывает доступные подписки."""
         try:
             user = self._get_user_from_update(update)
             await self.register_user_if_not_exists(update, context, user)
+
             user_id = user.id
             self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
@@ -44,67 +62,80 @@ class SubscriptionHandlers(BaseHandler):
             logger.error(f"Error in subscription_handle: {e}")
             await self._handle_subscription_error(update)
 
-    def _get_user_from_update(self, update: Update):
+    def _get_user_from_update(self, update: Update) -> telegram.User:
         """Получает пользователя из update."""
-        if update.message is not None:
-            return update.message.from_user
-        else:
-            return update.callback_query.from_user
+        return (update.message or update.callback_query).from_user
 
     def _format_subscription_info(self, subscription_info: Dict[str, Any]) -> str:
         """Форматирует информацию о подписке."""
-        text = ""
+        text_parts = []
+
+        # Текущая подписка
         if subscription_info["is_active"]:
             if subscription_info["type"] != "free":
                 expires_str = subscription_info["expires_at"].strftime("%d.%m.%Y")
-                text += f"📋 <b>Текущая подписка:</b> {subscription_info['type'].upper()}\n"
-                text += f"📅 <b>Действует до:</b> {expires_str}\n"
+                text_parts.extend([
+                    f"{self._EMOJI_MAP['current_sub']} <b>Текущая подписка:</b> {subscription_info['type'].upper()}",
+                    f"{self._EMOJI_MAP['expires']} <b>Действует до:</b> {expires_str}"
+                ])
             else:
-                text += f"📋 <b>Текущая подписка:</b> БЕСПЛАТНАЯ\n"
+                text_parts.append(f"{self._EMOJI_MAP['current_sub']} <b>Текущая подписка:</b> БЕСПЛАТНАЯ")
 
             usage_text = self._format_usage_info(subscription_info)
-            text += usage_text + "\n"
+            text_parts.append(usage_text)
 
-        text += "\n🔔 <b>Доступные подписки</b>\n"
-        text += self._format_available_subscriptions()
+        # Доступные подписки
+        text_parts.extend([
+            "",
+            f"{self._EMOJI_MAP['subscriptions']} <b>Доступные подписки</b>",
+            self._format_available_subscriptions()
+        ])
 
-        return text
+        return "\n".join(text_parts)
 
     def _format_usage_info(self, subscription_info: Dict[str, Any]) -> str:
-        """Форматирует информацию об использовании используя централизованную конфигурацию."""
+        """Форматирует информацию об использовании."""
         subscription_type = SubscriptionType(subscription_info["type"])
         limits = SubscriptionConfig.get_usage_limits(subscription_type)
 
         max_requests = limits.get("max_requests", 0)
         max_images = limits.get("max_images", 0)
 
-        requests_text = f"{subscription_info['requests_used']}/{max_requests}" if max_requests != float(
-            'inf') else f"{subscription_info['requests_used']} (безлимитно)"
-        images_text = f"{subscription_info['images_used']}/{max_images}" if max_images != float(
-            'inf') else f"{subscription_info['images_used']} (безлимитно)"
+        # Форматирование текста с безлимитными значениями
+        requests_text = self._format_limit_text(subscription_info['requests_used'], max_requests)
+        images_text = self._format_limit_text(subscription_info['images_used'], max_images)
 
         return (
-            f"📊 <b>Запросы использовано:</b> {requests_text}\n"
-            f"🎨 <b>Изображения использовано:</b> {images_text}"
+            f"{self._EMOJI_MAP['usage']} <b>Запросы использовано:</b> {requests_text}\n"
+            f"{self._EMOJI_MAP['images']} <b>Изображения использовано:</b> {images_text}"
         )
 
+    def _format_limit_text(self, used: int, limit: float) -> str:
+        """Форматирует текст с лимитом."""
+        if limit == float('inf'):
+            return f"{used} (безлимитно)"
+        return f"{used}/{limit}"
+
     def _format_available_subscriptions(self) -> str:
-        """Форматирует информацию о доступных подписках используя централизованную конфигурацию."""
-        text = ""
+        """Форматирует информацию о доступных подписках."""
+        text_parts = []
 
         for sub_type in SubscriptionConfig.get_all_paid_subscriptions():
             description = SubscriptionConfig.get_description(sub_type)
             price = SubscriptionConfig.get_price(sub_type)
             duration = SubscriptionConfig.get_duration(sub_type)
 
-            text += f"<b>{description['name']}</b> - {price}₽ / {duration.days} дней\n"
-            text += f"   {description['features']}\n\n"
+            text_parts.extend([
+                f"<b>{description['name']}</b> - {price}₽ / {duration.days} дней",
+                f"   {description['features']}",
+                ""
+            ])
 
-        return text
+        return "\n".join(text_parts)
 
-    def _create_subscription_keyboard(self):
-        """Создает клавиатуру для выбора подписки используя централизованную конфигурацию."""
-        keyboard = []
+    def _create_subscription_keyboard(self) -> InlineKeyboardMarkup:
+        """Создает клавиатуру для выбора подписки."""
+        buttons = []
 
         for sub_type in SubscriptionConfig.get_all_paid_subscriptions():
             description = SubscriptionConfig.get_description(sub_type)
@@ -112,29 +143,33 @@ class SubscriptionHandlers(BaseHandler):
 
             name = f"{description['name']} - {price}₽"
             callback_data = f"subscribe|{sub_type.value}"
-            keyboard.append([InlineKeyboardButton(name, callback_data=callback_data)])
+            buttons.append([InlineKeyboardButton(name, callback_data=callback_data)])
 
-        return InlineKeyboardMarkup(keyboard)
+        return InlineKeyboardMarkup(buttons)
 
     async def _send_subscription_message(self, update: Update, text: str,
                                          reply_markup: InlineKeyboardMarkup) -> None:
         """Отправляет сообщение с информацией о подписках."""
-        if update.message is not None:
-            await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
-        else:
-            try:
+        try:
+            if update.message:
+                await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+            else:
                 await update.callback_query.edit_message_text(
                     text, parse_mode=ParseMode.HTML, reply_markup=reply_markup
                 )
-            except telegram.error.BadRequest as e:
-                if "Message is not modified" not in str(e):
-                    await update.callback_query.message.reply_text(
-                        text, parse_mode=ParseMode.HTML, reply_markup=reply_markup
-                    )
+        except telegram.error.BadRequest as e:
+            if "Message is not modified" in str(e):
+                return
+            # Fallback для callback query
+            if update.callback_query:
+                await update.callback_query.message.reply_text(
+                    text, parse_mode=ParseMode.HTML, reply_markup=reply_markup
+                )
 
     async def _handle_subscription_error(self, update: Update) -> None:
         """Обрабатывает ошибки при работе с подписками."""
-        error_text = "❌ Произошла ошибка при загрузке подписок. Пожалуйста, попробуйте снова."
+        error_text = f"{self._EMOJI_MAP['error']} Произошла ошибка при загрузке подписок. Пожалуйста, попробуйте снова."
+
         if update.callback_query:
             await update.callback_query.message.reply_text(error_text, parse_mode=ParseMode.HTML)
 
@@ -147,14 +182,13 @@ class SubscriptionHandlers(BaseHandler):
 
         if data == "subscription_back":
             await self._handle_subscription_back(query)
-            return
-
-        if data.startswith("subscribe|"):
+        elif data.startswith("subscribe|"):
             await self._handle_subscription_payment(query, context)
 
-    async def _handle_subscription_back(query: telegram.CallbackQuery) -> None:
+    async def _handle_subscription_back(self, query: telegram.CallbackQuery) -> None:
         """Обрабатывает возврат из меню подписок."""
-        reply_text = "Возврат в главное меню...\n\n" + HELP_MESSAGE
+        reply_text = f"Возврат в главное меню...\n\n{HELP_MESSAGE}"
+
         try:
             await query.edit_message_text(
                 reply_text, parse_mode=ParseMode.HTML, disable_web_page_preview=True
@@ -165,7 +199,8 @@ class SubscriptionHandlers(BaseHandler):
                     reply_text, parse_mode=ParseMode.HTML, disable_web_page_preview=True
                 )
 
-    async def _handle_subscription_payment(self, query: telegram.CallbackQuery, context: CallbackContext) -> None:
+    async def _handle_subscription_payment(self, query: telegram.CallbackQuery,
+                                           context: CallbackContext) -> None:
         """Обрабатывает создание платежа для подписки."""
         try:
             _, subscription_type_str = query.data.split("|")
@@ -183,36 +218,38 @@ class SubscriptionHandlers(BaseHandler):
         except Exception as e:
             logger.error(f"Error in subscription payment: {e}")
             await query.edit_message_text(
-                "❌ Произошла ошибка при создании платежа. Пожалуйста, попробуйте позже.",
+                f"{self._EMOJI_MAP['error']} Произошла ошибка при создании платежа. Пожалуйста, попробуйте позже.",
                 parse_mode=ParseMode.HTML
             )
 
     def _format_payment_message(self, subscription_type: SubscriptionType) -> str:
-        """Форматирует сообщение об оплате используя централизованную конфигурацию."""
+        """Форматирует сообщение об оплате."""
         price = SubscriptionConfig.get_price(subscription_type)
         duration = SubscriptionConfig.get_duration(subscription_type)
         description = SubscriptionConfig.get_description(subscription_type)
 
         return (
-            f"💳 <b>Оформление подписки {description['name']}</b>\n\n"
+            f"{self._EMOJI_MAP['payment']} <b>Оформление подписки {description['name']}</b>\n\n"
             f"Стоимость: <b>{price}₽</b>\n"
             f"Период: <b>{duration.days} дней</b>\n"
             f"Возможности: {description['features']}\n\n"
             "Нажмите кнопку ниже для оплаты. После успешной оплаты подписка активируется автоматически!"
         )
 
-    def _create_payment_keyboard(self, payment_url: str):
+    def _create_payment_keyboard(self, payment_url: str) -> InlineKeyboardMarkup:
         """Создает клавиатуру для оплаты."""
         keyboard = [
-            [InlineKeyboardButton("💳 Оплатить", url=payment_url)],
-            [InlineKeyboardButton("⬅️ Назад", callback_data="subscription_back")]
+            [InlineKeyboardButton(f"{self._EMOJI_MAP['payment']} Оплатить", url=payment_url)],
+            [InlineKeyboardButton(f"{self._EMOJI_MAP['back']} Назад", callback_data="subscription_back")]
         ]
         return InlineKeyboardMarkup(keyboard)
 
     async def my_payments_handle(self, update: Update, context: CallbackContext) -> None:
         """Показывает статус pending платежей пользователя"""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
-        user_id = update.message.from_user.id
+        user = update.message.from_user
+        await self.register_user_if_not_exists(update, context, user)
+
+        user_id = user.id
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
         pending_payments = self.db.get_user_pending_payments(user_id)
@@ -224,25 +261,21 @@ class SubscriptionHandlers(BaseHandler):
             )
             return
 
-        text = "📋 <b>Ваши ожидающие платежи:</b>\n\n"
+        text_lines = [
+            f"{self._EMOJI_MAP['current_sub']} <b>Ваши ожидающие платежи:</b>\n"
+        ]
 
         for payment in pending_payments:
-            amount = payment["amount"]
-            payment_id = payment["payment_id"]
-            status = payment["status"]
+            status_emoji = self._STATUS_EMOJI.get(payment["status"], self._EMOJI_MAP["unknown"])
             created_at = payment["created_at"].strftime("%d.%m.%Y %H:%M")
 
-            status_emoji = {
-                "pending": "⏳",
-                "waiting_for_capture": "🔄",
-                "succeeded": "✅",
-                "canceled": "❌"
-            }.get(status, "❓")
+            text_lines.extend([
+                f"{status_emoji} <b>{payment['amount']} ₽</b> - {payment['status']}",
+                f"   ID: <code>{payment['payment_id']}</code>",
+                f"   Создан: {created_at}",
+                ""
+            ])
 
-            text += f"{status_emoji} <b>{amount} ₽</b> - {status}\n"
-            text += f"   ID: <code>{payment_id}</code>\n"
-            text += f"   Создан: {created_at}\n\n"
+        text_lines.append("Платежи проверяются автоматически каждые 30 секунд.")
 
-        text += "Платежи проверяются автоматически каждые 30 секунд."
-
-        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+        await update.message.reply_text("\n".join(text_lines), parse_mode=ParseMode.HTML)

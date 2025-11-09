@@ -1,6 +1,9 @@
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Dict, Any
+from typing import Dict, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from subscription_config import SubscriptionConfig
 
 
 class SubscriptionType(Enum):
@@ -16,9 +19,17 @@ class Subscription:
     Использует централизованную конфигурацию из SubscriptionConfig.
     """
 
-    def __init__(self, user_id: int, subscription_type: SubscriptionType,
-                 purchased_at: datetime, expires_at: datetime,
-                 requests_used: int = 0, images_used: int = 0):
+    __slots__ = ('user_id', 'type', 'purchased_at', 'expires_at', 'requests_used', 'images_used')
+
+    def __init__(
+        self,
+        user_id: int,
+        subscription_type: SubscriptionType,
+        purchased_at: datetime,
+        expires_at: datetime,
+        requests_used: int = 0,
+        images_used: int = 0
+    ):
         self.user_id = user_id
         self.type = subscription_type
         self.purchased_at = purchased_at
@@ -30,28 +41,22 @@ class Subscription:
         """Проверяет, активна ли подписка."""
         return datetime.now() < self.expires_at
 
+    def _get_config(self) -> 'SubscriptionConfig':
+        """Ленивая загрузка конфигурации для избежания циклических импортов."""
+        from subscription_config import SubscriptionConfig
+        return SubscriptionConfig
+
     def can_make_request(self) -> bool:
         """Проверяет, может ли пользователь сделать запрос."""
-        if not self.is_active():
-            return False
-
-        # Импортируем здесь чтобы избежать циклического импорта
-        from subscription_config import SubscriptionConfig
-        return SubscriptionConfig.can_make_request(self.type, self.requests_used)
+        return self.is_active() and self._get_config().can_make_request(self.type, self.requests_used)
 
     def can_generate_image(self) -> bool:
         """Проверяет, может ли пользователь сгенерировать изображение."""
-        if not self.is_active():
-            return False
-
-        # Импортируем здесь чтобы избежать циклического импорта
-        from subscription_config import SubscriptionConfig
-        return SubscriptionConfig.can_generate_image(self.type, self.images_used)
+        return self.is_active() and self._get_config().can_generate_image(self.type, self.images_used)
 
     def get_max_response_length(self) -> int:
         """Возвращает максимальную длину ответа для подписки."""
-        from subscription_config import SubscriptionConfig
-        limits = SubscriptionConfig.get_usage_limits(self.type)
+        limits = self._get_config().get_usage_limits(self.type)
         return limits.get("max_response_length", 2000)
 
     def to_dict(self) -> Dict[str, Any]:
