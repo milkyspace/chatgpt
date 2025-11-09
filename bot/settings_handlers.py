@@ -132,7 +132,7 @@ class SettingsHandlers(BaseHandler):
         preferences["model"] = model_key
 
         # Сбрасываем настройки при смене модели
-        if model_key == "dalle-2":
+        if model_key == "dall-e-2":
             preferences["quality"] = "standard"
         elif model_key == "dall-e-3":
             preferences["n_images"] = 1
@@ -207,7 +207,7 @@ class SettingsHandlers(BaseHandler):
     def _create_artist_buttons(self, user_id: int) -> List[List[InlineKeyboardButton]]:
         """Создает кнопки для выбора модели художника."""
         current_preferences = self.db.get_user_attribute(user_id, "image_preferences")
-        current_model = current_preferences.get("model", "dalle-2")
+        current_model = current_preferences.get("model", "dall-e-2")
 
         buttons = []
         for model_key in config.models["available_image_models"]:
@@ -219,7 +219,7 @@ class SettingsHandlers(BaseHandler):
         keyboard = [buttons]
 
         # Добавляем специфичные настройки для каждой модели
-        if current_model == "dalle-2":
+        if current_model == "dall-e-2":
             n_images = current_preferences.get("n_images", 1)
             images_buttons = [
                 InlineKeyboardButton(
@@ -234,7 +234,7 @@ class SettingsHandlers(BaseHandler):
                 InlineKeyboardButton(
                     f"✅ {res_key}" if res_key == current_resolution else res_key,
                     callback_data=f"model-artist-set_resolution|{res_key}"
-                ) for res_key in config.models["info"]["dalle-2"]["resolutions"]
+                ) for res_key in config.models["info"]["dall-e-2"]["resolutions"]
             ]
             keyboard.extend([images_buttons, resolution_buttons])
 
@@ -261,12 +261,12 @@ class SettingsHandlers(BaseHandler):
     async def artist_model_settings_handler(self, query, user_id: int) -> None:
         """Обрабатывает настройки модели художника."""
         current_preferences = self.db.get_user_attribute(user_id, "image_preferences")
-        current_model = current_preferences.get("model", "dalle-2")
+        current_model = current_preferences.get("model", "dall-e-2")
 
         details_text = self._format_model_info(current_model)
 
         # Добавляем пояснение для конкретной модели
-        if current_model == "dalle-2":
+        if current_model == "dall-e-2":
             details_text += "\nДля этой модели выберите количество изображений и разрешение:"
         elif current_model == "dall-e-3":
             details_text += "\nДля этой модели выберите качество изображений и разрешение:"

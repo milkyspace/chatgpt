@@ -76,7 +76,7 @@ class ImageHandlers(BaseHandler):
         except Exception as e:
             # Автоматический fallback для DALL-E 3 → DALL-E 2
             if "rejected" in str(e).lower() or "safety" in str(e).lower() or "billing" in str(e).lower():
-                logger.warning("FALLBACK dall-e-3 → dalle-2")
+                logger.warning("FALLBACK dall-e-3 → dall-e-2")
                 try:
                     image_urls = await openai_utils.generate_images(
                         prompt=prompt,
