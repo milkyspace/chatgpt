@@ -146,3 +146,89 @@ class ImageHandlers(BaseHandler):
             )
 
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
+
+async def process_image_message_handle(self, update: Update, context: CallbackContext,
+                                       message: Optional[str] = None) -> None:
+    """Обрабатывает сообщения с изображениями для редактирования/улучшения."""
+    user = update.message.from_user
+
+    await self.register_user_if_not_exists(update, context, user)
+    if await self.is_previous_message_not_answered_yet(update, context):
+        return
+
+    user_id = user.id
+    self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+    if not await self.subscription_preprocessor(update, context):
+        return
+
+    # Проверяем, есть ли фото в сообщении
+    if not update.message.photo:
+        await update.message.reply_text(
+            "❌ Пожалуйста, отправьте изображение для обработки.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    await update.message.chat.send_action(action="upload_photo")
+
+    placeholder_message = await update.message.reply_text(
+        "<i>Обрабатываю изображение...</i>",
+        parse_mode=ParseMode.HTML
+    )
+
+    try:
+        # Получаем изображение
+        photo = update.message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
+        img_bytes = await file.download_as_bytearray()
+
+        # Получаем промпт (текст сообщения или переданный параметр)
+        prompt = message or update.message.caption or "Улучши это изображение"
+
+        # Генерируем новое изображение на основе загруженного
+        result_url = await openai_utils.generate_image_with_input(prompt, img_bytes)
+
+        # Отправляем результат
+        await self._send_edited_image(context, placeholder_message, result_url, prompt)
+
+        # Обновляем статистику использования
+        self._update_image_usage_stats(user_id, 1)
+
+    except Exception as e:
+        await self._handle_image_generation_error(update, e)
+
+
+async def _send_edited_image(self, context: CallbackContext, placeholder_message: telegram.Message,
+                             image_url: str, prompt: str) -> None:
+    """Отправляет отредактированное изображение."""
+    chat_id = placeholder_message.chat_id
+    message_id = placeholder_message.message_id
+
+    try:
+        await context.bot.edit_message_text(
+            f"🎨 Обрабатываю...\n\n<i>{prompt}</i>",
+            chat_id=chat_id,
+            message_id=message_id,
+            parse_mode=ParseMode.HTML
+        )
+    except telegram.error.BadRequest:
+        pass
+
+    # Скачиваем и отправляем изображение
+    async with aiohttp.ClientSession() as session:
+        async with session.get(image_url) as resp:
+            if resp.status == 200:
+                img = io.BytesIO(await resp.read())
+                img.name = "edited_image.jpg"
+
+                await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=InputFile(img),
+                    caption=f"Готово 🎨\n\n<i>{prompt}</i>",
+                    parse_mode=ParseMode.HTML
+                )
+
+    # Удаляем placeholder сообщение
+    await context.bot.delete_message(chat_id=chat_id, message_id=message_id)

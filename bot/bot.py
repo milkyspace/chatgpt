@@ -183,6 +183,18 @@ def run_bot() -> None:
     application.add_handler(MessageHandler(filters.VOICE & user_filter,
                                            message_handlers.voice_message_handle))
 
+    # Для обработки фотографий с подписями
+    application.add_handler(MessageHandler(
+        filters.PHOTO & filters.ChatType.PRIVATE,
+        image_handlers.process_image_message_handle
+    ))
+
+    # Для обработки фотографий в группах (если бот упомянут)
+    application.add_handler(MessageHandler(
+        filters.PHOTO & filters.ChatType.GROUPS & filters.Entity("mention"),
+        image_handlers.process_image_message_handle
+    ))
+
     # Добавляем обработчики подписок
     application.add_handler(
         CommandHandler("subscription", subscription_handlers.subscription_handle, filters=user_filter))

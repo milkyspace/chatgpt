@@ -194,10 +194,11 @@ class MessageHandlers(MessageProcessor):
 
         # Обработка специальных режимов
         if chat_mode == "artist":
-            await self.generate_image_handle(update, context, message=message)
+            # Используем image_handlers вместо self.generate_image_handle
+            await self.image_handlers.generate_image_handle(update, context, message=processed_message)
             return
         elif chat_mode == "stenographer":
-            await self.voice_message_handle(update, context, message=message)
+            await self.voice_message_handle(update, context, message=processed_message)
             return
 
         await self._handle_text_message(update, context, processed_message, use_new_dialog_timeout)
@@ -532,14 +533,3 @@ class MessageHandlers(MessageProcessor):
             _message = _message.replace("@" + context.bot.username, "").strip()
 
         return _message
-
-    async def generate_image_handle(self, update, context, message=None):
-        photo = update.message.photo[-1]
-        file = await context.bot.get_file(photo.file_id)
-        img_bytes = await file.download_as_bytearray()
-
-        prompt = message or "Сделай изображение лучше"  # или твой входной текст
-
-        result = await openai_utils.generate_image_with_input(prompt, img_bytes)
-
-        await update.message.reply_photo(result)

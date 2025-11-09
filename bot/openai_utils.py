@@ -218,3 +218,18 @@ async def generate_image_with_input(prompt: str, image_bytes: bytes) -> bytes:
     # Достаём base64
     b64 = response.data[0].b64_json
     return base64.b64decode(b64)
+
+async def generate_image(prompt: str) -> str:
+    """Генерирует изображение по текстовому описанию."""
+    try:
+        response = await openai.images.generate(
+            model="dall-e-3",
+            prompt=prompt,
+            size="1024x1024",
+            quality="standard",
+            n=1,
+        )
+        return response.data[0].url
+    except Exception as e:
+        logger.error(f"Error generating image: {e}")
+        raise
