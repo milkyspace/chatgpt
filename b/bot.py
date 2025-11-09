@@ -4,7 +4,6 @@ import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 
-from b.services.payments_monitor import logger
 from config import cfg
 from router_public import router as public_router
 from router_admin import router as admin_router
@@ -15,6 +14,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+
 logger = logging.getLogger(__name__)
 
 async def main():
