@@ -69,3 +69,11 @@ def configure_logging() -> None:
         format='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
     )
     logger.setLevel(logging.getLogger().level)
+
+
+def get_user_semaphore(user_id: int) -> asyncio.Semaphore:
+    """Безопасно получает семафор пользователя, создавая его при необходимости."""
+    if user_id not in user_semaphores:
+        user_semaphores[user_id] = asyncio.Semaphore(1)
+        logger.info(f"Created semaphore for user {user_id}")
+    return user_semaphores[user_id]

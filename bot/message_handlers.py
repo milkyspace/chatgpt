@@ -21,7 +21,7 @@ import openai_utils
 from base_handler import BaseHandler
 from keyboards import BotKeyboards
 from message_processor import MessageProcessor
-from utils import HELP_MESSAGE, HELP_GROUP_CHAT_MESSAGE
+from utils import get_user_semaphore, HELP_MESSAGE, HELP_GROUP_CHAT_MESSAGE
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -235,6 +235,11 @@ class MessageHandlers(MessageProcessor):
             logger.info(f"=== START TEXT MESSAGE PROCESSING ===")
             logger.info(f"User: {user_id}, Message: '{message}'")
 
+            # Безопасный доступ к семафору
+            if user_id not in user_semaphores:
+                logger.warning(f"Semaphore not found for user {user_id}, initializing...")
+                user_semaphores[user_id] = asyncio.Semaphore(1)
+
             chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
             logger.info(f"Chat mode: {chat_mode}")
 
@@ -254,7 +259,7 @@ class MessageHandlers(MessageProcessor):
                                                 parse_mode=ParseMode.HTML)
                 return
 
-            async with user_semaphores[user_id]:
+            async with get_user_semaphore(user_id):
                 logger.info("Acquired user semaphore")
                 placeholder_message = await update.message.reply_text("<i>Думаю...</i>", parse_mode=ParseMode.HTML)
                 await update.message.chat.send_action(action="typing")

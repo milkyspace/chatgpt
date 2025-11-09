@@ -47,6 +47,11 @@ class BaseHandler(ABC):
             user_registered_now = True
             self.db.start_new_dialog(user.id)
 
+        # Убедимся, что семафор инициализирован ДО инициализации атрибутов
+        if user.id not in user_semaphores:
+            user_semaphores[user.id] = asyncio.Semaphore(1)
+            logger.info(f"Initialized semaphore for new user {user.id}")
+
         await self._initialize_user_attributes(user.id)
 
         if user_registered_now:
@@ -56,11 +61,13 @@ class BaseHandler(ABC):
 
     async def _initialize_user_attributes(self, user_id: int) -> None:
         """Инициализирует необходимые атрибуты пользователя."""
-        if self.db.get_user_attribute(user_id, "current_dialog_id") is None:
-            self.db.start_new_dialog(user_id)
-
+        # Инициализация семафора ДО всех других операций
         if user_id not in user_semaphores:
             user_semaphores[user_id] = asyncio.Semaphore(1)
+            logger.info(f"Initialized semaphore for user {user_id}")
+
+        if self.db.get_user_attribute(user_id, "current_dialog_id") is None:
+            self.db.start_new_dialog(user_id)
 
         attributes_to_init = [
             ("current_model", config.models["available_text_models"][0]),
