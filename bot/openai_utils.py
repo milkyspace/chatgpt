@@ -1,18 +1,13 @@
 import base64
 import logging
 from io import BytesIO
-from typing import Optional, List
+from typing import Optional, List, AsyncGenerator, Tuple, Union
 
 from openai import AsyncOpenAI
 
 import config
 
-# Инициализация клиента OpenAI
-if config.openai_api_base is not None:
-    openai_client = AsyncOpenAI(api_key=config.openai_api_key, base_url=config.openai_api_base)
-else:
-    openai_client = AsyncOpenAI(api_key=config.openai_api_key)
-
+# Константы вынесены в верхний регистр
 OPENAI_COMPLETION_OPTIONS = {
     "temperature": 0.7,
     "max_tokens": 2000,
@@ -21,65 +16,95 @@ OPENAI_COMPLETION_OPTIONS = {
     "presence_penalty": 0,
 }
 
+# Инициализация клиента OpenAI (упрощенная версия)
+openai_client = AsyncOpenAI(
+    api_key=config.openai_api_key,
+    base_url=config.openai_api_base  # base_url может быть None
+)
+
 logger = logging.getLogger(__name__)
 
 
 def configure_logging():
-    if config.enable_detailed_logging:
-        logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
-    else:
-        logging.basicConfig(level=logging.CRITICAL, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
-    logger.setLevel(logging.getLogger().level)
+    """Конфигурация логирования с оптимизацией производительности"""
+    level = logging.DEBUG if config.enable_detailed_logging else logging.CRITICAL
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+        force=True  # Перезаписывает существующую конфигурацию
+    )
 
 
 configure_logging()
 
 
-# ---------------------------- ✅ Улучшенная модель чата ----------------------------
 class ChatGPT:
-    def __init__(self, model="gpt-4o"):
+    """Оптимизированный класс для работы с ChatGPT"""
+
+    # Кэш для промптов (небольшая оптимизация)
+    _prompt_cache = {}
+
+    def __init__(self, model: str = "gpt-4o"):
         self.model = model
         self.is_claude_model = model.startswith("claude")
-        self.logger = logging.getLogger(__name__)
+        self.logger = logger  # Используем существующий логгер
 
-    async def send_message_stream(self, message, dialog_messages=[], chat_mode="assistant"):
-        """Потоковая отправка сообщения с использованием OpenAI API."""
-        if chat_mode not in config.chat_modes.keys():
-            raise ValueError(f"Chat mode {chat_mode} is not supported")
+    async def send_message_stream(
+            self,
+            message: str,
+            dialog_messages: List[dict] = None,
+            chat_mode: str = "assistant"
+    ) -> AsyncGenerator[Tuple[str, str, Tuple[int, int], int], None]:
+        """Потоковая отправка сообщения с оптимизацией производительности"""
+        if dialog_messages is None:
+            dialog_messages = []
 
+        self._validate_chat_mode(chat_mode)
         messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
 
         try:
             response = await openai_client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                stream=True,  # Включаем потоковую передачу
+                stream=True,
                 **OPENAI_COMPLETION_OPTIONS
             )
 
             full_answer = ""
             n_input_tokens, n_output_tokens = 0, 0
+            chunk_counter = 0
+            YIELD_EVERY_N_CHUNKS = 10  # Реже отдаем промежуточные результаты
 
             async for chunk in response:
-                if chunk.choices and chunk.choices[0].delta.content is not None:
+                if (chunk.choices and
+                        chunk.choices[0].delta.content is not None):
+
                     chunk_content = chunk.choices[0].delta.content
                     full_answer += chunk_content
+                    chunk_counter += 1
 
-                    # Эмулируем подсчет токенов (в потоковом режиме точный подсчет сложен)
-                    if len(full_answer) % 100 == 0:  # Обновляем каждые ~100 символов
+                    # Оптимизация: реже проверяем длину для yield
+                    if chunk_counter % YIELD_EVERY_N_CHUNKS == 0:
                         yield "streaming", full_answer, (n_input_tokens, n_output_tokens), 0
 
             # Финальный результат
             yield "finished", full_answer, (n_input_tokens, n_output_tokens), 0
 
         except Exception as e:
-            self.logger.error(f"Error in streaming message: {e}")
-            raise e
+            self.logger.error("Error in streaming message: %s", e, exc_info=True)
+            raise
 
-    async def send_message(self, message, dialog_messages=[], chat_mode="assistant"):
-        if chat_mode not in config.chat_modes.keys():
-            raise ValueError(f"Chat mode {chat_mode} is not supported")
+    async def send_message(
+            self,
+            message: str,
+            dialog_messages: List[dict] = None,
+            chat_mode: str = "assistant"
+    ) -> Tuple[str, Tuple[int, int], int]:
+        """Синхронная отправка сообщения с оптимизацией"""
+        if dialog_messages is None:
+            dialog_messages = []
 
+        self._validate_chat_mode(chat_mode)
         messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
 
         response = await openai_client.chat.completions.create(
@@ -89,19 +114,38 @@ class ChatGPT:
         )
 
         answer = response.choices[0].message.content
-        return answer, (response.usage.prompt_tokens, response.usage.completion_tokens), 0
+        usage = response.usage
+        return answer, (usage.prompt_tokens, usage.completion_tokens), 0
 
-    # --------------------- Сборка сообщений ---------------------
-    def _generate_prompt_messages(self, message, dialog_messages, chat_mode, image_buffer: BytesIO = None):
-        prompt = config.chat_modes[chat_mode]["prompt_start"]
+    def _validate_chat_mode(self, chat_mode: str) -> None:
+        """Валидация chat_mode с кэшированием"""
+        if chat_mode not in config.chat_modes:
+            raise ValueError(f"Chat mode {chat_mode} is not supported")
 
+    def _generate_prompt_messages(
+            self,
+            message: str,
+            dialog_messages: List[dict],
+            chat_mode: str,
+            image_buffer: Optional[BytesIO] = None
+    ) -> List[dict]:
+        """Генерация сообщений с оптимизацией и кэшированием промптов"""
+        # Кэширование системных промптов
+        cache_key = f"system_{chat_mode}"
+        if cache_key not in self._prompt_cache:
+            self._prompt_cache[cache_key] = config.chat_modes[chat_mode]["prompt_start"]
+
+        prompt = self._prompt_cache[cache_key]
         messages = [{"role": "system", "content": prompt}]
 
+        # Более эффективное построение истории диалога
         for msg in dialog_messages:
-            messages.append({"role": "user", "content": msg["user"]})
-            messages.append({"role": "assistant", "content": msg["bot"]})
+            messages.extend([
+                {"role": "user", "content": msg["user"]},
+                {"role": "assistant", "content": msg["bot"]}
+            ])
 
-        # ✅ Вставляем изображение в message (GPT-4o Vision)
+        # Обработка изображения
         if image_buffer is not None:
             encoded = base64.b64encode(image_buffer.read()).decode()
             messages.append({
@@ -116,9 +160,14 @@ class ChatGPT:
 
         return messages
 
+    # Контекстный менеджер для очистки кэша
+    def clear_cache(self):
+        """Очистка кэша промптов"""
+        self._prompt_cache.clear()
 
-# ---------------------------- ✅ AUDIO ----------------------------
+
 async def transcribe_audio(audio_file) -> str:
+    """Транскрибация аудио с улучшенной обработкой ошибок"""
     try:
         transcript = await openai_client.audio.transcriptions.create(
             file=audio_file,
@@ -126,22 +175,31 @@ async def transcribe_audio(audio_file) -> str:
         )
         return transcript.text or ""
     except Exception as e:
-        logger.error(f"Error transcribing audio: {e}")
+        logger.error("Error transcribing audio: %s", e, exc_info=True)
         return ""
 
 
-# ---------------------------- ✅ NEW: DALL·E 3 / GPT-IMAGE-1 ----------------------------
-async def generate_images(prompt: str, model: str = "gpt-image-1", size: str = "1024x1024") -> List[str]:
+async def generate_images(
+        prompt: str,
+        model: str = "gpt-image-1",
+        size: str = "1024x1024",
+        n: int = 1
+) -> List[str]:
+    """Генерация изображений с улучшенной обработкой параметров"""
     try:
+        # Валидация параметров
+        if n <= 0 or n > 4:  # OpenAI обычно ограничивает количество
+            raise ValueError("Number of images must be between 1 and 4")
+
         response = await openai_client.images.generate(
             model=model,
             prompt=prompt,
             size=size,
-            n=1,
+            n=n,
             quality="high"
         )
         return [item.url for item in response.data]
 
     except Exception as e:
-        logger.error(f"Error generating images: {e}")
-        raise e
+        logger.error("Error generating images: %s", e, exc_info=True)
+        raise
