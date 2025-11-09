@@ -3,14 +3,12 @@ import asyncio
 from typing import Dict, Any
 
 from bot import database
-from bot.handlers.subscription_handlers import SubscriptionHandlers
-
-import bot.subscription_handlers as SubscriptionHandlers
-import bot.image_handlers as ImageHandlers
-import bot.chat_mode_handlers as ChatModeHandlers
-import bot.admin_handlers as AdminHandlers
-import bot.settings_handlers as SettingsHandlers
-import bot.message_handlers as MessageHandlers
+from .subscription_handlers import SubscriptionHandlers
+from .image_handlers import ImageHandlers
+from .chat_mode_handlers import ChatModeHandlers
+from .admin_handlers import AdminHandlers
+from .settings_handlers import SettingsHandlers
+from .message_handlers import MessageHandlers
 
 # Глобальные переменные
 db = database.Database()

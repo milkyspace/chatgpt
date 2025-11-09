@@ -6,7 +6,7 @@
 from datetime import timedelta
 from typing import Dict, Any
 
-from bot.subscription.subscription import SubscriptionType
+from .subscription import SubscriptionType
 
 
 class SubscriptionConfig:
