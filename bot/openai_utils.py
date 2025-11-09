@@ -198,7 +198,7 @@ async def generate_images(prompt: str, model: str = "dall-e-3", n_images: int = 
         image_urls = []
 
         # Для DALL-E 3 делаем один запрос
-        if model == "dalle-3":
+        if model == "dall-e-3":
 
             response = await openai.images.generate(
                 model=model,

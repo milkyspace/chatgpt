@@ -134,7 +134,7 @@ class SettingsHandlers(BaseHandler):
         # Сбрасываем настройки при смене модели
         if model_key == "dalle-2":
             preferences["quality"] = "standard"
-        elif model_key == "dalle-3":
+        elif model_key == "dall-e-3":
             preferences["n_images"] = 1
         preferences["resolution"] = "1024x1024"
 
@@ -238,20 +238,20 @@ class SettingsHandlers(BaseHandler):
             ]
             keyboard.extend([images_buttons, resolution_buttons])
 
-        elif current_model == "dalle-3":
+        elif current_model == "dall-e-3":
             current_quality = current_preferences.get("quality", "standard")
             quality_buttons = [
                 InlineKeyboardButton(
                     f"✅ {quality_key}" if quality_key == current_quality else quality_key,
                     callback_data=f"model-artist-set_quality|{quality_key}"
-                ) for quality_key in config.models["info"]["dalle-3"]["qualities"]
+                ) for quality_key in config.models["info"]["dall-e-3"]["qualities"]
             ]
             current_resolution = current_preferences.get("resolution", "1024x1024")
             resolution_buttons = [
                 InlineKeyboardButton(
                     f"✅ {res_key}" if res_key == current_resolution else res_key,
                     callback_data=f"model-artist-set_resolution|{res_key}"
-                ) for res_key in config.models["info"]["dalle-3"]["qualities"][current_quality]["resolutions"]
+                ) for res_key in config.models["info"]["dall-e-3"]["qualities"][current_quality]["resolutions"]
             ]
             keyboard.extend([quality_buttons, resolution_buttons])
 
@@ -268,7 +268,7 @@ class SettingsHandlers(BaseHandler):
         # Добавляем пояснение для конкретной модели
         if current_model == "dalle-2":
             details_text += "\nДля этой модели выберите количество изображений и разрешение:"
-        elif current_model == "dalle-3":
+        elif current_model == "dall-e-3":
             details_text += "\nДля этой модели выберите качество изображений и разрешение:"
 
         keyboard = self._create_artist_buttons(user_id)
