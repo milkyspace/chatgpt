@@ -48,6 +48,10 @@ class SettingsHandlers(BaseHandler):
         text, reply_markup = self.get_settings_menu(user_id)
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
+    async def set_settings_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает установку настроек - прокси метод для model_settings_handler."""
+        await self.model_settings_handler(update, context)
+
     def _create_model_buttons(self, available_models: list, current_model: str, prefix: str = "model") -> Tuple[
         list, list]:
         """Создает кнопки для выбора модели."""

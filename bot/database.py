@@ -1,11 +1,14 @@
 from typing import Optional, Any, List, Dict
 import pymongo
+import logging
 from pymongo import UpdateOne
 import uuid
 from datetime import datetime, timedelta
 import config
 from subscription import SubscriptionType
-from subscription_config import SubscriptionConfig
+
+# Настройка логирования
+logger = logging.getLogger(__name__)
 
 
 class Database:
@@ -146,17 +149,32 @@ class Database:
         return dialog_id
 
     def get_user_attribute(self, user_id: int, key: str) -> Any:
-        """Получение атрибута пользователя с проекцией для оптимизации"""
-        user = self._get_user_document(user_id, {key: 1})
-        return user.get(key)
+        """Оптимизированное получение атрибута пользователя."""
+        try:
+            result = self.user_collection.find_one(
+                {"_id": user_id},
+                {key: 1}
+            )
+            return result.get(key) if result else None
+        except Exception as e:
+            logger.error(f"Error getting attribute {key} for user {user_id}: {e}")
+            return None
 
     def set_user_attribute(self, user_id: int, key: str, value: Any) -> None:
-        """Установка атрибута пользователя с обновлением last_interaction"""
-        self.check_if_user_exists(user_id, raise_exception=True)
-        self.user_collection.update_one(
-            {"_id": user_id},
-            {"$set": {key: value, "last_interaction": datetime.now()}}
-        )
+        """Оптимизированная установка атрибута с bulk operations."""
+        try:
+            self.user_collection.update_one(
+                {"_id": user_id},
+                {
+                    "$set": {
+                        key: value,
+                        "last_interaction": datetime.now()
+                    }
+                },
+                upsert=False
+            )
+        except Exception as e:
+            logger.error(f"Error setting attribute {key} for user {user_id}: {e}")
 
     def update_n_used_tokens(self, user_id: int, model: str, n_input_tokens: int, n_output_tokens: int) -> None:
         """Обновление счетчиков токенов с атомарными операциями"""

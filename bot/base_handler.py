@@ -111,9 +111,14 @@ class BaseHandler(ABC):
         return False
 
     async def subscription_preprocessor(self, update: Update, context: CallbackContext) -> bool:
-        """Проверяет возможность выполнения запроса по подписке."""
+        """Оптимизированная проверка подписки."""
         try:
             user_id = update.effective_user.id
+
+            # Быстрая проверка существования пользователя
+            if not self.db.check_if_user_exists(user_id):
+                await self.register_user_if_not_exists(update, context, update.effective_user)
+
             subscription_info = self.db.get_user_subscription_info(user_id)
 
             if not subscription_info["is_active"]:
@@ -126,11 +131,7 @@ class BaseHandler(ABC):
 
             return await self._check_subscription_limits(subscription_info, update)
         except Exception as e:
-            logger.error(f"Error in subscription preprocessor: {e}", exc_info=True)
-            await update.message.reply_text(
-                "❌ Ошибка проверки подписки. Пожалуйста, попробуйте еще раз.",
-                parse_mode=ParseMode.HTML
-            )
+            logger.error(f"Subscription preprocessor error: {e}")
             return False
 
     async def _check_subscription_limits(self, subscription_info: Dict[str, Any], update: Update) -> bool:

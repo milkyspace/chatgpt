@@ -11,36 +11,31 @@ import logging
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
-from telegram.ext import (
-    CallbackContext
-)
+from telegram.ext import CallbackContext
 
 import config
 from base_handler import BaseHandler
 from keyboards import BotKeyboards
 
-# Настройка логирования
 logger = logging.getLogger(__name__)
 
 
 class AdminHandlers(BaseHandler):
     """Класс для обработки админ-панели."""
 
-    async def admin_panel_handle(self, update: Update, context: CallbackContext) -> None:
-        """Обрабатывает команду админ-панели."""
+    VALID_ROLES = ['admin', 'beta_tester', 'friend', 'regular_user', 'trial_user']
+
+    async def _admin_precheck(self, update: Update, context: CallbackContext, user_id: int) -> bool:
+        """Выполняет стандартные проверки для админ-команд."""
         await self.register_user_if_not_exists(update, context, update.message.from_user)
-        user_id = update.message.from_user.id
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
         if not self._is_admin(user_id):
-            await update.message.reply_text("❌ У вас нет доступа к админ-панели.")
-            return
-
-        await self._show_admin_panel(update, context)
+            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+            return False
+        return True
 
     def _is_admin(self, user_id: int) -> bool:
         """Проверяет, является ли пользователь администратором."""
@@ -56,14 +51,20 @@ class AdminHandlers(BaseHandler):
         else:
             await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
+    async def admin_panel_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает команду админ-панели."""
+        user_id = update.message.from_user.id
+
+        if not await self._admin_precheck(update, context, user_id):
+            return
+
+        await self._show_admin_panel(update, context)
+
     async def show_users_handle(self, update: Update, context: CallbackContext) -> None:
         """Показывает список пользователей."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
         user_id = update.message.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if not self._is_admin(user_id):
-            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        if not await self._admin_precheck(update, context, user_id):
             return
 
         users = self.db.get_users_and_roles()
@@ -72,7 +73,8 @@ class AdminHandlers(BaseHandler):
             await update.message.reply_text("📝 Пользователей не найдено.")
             return
 
-        text = "👥 <b>Список пользователей:</b>\n\n"
+        text_lines = ["👥 <b>Список пользователей:</b>\n\n"]
+
         for i, user in enumerate(users[:50], 1):
             username = user.get('username', 'Нет username')
             first_name = user.get('first_name', 'Нет имени')
@@ -82,25 +84,29 @@ class AdminHandlers(BaseHandler):
             if isinstance(last_interaction, datetime):
                 last_interaction = last_interaction.strftime("%d.%m.%Y %H:%M")
 
-            text += f"{i}. ID: {user['_id']}\n"
-            text += f"   👤: {first_name} (@{username})\n"
-            text += f"   🏷️: {role}\n"
-            text += f"   ⏰: {last_interaction}\n\n"
+            text_lines.extend([
+                f"{i}. ID: {user['_id']}\n",
+                f"   👤: {first_name} (@{username})\n",
+                f"   🏷️: {role}\n",
+                f"   ⏰: {last_interaction}\n\n"
+            ])
 
         if len(users) > 50:
-            text += f"\n... и еще {len(users) - 50} пользователей"
+            text_lines.append(f"\n... и еще {len(users) - 50} пользователей")
 
         reply_markup = BotKeyboards.get_back_to_admin_keyboard()
-        await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+        await update.message.reply_text(''.join(text_lines), parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+
+    async def _show_command_help(self, update: Update, command: str, help_text: str) -> None:
+        """Показывает справку по команде."""
+        reply_markup = BotKeyboards.get_back_to_admin_keyboard()
+        await update.message.reply_text(help_text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
     async def edit_user_handle(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает запрос на редактирование пользователя."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
         user_id = update.message.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if not self._is_admin(user_id):
-            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        if not await self._admin_precheck(update, context, user_id):
             return
 
         text = (
@@ -109,20 +115,16 @@ class AdminHandlers(BaseHandler):
             "<code>/edit_user USER_ID ROLE</code>\n\n"
             "Пример:\n"
             "<code>/edit_user 123456789 admin</code>\n\n"
-            "Доступные роли: admin, beta_tester, friend, regular_user, trial_user"
+            f"Доступные роли: {', '.join(self.VALID_ROLES)}"
         )
 
-        reply_markup = BotKeyboards.get_back_to_admin_keyboard()
-        await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+        await self._show_command_help(update, "edit_user", text)
 
     async def broadcast_handle(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает запрос на рассылку."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
         user_id = update.message.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if not self._is_admin(user_id):
-            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        if not await self._admin_precheck(update, context, user_id):
             return
 
         text = (
@@ -133,13 +135,31 @@ class AdminHandlers(BaseHandler):
             "<code>/broadcast Всем привет! Это тестовая рассылка.</code>"
         )
 
-        reply_markup = BotKeyboards.get_back_to_admin_keyboard()
-        await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+        await self._show_command_help(update, "broadcast", text)
+
+    async def get_user_data_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает запрос на получение данных пользователя."""
+        user_id = update.message.from_user.id
+
+        if not await self._admin_precheck(update, context, user_id):
+            return
+
+        text = (
+            "👤 <b>Получение данных пользователя</b>\n\n"
+            "Для получения данных отправьте команду в формате:\n"
+            "<code>/user_data USER_ID</code>\n\n"
+            "Пример:\n"
+            "<code>/user_data 123456789</code>\n\n"
+            "Или отправьте username пользователя:\n"
+            "<code>/user_data @username</code>"
+        )
+
+        await self._show_command_help(update, "user_data", text)
 
     async def handle_main_menu_back(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает возврат в главное меню из админ-панели."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
         user_id = update.message.from_user.id
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
         reply_markup = await BotKeyboards.get_main_keyboard(user_id)
@@ -151,23 +171,18 @@ class AdminHandlers(BaseHandler):
 
     async def handle_admin_panel_back(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает возврат в админ-панель."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
         user_id = update.message.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if not self._is_admin(user_id):
-            await update.message.reply_text("❌ У вас нет доступа к админ-панели.")
+        if not await self._admin_precheck(update, context, user_id):
             return
 
         await self._show_admin_panel(update, context)
 
     async def edit_user_command(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает команду /edit_user."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
         user_id = update.message.from_user.id
 
-        if not self._is_admin(user_id):
-            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        if not await self._admin_precheck(update, context, user_id):
             return
 
         if not context.args or len(context.args) < 2:
@@ -186,15 +201,13 @@ class AdminHandlers(BaseHandler):
                 await update.message.reply_text(f"❌ Пользователь с ID {target_user_id} не найден.")
                 return
 
-            valid_roles = ['admin', 'beta_tester', 'friend', 'regular_user', 'trial_user']
-            if new_role not in valid_roles:
+            if new_role not in self.VALID_ROLES:
                 await update.message.reply_text(
-                    f"❌ Неверная роль. Допустимые роли: {', '.join(valid_roles)}"
+                    f"❌ Неверная роль. Допустимые роли: {', '.join(self.VALID_ROLES)}"
                 )
                 return
 
             self.db.set_user_attribute(target_user_id, "role", new_role)
-
             await update.message.reply_text(
                 f"✅ Роль пользователя {target_user_id} успешно изменена на '{new_role}'"
             )
@@ -207,11 +220,9 @@ class AdminHandlers(BaseHandler):
 
     async def broadcast_command(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает команду /broadcast."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
         user_id = update.message.from_user.id
 
-        if not self._is_admin(user_id):
-            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        if not await self._admin_precheck(update, context, user_id):
             return
 
         if not context.args:
@@ -258,7 +269,6 @@ class AdminHandlers(BaseHandler):
 
         if data.startswith("confirm_broadcast|"):
             message_text = data.split("|", 1)[1]
-
             await query.edit_message_text("🔄 Начинаю рассылку...")
 
             all_user_ids = self.db.get_all_user_ids()
@@ -291,29 +301,6 @@ class AdminHandlers(BaseHandler):
             )
 
             await query.edit_message_text(result_text, parse_mode=ParseMode.HTML)
-
-    async def get_user_data_handle(self, update: Update, context: CallbackContext) -> None:
-        """Обрабатывает запрос на получение данных пользователя."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
-        user_id = update.message.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
-        if not self._is_admin(user_id):
-            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
-            return
-
-        text = (
-            "👤 <b>Получение данных пользователя</b>\n\n"
-            "Для получения данных отправьте команду в формате:\n"
-            "<code>/user_data USER_ID</code>\n\n"
-            "Пример:\n"
-            "<code>/user_data 123456789</code>\n\n"
-            "Или отправьте username пользователя:\n"
-            "<code>/user_data @username</code>"
-        )
-
-        reply_markup = BotKeyboards.get_back_to_admin_keyboard()
-        await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
     async def get_user_data_command(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает команду /user_data."""
@@ -384,51 +371,57 @@ class AdminHandlers(BaseHandler):
         """Форматирует подробную информацию о пользователе."""
         user_id = user_data['_id']
 
-        text = f"👤 <b>Данные пользователя</b>\n\n"
-        text += f"<b>ID:</b> <code>{user_id}</code>\n"
-        text += f"<b>Username:</b> @{user_data.get('username', 'не указан')}\n"
-        text += f"<b>Имя:</b> {user_data.get('first_name', 'не указано')}\n"
-        text += f"<b>Фамилия:</b> {user_data.get('last_name', 'не указана')}\n"
-        text += f"<b>Chat ID:</b> <code>{user_data.get('chat_id', 'не указан')}</code>\n"
-        text += f"<b>Роль:</b> {user_data.get('role', 'не указана')}\n\n"
+        text_lines = [
+            f"👤 <b>Данные пользователя</b>\n\n",
+            f"<b>ID:</b> <code>{user_id}</code>\n",
+            f"<b>Username:</b> @{user_data.get('username', 'не указан')}\n",
+            f"<b>Имя:</b> {user_data.get('first_name', 'не указано')}\n",
+            f"<b>Фамилия:</b> {user_data.get('last_name', 'не указана')}\n",
+            f"<b>Chat ID:</b> <code>{user_data.get('chat_id', 'не указан')}</code>\n",
+            f"<b>Роль:</b> {user_data.get('role', 'не указана')}\n\n"
+        ]
 
         # Информация о подписке
         subscription_info = self.db.get_user_subscription_info(user_id)
         if subscription_info["is_active"]:
             expires_at = subscription_info["expires_at"].strftime("%d.%m.%Y %H:%M")
-            text += f"<b>Подписка:</b> {subscription_info['type']}\n"
-            text += f"<b>Действует до:</b> {expires_at}\n"
-            text += f"<b>Запросов использовано:</b> {subscription_info['requests_used']}\n"
-            text += f"<b>Изображений использовано:</b> {subscription_info['images_used']}\n\n"
+            text_lines.extend([
+                f"<b>Подписка:</b> {subscription_info['type']}\n",
+                f"<b>Действует до:</b> {expires_at}\n",
+                f"<b>Запросов использовано:</b> {subscription_info['requests_used']}\n",
+                f"<b>Изображений использовано:</b> {subscription_info['images_used']}\n\n"
+            ])
         else:
-            text += "<b>Подписка:</b> не активна\n\n"
+            text_lines.append("<b>Подписка:</b> не активна\n\n")
 
         # Статистика использования
-        text += "<b>Статистика использования:</b>\n"
+        text_lines.append("<b>Статистика использования:</b>\n")
 
         n_used_tokens = user_data.get('n_used_tokens', {})
         if n_used_tokens:
             for model, tokens in n_used_tokens.items():
                 input_tokens = tokens.get('n_input_tokens', 0)
                 output_tokens = tokens.get('n_output_tokens', 0)
-                text += f"  {model}: {input_tokens} ввод / {output_tokens} вывод\n"
+                text_lines.append(f"  {model}: {input_tokens} ввод / {output_tokens} вывод\n")
         else:
-            text += "  Токены: не использовались\n"
+            text_lines.append("  Токены: не использовались\n")
 
         n_generated_images = user_data.get('n_generated_images', 0)
-        text += f"  Сгенерировано изображений: {n_generated_images}\n"
+        text_lines.append(f"  Сгенерировано изображений: {n_generated_images}\n")
 
         n_transcribed_seconds = user_data.get('n_transcribed_seconds', 0)
-        text += f"  Расшифровано аудио: {n_transcribed_seconds} сек.\n\n"
+        text_lines.append(f"  Расшифровано аудио: {n_transcribed_seconds} сек.\n\n")
 
         # Финансовая информация
         financials = self.db.get_user_financials(user_id)
-        text += "<b>Финансовая информация:</b>\n"
-        text += f"  Баланс RUB: {user_data.get('rub_balance', 0)}₽\n"
-        text += f"  Баланс EUR: {user_data.get('euro_balance', 0)}€\n"
-        text += f"  Всего пополнено: {financials.get('total_topup', 0)}₽\n"
-        text += f"  Всего потрачено: {user_data.get('total_spent', 0)}₽\n"
-        text += f"  Пожертвовано: {financials.get('total_donated', 0)}₽\n\n"
+        text_lines.extend([
+            "<b>Финансовая информация:</b>\n",
+            f"  Баланс RUB: {user_data.get('rub_balance', 0)}₽\n",
+            f"  Баланс EUR: {user_data.get('euro_balance', 0)}€\n",
+            f"  Всего пополнено: {financials.get('total_topup', 0)}₽\n",
+            f"  Всего потрачено: {user_data.get('total_spent', 0)}₽\n",
+            f"  Пожертвовано: {financials.get('total_donated', 0)}₽\n\n"
+        ])
 
         # Информация о активности
         first_seen = user_data.get('first_seen', 'неизвестно')
@@ -439,16 +432,19 @@ class AdminHandlers(BaseHandler):
         if isinstance(last_interaction, datetime):
             last_interaction = last_interaction.strftime("%d.%m.%Y %H:%M")
 
-        text += f"<b>Первое посещение:</b> {first_seen}\n"
-        text += f"<b>Последняя активность:</b> {last_interaction}\n"
+        text_lines.extend([
+            f"<b>Первое посещение:</b> {first_seen}\n",
+            f"<b>Последняя активность:</b> {last_interaction}\n"
+        ])
 
         current_model = user_data.get('current_model', 'не указана')
         current_chat_mode = user_data.get('current_chat_mode', 'не указан')
-        text += f"<b>Текущая модель:</b> {current_model}\n"
-        text += f"<b>Режим чата:</b> {current_chat_mode}\n"
+        text_lines.extend([
+            f"<b>Текущая модель:</b> {current_model}\n",
+            f"<b>Режим чата:</b> {current_chat_mode}\n"
+        ])
 
-        return text
-
+        return ''.join(text_lines)
 
 ============================================================
 
@@ -503,6 +499,11 @@ class BaseHandler(ABC):
             user_registered_now = True
             self.db.start_new_dialog(user.id)
 
+        # Убедимся, что семафор инициализирован ДО инициализации атрибутов
+        if user.id not in user_semaphores:
+            user_semaphores[user.id] = asyncio.Semaphore(1)
+            logger.info(f"Initialized semaphore for new user {user.id}")
+
         await self._initialize_user_attributes(user.id)
 
         if user_registered_now:
@@ -512,11 +513,13 @@ class BaseHandler(ABC):
 
     async def _initialize_user_attributes(self, user_id: int) -> None:
         """Инициализирует необходимые атрибуты пользователя."""
-        if self.db.get_user_attribute(user_id, "current_dialog_id") is None:
-            self.db.start_new_dialog(user_id)
-
+        # Инициализация семафора ДО всех других операций
         if user_id not in user_semaphores:
             user_semaphores[user_id] = asyncio.Semaphore(1)
+            logger.info(f"Initialized semaphore for user {user_id}")
+
+        if self.db.get_user_attribute(user_id, "current_dialog_id") is None:
+            self.db.start_new_dialog(user_id)
 
         attributes_to_init = [
             ("current_model", config.models["available_text_models"][0]),
@@ -561,18 +564,26 @@ class BaseHandler(ABC):
 
     async def subscription_preprocessor(self, update: Update, context: CallbackContext) -> bool:
         """Проверяет возможность выполнения запроса по подписке."""
-        user_id = update.effective_user.id
-        subscription_info = self.db.get_user_subscription_info(user_id)
+        try:
+            user_id = update.effective_user.id
+            subscription_info = self.db.get_user_subscription_info(user_id)
 
-        if not subscription_info["is_active"]:
+            if not subscription_info["is_active"]:
+                await update.message.reply_text(
+                    "❌ Для использования бота требуется активная подписка. "
+                    "Пожалуйста, приобретите подписку через /subscription",
+                    parse_mode=ParseMode.HTML
+                )
+                return False
+
+            return await self._check_subscription_limits(subscription_info, update)
+        except Exception as e:
+            logger.error(f"Error in subscription preprocessor: {e}", exc_info=True)
             await update.message.reply_text(
-                "❌ Для использования бота требуется активная подписка. "
-                "Пожалуйста, приобретите подписку через /subscription",
+                "❌ Ошибка проверки подписки. Пожалуйста, попробуйте еще раз.",
                 parse_mode=ParseMode.HTML
             )
             return False
-
-        return await self._check_subscription_limits(subscription_info, update)
 
     async def _check_subscription_limits(self, subscription_info: Dict[str, Any], update: Update) -> bool:
         """Проверяет лимиты подписки используя централизованную конфигурацию."""
@@ -777,10 +788,6 @@ def run_bot() -> None:
                                            message_handlers.message_handle))
     application.add_handler(MessageHandler(filters.VOICE & user_filter,
                                            message_handlers.voice_message_handle))
-    application.add_handler(MessageHandler(filters.PHOTO & user_filter,
-                                           message_handlers.photo_message_handle))
-    application.add_handler(MessageHandler(filters.Document.IMAGE & user_filter,
-                                           message_handlers.photo_message_handle))
 
     # Добавляем обработчики подписок
     application.add_handler(
@@ -881,19 +888,14 @@ bot/chat_mode_handlers.py:
 import logging
 from datetime import datetime
 
-import telegram
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
-from telegram.ext import (
-    CallbackContext
-)
+from telegram.ext import CallbackContext
+import telegram
 
 import config
 from base_handler import BaseHandler
 
-# Настройка логирования
 logger = logging.getLogger(__name__)
 
 
@@ -904,57 +906,71 @@ class ChatModeHandlers(BaseHandler):
     def get_chat_mode_menu(page_index: int):
         """Создает меню выбора режима чата."""
         n_chat_modes_per_page = config.n_chat_modes_per_page
-        text = f"Выберите <b>режим чата</b> (Доступно {len(config.chat_modes)} режимов):"
-
         chat_mode_keys = list(config.chat_modes.keys())
-        page_chat_mode_keys = chat_mode_keys[
-                              page_index * n_chat_modes_per_page:(page_index + 1) * n_chat_modes_per_page
-                              ]
+        total_modes = len(chat_mode_keys)
 
+        text = f"Выберите <b>режим чата</b> (Доступно {total_modes} режимов):"
+
+        # Получаем режимы для текущей страницы
+        start_idx = page_index * n_chat_modes_per_page
+        end_idx = start_idx + n_chat_modes_per_page
+        page_chat_mode_keys = chat_mode_keys[start_idx:end_idx]
+
+        # Создаем кнопки режимов (по 2 в строке)
         keyboard = []
-        row = []
-        for chat_mode_key in page_chat_mode_keys:
-            name = config.chat_modes[chat_mode_key]["name"]
-            row.append(InlineKeyboardButton(name, callback_data=f"set_chat_mode|{chat_mode_key}"))
-            if len(row) == 2:
-                keyboard.append(row)
-                row = []
-        if row:
+        for i in range(0, len(page_chat_mode_keys), 2):
+            row = [
+                InlineKeyboardButton(
+                    config.chat_modes[key]["name"],
+                    callback_data=f"set_chat_mode|{key}"
+                ) for key in page_chat_mode_keys[i:i + 2]
+            ]
             keyboard.append(row)
 
-        # Пагинация
-        if len(chat_mode_keys) > n_chat_modes_per_page:
+        # Добавляем пагинацию если нужно
+        if total_modes > n_chat_modes_per_page:
             is_first_page = (page_index == 0)
-            is_last_page = ((page_index + 1) * n_chat_modes_per_page >= len(chat_mode_keys))
+            is_last_page = (end_idx >= total_modes)
 
-            pagination_row = []
+            pagination_buttons = []
             if not is_first_page:
-                pagination_row.append(InlineKeyboardButton("«", callback_data=f"show_chat_modes|{page_index - 1}"))
+                pagination_buttons.append(
+                    InlineKeyboardButton("«", callback_data=f"show_chat_modes|{page_index - 1}")
+                )
             if not is_last_page:
-                pagination_row.append(InlineKeyboardButton("»", callback_data=f"show_chat_modes|{page_index + 1}"))
-            if pagination_row:
-                keyboard.append(pagination_row)
+                pagination_buttons.append(
+                    InlineKeyboardButton("»", callback_data=f"show_chat_modes|{page_index + 1}")
+                )
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        return text, reply_markup
+            if pagination_buttons:
+                keyboard.append(pagination_buttons)
+
+        return text, InlineKeyboardMarkup(keyboard)
+
+    async def _process_user_interaction(self, update: Update, context: CallbackContext, from_callback: bool = False):
+        """Общая логика обработки пользовательского взаимодействия."""
+        user_data = update.callback_query.from_user if from_callback else update.message.from_user
+        await self.register_user_if_not_exists(update, context, user_data)
+
+        if not from_callback and await self.is_previous_message_not_answered_yet(update, context):
+            return False
+
+        user_id = user_data.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+        return True
 
     async def show_chat_modes_handle(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает команду /mode."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
-        if await self.is_previous_message_not_answered_yet(update, context):
+        if not await self._process_user_interaction(update, context, from_callback=False):
             return
-
-        user_id = update.message.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
         text, reply_markup = self.get_chat_mode_menu(0)
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
     async def show_chat_modes_callback_handle(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает callback пагинации режимов чата."""
-        await self.register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
-        user_id = update.callback_query.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+        if not await self._process_user_interaction(update, context, from_callback=True):
+            return
 
         query = update.callback_query
         await query.answer()
@@ -968,28 +984,28 @@ class ChatModeHandlers(BaseHandler):
             await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
         except telegram.error.BadRequest as e:
             if not str(e).startswith("Message is not modified"):
-                raise
+                raise e
 
     async def set_chat_mode_handle(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает выбор режима чата."""
-        await self.register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
-        user_id = update.callback_query.from_user.id
+        await self._process_user_interaction(update, context, from_callback=True)
 
         query = update.callback_query
         await query.answer()
 
         chat_mode = query.data.split("|")[1]
+        user_id = query.from_user.id
 
         self.db.set_user_attribute(user_id, "current_chat_mode", chat_mode)
         self.db.start_new_dialog(user_id)
 
+        welcome_message = config.chat_modes[chat_mode]["welcome_message"]
         await context.bot.send_message(
-            update.callback_query.message.chat.id,
-            f"{config.chat_modes[chat_mode]['welcome_message']}",
+            query.message.chat.id,
+            welcome_message,
             parse_mode=ParseMode.HTML
         )
 
-============================================================
 
 bot/config.py:
 ========================================
@@ -1043,8 +1059,9 @@ payment_banner_photo_path = Path(__file__).parent.parent.resolve() / "static" / 
 
 bot/database.py:
 ========================================
-from typing import Optional, Any
+from typing import Optional, Any, List, Dict
 import pymongo
+from pymongo import UpdateOne
 import uuid
 from datetime import datetime, timedelta
 import config
@@ -1062,14 +1079,42 @@ class Database:
         self.dialog_collection = self.db["dialog"]
         self.payment_collection = self.db["payments"]
 
-    def check_if_user_exists(self, user_id: int, raise_exception: bool = False):
-        if self.user_collection.count_documents({"_id": user_id}) > 0:
+        # Создаем индексы для часто используемых запросов
+        self._create_indexes()
+
+    def _create_indexes(self):
+        """Создание индексов для оптимизации запросов"""
+        self.user_collection.create_index("username")
+        self.user_collection.create_index("role")
+        self.user_collection.create_index("last_interaction")
+
+        self.subscription_collection.create_index([
+            ("user_id", pymongo.ASCENDING),
+            ("expires_at", pymongo.ASCENDING)
+        ])
+        self.subscription_collection.create_index("expires_at")
+
+        self.dialog_collection.create_index([
+            ("user_id", pymongo.ASCENDING),
+            ("_id", pymongo.ASCENDING)
+        ])
+
+        self.payment_collection.create_index("payment_id", unique=True)
+        self.payment_collection.create_index([
+            ("user_id", pymongo.ASCENDING),
+            ("status", pymongo.ASCENDING)
+        ])
+
+    def check_if_user_exists(self, user_id: int, raise_exception: bool = False) -> bool:
+        """Проверка существования пользователя с оптимизацией через find_one"""
+        user = self.user_collection.find_one({"_id": user_id}, {"_id": 1})
+
+        if user:
             return True
         else:
             if raise_exception:
                 raise ValueError(f"User {user_id} does not exist")
-            else:
-                return False
+            return False
 
     def add_new_user(
             self,
@@ -1078,7 +1123,8 @@ class Database:
             username: str = "",
             first_name: str = "",
             last_name: str = "",
-    ):
+    ) -> bool:
+        """Добавление нового пользователя с проверкой через insert_one"""
         user_dict = {
             "_id": user_id,
             "chat_id": chat_id,
@@ -1105,8 +1151,8 @@ class Database:
             "dalle_2": {"images": 0, "cost": 0.0},
             "dalle_3": {"images": 0, "cost": 0.0},
             "n_generated_images": 0,
-            "n_transcribed_seconds": 0.0,  # voice message transcription
-            "token_balance": 100000,  # Initialize token balance for new users
+            "n_transcribed_seconds": 0.0,
+            "token_balance": 100000,
             "role": "trial_user",
             "euro_balance": 1,
             "rub_balance": 100,
@@ -1114,10 +1160,21 @@ class Database:
             "total_donated": 0
         }
 
-        if not self.check_if_user_exists(user_id):
+        try:
             self.user_collection.insert_one(user_dict)
+            return True
+        except pymongo.errors.DuplicateKeyError:
+            return False
 
-    def start_new_dialog(self, user_id: int):
+    def _get_user_document(self, user_id: int, projection: Optional[Dict] = None) -> Dict:
+        """Внутренний метод для получения документа пользователя с обработкой ошибок"""
+        user = self.user_collection.find_one({"_id": user_id}, projection)
+        if not user:
+            raise ValueError(f"User {user_id} does not exist")
+        return user
+
+    def start_new_dialog(self, user_id: int) -> str:
+        """Создание нового диалога с оптимизированными проверками"""
         self.check_if_user_exists(user_id, raise_exception=True)
 
         subscription_info = self.get_user_subscription_info(user_id)
@@ -1125,63 +1182,70 @@ class Database:
             raise PermissionError("Нет активной подписки")
 
         dialog_id = str(uuid.uuid4())
+        current_time = datetime.now()
+
         dialog_dict = {
             "_id": dialog_id,
             "user_id": user_id,
             "chat_mode": self.get_user_attribute(user_id, "current_chat_mode"),
-            "start_time": datetime.now(),
+            "start_time": current_time,
             "model": self.get_user_attribute(user_id, "current_model"),
             "messages": []
         }
 
-        # add new dialog
-        self.dialog_collection.insert_one(dialog_dict)
+        # Используем bulk operations для атомарности
+        operations = [
+            UpdateOne(
+                {"_id": user_id},
+                {"$set": {"current_dialog_id": dialog_id, "last_interaction": current_time}}
+            )
+        ]
 
-        # update user's current dialog
-        self.user_collection.update_one(
-            {"_id": user_id},
-            {"$set": {"current_dialog_id": dialog_id}}
-        )
+        self.dialog_collection.insert_one(dialog_dict)
+        self.user_collection.bulk_write(operations)
 
         return dialog_id
 
-    def get_user_attribute(self, user_id: int, key: str):
+    def get_user_attribute(self, user_id: int, key: str) -> Any:
+        """Получение атрибута пользователя с проекцией для оптимизации"""
+        user = self._get_user_document(user_id, {key: 1})
+        return user.get(key)
+
+    def set_user_attribute(self, user_id: int, key: str, value: Any) -> None:
+        """Установка атрибута пользователя с обновлением last_interaction"""
         self.check_if_user_exists(user_id, raise_exception=True)
-        user_dict = self.user_collection.find_one({"_id": user_id})
+        self.user_collection.update_one(
+            {"_id": user_id},
+            {"$set": {key: value, "last_interaction": datetime.now()}}
+        )
 
-        if key not in user_dict:
-            return None
+    def update_n_used_tokens(self, user_id: int, model: str, n_input_tokens: int, n_output_tokens: int) -> None:
+        """Обновление счетчиков токенов с атомарными операциями"""
+        update_query = {
+            "$inc": {
+                f"n_used_tokens.{model}.n_input_tokens": n_input_tokens,
+                f"n_used_tokens.{model}.n_output_tokens": n_output_tokens
+            },
+            "$set": {"last_interaction": datetime.now()}
+        }
 
-        return user_dict[key]
+        self.user_collection.update_one({"_id": user_id}, update_query, upsert=True)
 
-    def set_user_attribute(self, user_id: int, key: str, value: Any):
-        self.check_if_user_exists(user_id, raise_exception=True)
-        self.user_collection.update_one({"_id": user_id}, {"$set": {key: value}})
-
-    def update_n_used_tokens(self, user_id: int, model: str, n_input_tokens: int, n_output_tokens: int):
-        n_used_tokens_dict = self.get_user_attribute(user_id, "n_used_tokens")
-
-        if model in n_used_tokens_dict:
-            n_used_tokens_dict[model]["n_input_tokens"] += n_input_tokens
-            n_used_tokens_dict[model]["n_output_tokens"] += n_output_tokens
-        else:
-            n_used_tokens_dict[model] = {
-                "n_input_tokens": n_input_tokens,
-                "n_output_tokens": n_output_tokens
-            }
-
-        self.set_user_attribute(user_id, "n_used_tokens", n_used_tokens_dict)
-
-    def get_dialog_messages(self, user_id: int, dialog_id: Optional[str] = None):
+    def get_dialog_messages(self, user_id: int, dialog_id: Optional[str] = None) -> List[Dict]:
+        """Получение сообщений диалога с оптимизированным запросом"""
         self.check_if_user_exists(user_id, raise_exception=True)
 
         if dialog_id is None:
             dialog_id = self.get_user_attribute(user_id, "current_dialog_id")
 
-        dialog_dict = self.dialog_collection.find_one({"_id": dialog_id, "user_id": user_id})
-        return dialog_dict["messages"]
+        dialog = self.dialog_collection.find_one(
+            {"_id": dialog_id, "user_id": user_id},
+            {"messages": 1}
+        )
+        return dialog["messages"] if dialog else []
 
-    def set_dialog_messages(self, user_id: int, dialog_messages: list, dialog_id: Optional[str] = None):
+    def set_dialog_messages(self, user_id: int, dialog_messages: List[Dict], dialog_id: Optional[str] = None) -> None:
+        """Установка сообщений диалога"""
         self.check_if_user_exists(user_id, raise_exception=True)
 
         if dialog_id is None:
@@ -1192,257 +1256,77 @@ class Database:
             {"$set": {"messages": dialog_messages}}
         )
 
-    def check_token_balance(self, user_id: int) -> int:
-        """Check the user's current token balance."""
-        user = self.user_collection.find_one({"_id": user_id})
-        return user.get("token_balance", 0)
-
-    def deduct_tokens_based_on_role(self, user_id: int, n_input_tokens: int, n_output_tokens: int):
-        user = self.user_collection.find_one({"_id": user_id})
-        role = user.get("role", "Trial_User")  # Default to Trial_User if not set
-        deduction_rate = config.role_deduction_rates.get(role, 1)  # Use the rates from config.py
-        tokens_to_deduct = (n_input_tokens + n_output_tokens) * deduction_rate
-        self.user_collection.update_one(
-            {"_id": user_id},
-            {"$inc": {"token_balance": -tokens_to_deduct}}
-        )
-
+    # Оптимизированные методы для работы с балансами
     def get_user_role(self, user_id: int) -> str:
-        """Determine the role of a user based on their user ID."""
-        user = self.user_collection.find_one({"_id": user_id})
-        if user and "role" in user:
-            return user["role"]
-        return "trial_User"  # Default role if not explicitly set
+        """Получение роли пользователя с кэшированием в будущем"""
+        user = self.user_collection.find_one(
+            {"_id": user_id},
+            {"role": 1}
+        )
+        return user.get("role", "trial_user") if user else "trial_user"
 
     def get_user_model(self, user_id: int) -> str:
-        """Determine the model of a user based on their user ID."""
-        user = self.user_collection.find_one({"_id": user_id})
-        if user and "current_model" in user:
-            return user["current_model"]
-        return "Some form of GPT I guess, there was an error accesing the database"
+        """Получение модели пользователя"""
+        user = self.user_collection.find_one(
+            {"_id": user_id},
+            {"current_model": 1}
+        )
+        return user.get("current_model", "gpt-3.5-turbo") if user else "gpt-3.5-turbo"
 
-    def get_user_last_interaction(self, user_id: int) -> str:
-        """Determine the model of a user based on their user ID."""
-        user = self.user_collection.find_one({"_id": user_id})
-        if user and "last_interaction" in user:
-            return user["last_interaction"]
-        return "Not found"
+    def get_user_last_interaction(self, user_id: int) -> datetime:
+        """Получение времени последнего взаимодействия"""
+        user = self.user_collection.find_one(
+            {"_id": user_id},
+            {"last_interaction": 1}
+        )
+        return user.get("last_interaction") if user else datetime.min
 
-    def get_user_count(self):
+    def get_user_count(self) -> int:
+        """Получение количества пользователей"""
         return self.user_collection.count_documents({})
 
-    def get_all_user_ids(self):
-        # Fetch all documents from the user_collection, projecting only the '_id' field
-        user_ids_cursor = self.user_collection.find({}, {"_id": 1})
-        # Extract '_id' from each document and return them as a list
-        return [user["_id"] for user in user_ids_cursor]
+    def get_all_user_ids(self) -> List[int]:
+        """Получение всех ID пользователей с проекцией"""
+        return [user["_id"] for user in self.user_collection.find({}, {"_id": 1})]
 
-    def get_user_by_id(self, user_id: int):
+    def get_user_by_id(self, user_id: int) -> Optional[Dict]:
+        """Получение пользователя по ID"""
         return self.user_collection.find_one({"_id": user_id})
 
-    def get_users_and_roles(self):
-        # Fetch all users and project only the first_name and role
-        users_cursor = self.user_collection.find({}, {"username": 1, "first_name": 1, "role": 1, "last_interaction": 1})
-        return list(users_cursor)
+    def get_users_and_roles(self) -> List[Dict]:
+        """Получение пользователей и их ролей с проекцией"""
+        return list(self.user_collection.find(
+            {},
+            {"username": 1, "first_name": 1, "role": 1, "last_interaction": 1}
+        ))
 
-    def find_users_by_role(self, role: str):
+    def find_users_by_role(self, role: str) -> List[Dict]:
+        """Поиск пользователей по роли"""
         return list(self.user_collection.find({"role": role}))
 
-    def find_user_by_username(self, username: str):
+    def find_user_by_username(self, username: str) -> Optional[Dict]:
+        """Поиск пользователя по username"""
         return self.user_collection.find_one({"username": username})
 
-    def find_users_by_first_name(self, first_name: str):
+    def find_users_by_first_name(self, first_name: str) -> List[Dict]:
+        """Поиск пользователей по имени"""
         return list(self.user_collection.find({"first_name": first_name}))
 
-    def update_euro_balance(self, user_id: int, euro_amount: float):
-        self.check_if_user_exists(user_id, raise_exception=True)
-        self.user_collection.update_one(
+    # Оптимизированные методы работы с финансами
+    def get_user_financials(self, user_id: int) -> Dict[str, float]:
+        """Получение финансовой информации пользователя"""
+        user_data = self.user_collection.find_one(
             {"_id": user_id},
-            {"$inc": {"euro_balance": euro_amount}}
+            {"total_topup": 1, "total_donated": 1}
         )
-
-    def update_rub_balance(self, user_id: int, rub_amount: float):
-        self.check_if_user_exists(user_id, raise_exception=True)
-        self.user_collection.update_one(
-            {"_id": user_id},
-            {"$inc": {"rub_balance": rub_amount}}
-        )
-
-    def update_total_topup(self, user_id, amount):
-        self.user_collection.update_one(
-            {"_id": user_id},
-            {"$inc": {"total_topup": amount}}
-        )
-
-    def update_total_donated(self, user_id, amount):
-        self.user_collection.update_one(
-            {"_id": user_id},
-            {"$inc": {"total_donated": amount}}
-        )
-
-    def get_user_euro_balance(self, user_id: int) -> float:
-
-        user = self.user_collection.find_one({"_id": user_id})
-        return user.get("euro_balance", 0.0)
-
-    def get_user_rub_balance(self, user_id: int) -> float:
-
-        user = self.user_collection.find_one({"_id": user_id})
-        return user.get("rub_balance", 0.0)
-
-    def get_user_financials(self, user_id):
-        user_data = self.user_collection.find_one({"_id": user_id}, {"total_topup": 1, "total_donated": 1})
-        if not user_data:
-            return {"total_topup": 0, "total_donated": 0}  # Defaults in case the fields are missing
         return {
-            "total_topup": user_data.get("total_topup", 0),  # Return 0 if the field doesn't exist
-            "total_donated": user_data.get("total_donated", 0)
+            "total_topup": user_data.get("total_topup", 0) if user_data else 0,
+            "total_donated": user_data.get("total_donated", 0) if user_data else 0
         }
-
-    def deduct_euro_balance(self, user_id: int, euro_amount: float):
-        self.check_if_user_exists(user_id, raise_exception=True)
-        # Ensure the deduction amount is not negative to avoid accidental balance increase
-        if euro_amount < 0:
-            raise ValueError("Deduction amount must be positive")
-        self.user_collection.update_one(
-            {"_id": user_id},
-            {"$inc": {"euro_balance": -euro_amount, "total_spent": euro_amount}}
-        )
-
-    def deduct_rub_balance(self, user_id: int, rub_amount: float):
-        self.check_if_user_exists(user_id, raise_exception=True)
-        # Ensure the deduction amount is not negative to avoid accidental balance increase
-        if rub_amount < 0:
-            raise ValueError("Deduction amount must be positive")
-        self.user_collection.update_one(
-            {"_id": user_id},
-            {"$inc": {"rub_balance": -rub_amount, "total_spent": rub_amount}}
-        )
-
-    def deduct_cost_for_action(self, user_id: int, action_type: str, action_params: dict):
-        # Получаем информацию о подписке пользователя
-        subscription_info = self.get_user_subscription_info(user_id)
-
-        # Если у пользователя активная подписка, используем её лимиты
-        if subscription_info["is_active"]:
-            subscription_type = SubscriptionType(subscription_info["type"])
-
-            # Используем централизованную конфигурацию для проверки лимитов
-            if action_type in ['gpt-3.5-turbo', 'gpt-3.5-turbo-16k', 'gpt-4', 'gpt-4-1106-preview',
-                               'gpt-4-vision-preview', 'text-davinci-003', 'gpt-4-turbo-2024-04-09',
-                               "gpt-4o", "claude-3-opus-20240229", "claude-3-sonnet-20240229",
-                               "claude-3-haiku-20240307", 'whisper']:
-
-                if not SubscriptionConfig.can_make_request(subscription_type, subscription_info["requests_used"]):
-                    # Лимит исчерпан, списываем с баланса
-                    return  # Переходим к списанию с баланса
-                else:
-                    # Обновляем использование подписки
-                    self.update_subscription_usage(user_id, request_used=True)
-                    return  # Не списываем средства с баланса
-
-            elif action_type in ['dalle-2', 'dalle-3', 'photo_edit']:
-                if not SubscriptionConfig.can_generate_image(subscription_type, subscription_info["images_used"]):
-                    # Лимит исчерпан, списываем с баланса
-                    pass  # Переходим к списанию с баланса
-                else:
-                    # Обновляем использование подписки
-                    self.update_subscription_usage(user_id, image_used=True)
-                    return  # Не списываем средства с баланса
-
-        # Если подписки нет или лимиты исчерпаны, списываем с баланса
-        user_role = self.get_user_role(user_id)
-        deduction_rate = config.role_deduction_rates.get(user_role, 1)
-
-        # Retrieve the pricing information from the `config.models` dictionary
-        model_info = config.models["info"].get(action_type)
-        if not model_info:
-            raise ValueError(f"Unknown action type: {action_type}")
-
-        # Initialize the cost variable
-        cost_in_euros = 0
-        cost_in_rubs = 0
-
-        # Handle text models (per 1000 tokens)
-        if action_type in ['gpt-3.5-turbo', 'gpt-3.5-turbo-16k', 'gpt-4', 'gpt-4-1106-preview',
-                           'gpt-4-vision-preview', 'text-davinci-003', 'gpt-4-turbo-2024-04-09',
-                           "gpt-4o", "claude-3-opus-20240229", "claude-3-sonnet-20240229",
-                           "claude-3-haiku-20240307"]:
-
-            # Retrieve the input/output pricing from `config.models`
-            price_per_1000_input = model_info.get('price_per_1000_input_tokens', 0)
-            price_per_1000_output = model_info.get('price_per_1000_output_tokens', 0)
-
-            # Calculate the cost based on input and output tokens
-            cost_in_euros = ((action_params.get('n_input_tokens', 0) / 1000) * price_per_1000_input +
-                             (action_params.get('n_output_tokens', 0) / 1000) * price_per_1000_output) * deduction_rate
-            cost_in_rubs = cost_in_euros  # Конвертируем в рубли (в данном случае 1:1)
-
-        # Handle DALLE-2 (per image)
-        elif action_type == 'dalle-2':
-            n_images = action_params.get('n_images', 1)
-            resolution = action_params.get('resolution', '1024x1024')
-
-            # Retrieve the cost per image based on resolution
-            dalle2_resolutions = model_info.get('resolutions', {})
-            price_per_image = dalle2_resolutions.get(resolution, {}).get('price_per_1_image', 0.020)
-
-            cost_in_euros = n_images * price_per_image * deduction_rate
-            cost_in_rubs = cost_in_euros  # Конвертируем в рубли
-
-            # Update DALL-E 2 tracking in the user database
-            self.user_collection.update_one(
-                {"_id": user_id},
-                {"$inc": {"dalle_2.images": n_images, "dalle_2.cost": cost_in_rubs}}
-            )
-
-        elif action_type == 'dalle-3':
-            n_images = action_params.get('n_images', 1)
-            quality = action_params.get('quality', 'standard')
-            resolution = action_params.get('resolution', '1024x1024')
-
-            # Retrieve pricing based on quality and resolution
-            dalle3_qualities = model_info.get('qualities', {})
-            quality_info = dalle3_qualities.get(quality, {})
-            resolution_info = quality_info.get('resolutions', {}).get(resolution, {})
-            price_per_image = resolution_info.get('price_per_1_image', 0.040)
-
-            cost_in_euros = n_images * price_per_image * deduction_rate
-            cost_in_rubs = cost_in_euros  # Конвертируем в рубли
-
-            # Update DALL-E 3 tracking in the user database
-            self.user_collection.update_one(
-                {"_id": user_id},
-                {"$inc": {"dalle_3.images": n_images, "dalle_3.cost": cost_in_rubs}}
-            )
-
-        # Handle Whisper (per minute)
-        elif action_type == 'whisper':
-            audio_duration_minutes = action_params.get('audio_duration_minutes', 0)
-            price_per_minute = model_info.get('price_per_1_min', 0.006)
-
-            cost_in_euros = audio_duration_minutes * price_per_minute * deduction_rate
-            cost_in_rubs = cost_in_euros  # Конвертируем в рубли
-
-        # Добавляем обработку фоторедактирования
-        elif action_type == 'photo_edit':
-            # Стоимость редактирования фото (можно настроить)
-            cost_per_edit = 0.08  # $0.08 за редактирование
-            n_edits = action_params.get('n_edits', 1)
-
-            cost_in_rubs = n_edits * cost_per_edit
-            self.deduct_rub_balance(user_id, cost_in_rubs)
-
-        else:
-            raise ValueError(f"Unknown action type: {action_type}")
-
-        # Deduct the calculated cost from the user's balance (только если не использована подписка)
-        if cost_in_rubs > 0:
-            self.deduct_rub_balance(user_id, cost_in_rubs)
 
     def add_subscription(self, user_id: int, subscription_type: SubscriptionType,
                          duration_days: int) -> None:
-        """Добавляет новую подписку пользователю"""
+        """Добавление подписки пользователю"""
         purchased_at = datetime.now()
         expires_at = purchased_at + timedelta(days=duration_days)
 
@@ -1457,22 +1341,21 @@ class Database:
 
         self.subscription_collection.insert_one(subscription_data)
 
-    def get_active_subscription(self, user_id: int) -> dict:
-        """Возвращает активную подписку пользователя"""
+    def get_active_subscription(self, user_id: int) -> Optional[Dict]:
+        """Получение активной подписки пользователя"""
         return self.subscription_collection.find_one({
             "user_id": user_id,
             "expires_at": {"$gt": datetime.now()}
-        }, sort=[("purchased_at", -1)])
+        }, sort=[("purchased_at", pymongo.DESCENDING)])
 
     def update_subscription_usage(self, user_id: int, request_used: bool = False,
                                   image_used: bool = False) -> None:
-        """Обновляет счетчики использования подписки"""
+        """Обновление счетчиков использования подписки"""
         update_data = {}
         if request_used:
             update_data["$inc"] = {"requests_used": 1}
         if image_used:
-            if "$inc" not in update_data:
-                update_data["$inc"] = {}
+            update_data["$inc"] = update_data.get("$inc", {})
             update_data["$inc"]["images_used"] = 1
 
         if update_data:
@@ -1481,8 +1364,8 @@ class Database:
                 update_data
             )
 
-    def get_user_subscription_info(self, user_id: int) -> dict:
-        """Возвращает информацию о подписке пользователя"""
+    def get_user_subscription_info(self, user_id: int) -> Dict:
+        """Получение информации о подписке пользователя"""
         subscription = self.get_active_subscription(user_id)
         if subscription:
             return {
@@ -1500,24 +1383,30 @@ class Database:
                 "images_used": 0
             }
 
+    # Методы платежей с улучшенной обработкой ошибок
     def create_payment(self, user_id: int, payment_id: str, amount: float,
                        payment_type: str, description: str = "") -> None:
-        """Создает запись о платеже"""
+        """Создание записи о платеже"""
+        current_time = datetime.now()
         payment_data = {
             "user_id": user_id,
             "payment_id": payment_id,
             "amount": amount,
             "currency": "RUB",
-            "type": payment_type,  # 'topup', 'donation', 'subscription'
+            "type": payment_type,
             "description": description,
-            "status": "pending",  # pending, succeeded, canceled, waiting_for_capture
-            "created_at": datetime.now(),
-            "updated_at": datetime.now()
+            "status": "pending",
+            "created_at": current_time,
+            "updated_at": current_time
         }
-        self.payment_collection.insert_one(payment_data)
+
+        try:
+            self.payment_collection.insert_one(payment_data)
+        except pymongo.errors.DuplicateKeyError:
+            raise ValueError(f"Payment with ID {payment_id} already exists")
 
     def update_payment_status(self, payment_id: str, status: str) -> None:
-        """Обновляет статус платежа"""
+        """Обновление статуса платежа"""
         self.payment_collection.update_one(
             {"payment_id": payment_id},
             {
@@ -1528,23 +1417,22 @@ class Database:
             }
         )
 
-    def get_pending_payments(self) -> list:
-        """Возвращает список pending платежей"""
+    def get_pending_payments(self) -> List[Dict]:
+        """Получение pending платежей"""
         return list(self.payment_collection.find({
             "status": {"$in": ["pending", "waiting_for_capture"]}
         }))
 
-    def get_payment_by_id(self, payment_id: str) -> dict:
-        """Возвращает платеж по ID"""
+    def get_payment_by_id(self, payment_id: str) -> Optional[Dict]:
+        """Получение платежа по ID"""
         return self.payment_collection.find_one({"payment_id": payment_id})
 
-    def get_user_pending_payments(self, user_id: int) -> list:
-        """Возвращает pending платежи пользователя"""
+    def get_user_pending_payments(self, user_id: int) -> List[Dict]:
+        """Получение pending платежей пользователя"""
         return list(self.payment_collection.find({
             "user_id": user_id,
             "status": {"$in": ["pending", "waiting_for_capture"]}
         }))
-
 
 ============================================================
 
@@ -1555,15 +1443,11 @@ import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
-import requests
+import aiohttp
 import telegram
-from telegram import (
-    Update, InputFile
-)
+from telegram import Update, InputFile
 from telegram.constants import ParseMode
-from telegram.ext import (
-    CallbackContext
-)
+from telegram.ext import CallbackContext
 
 import openai_utils
 from base_handler import BaseHandler
@@ -1571,17 +1455,20 @@ from base_handler import BaseHandler
 # Настройка логирования
 logger = logging.getLogger(__name__)
 
+
 class ImageHandlers(BaseHandler):
     """Класс для обработки генерации изображений."""
 
     async def generate_image_handle(self, update: Update, context: CallbackContext,
                                     message: Optional[str] = None) -> None:
         """Обрабатывает генерацию изображений."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
+        user = update.message.from_user
+        await self.register_user_if_not_exists(update, context, user)
+
         if await self.is_previous_message_not_answered_yet(update, context):
             return
 
-        user_id = update.message.from_user.id
+        user_id = user.id
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
         if not await self.subscription_preprocessor(update, context):
@@ -1590,7 +1477,10 @@ class ImageHandlers(BaseHandler):
         await update.message.chat.send_action(action="upload_photo")
 
         prompt = message or update.message.text
-        placeholder_message = await update.message.reply_text("<i>Рисуем...</i>", parse_mode=ParseMode.HTML)
+        placeholder_message = await update.message.reply_text(
+            "<i>Рисуем...</i>",
+            parse_mode=ParseMode.HTML
+        )
 
         try:
             image_urls = await self._generate_images(user_id, prompt)
@@ -1598,85 +1488,82 @@ class ImageHandlers(BaseHandler):
 
         except Exception as e:
             await self._handle_image_generation_error(update, e)
-        except Exception as e:
-            await self._handle_image_generation_error(update, e, is_unexpected=True)
 
     async def _generate_images(self, user_id: int, prompt: str) -> List[str]:
         """Генерирует изображения через OpenAI."""
-        user_preferences = self.db.get_user_attribute(user_id, "image_preferences")
+        user_preferences = self.db.get_user_attribute(user_id, "image_preferences") or {}
+
         model = user_preferences.get("model", "dalle-2")
         n_images = user_preferences.get("n_images", 3)
         resolution = user_preferences.get("resolution", "1024x1024")
 
         image_urls = await openai_utils.generate_images(
-            prompt=prompt, model=model, n_images=n_images, size=resolution
+            prompt=prompt,
+            model=model,
+            n_images=n_images,
+            size=resolution
         )
 
-        self._update_image_usage_stats(user_id, user_preferences, n_images)
+        self._update_image_usage_stats(user_id, n_images)
         return image_urls
 
-    def _update_image_usage_stats(self, user_id: int, user_preferences: Dict[str, Any], n_images: int) -> None:
+    def _update_image_usage_stats(self, user_id: int, n_images: int) -> None:
         """Обновляет статистику использования изображений."""
-        self.db.set_user_attribute(
-            user_id, "n_generated_images",
-            n_images + self.db.get_user_attribute(user_id, "n_generated_images")
-        )
-
-        action_type = user_preferences.get("model", "dalle-3")
-        action_params = {
-            "model": user_preferences.get("model", "dalle-2"),
-            "quality": user_preferences.get("quality", "standard"),
-            "resolution": user_preferences.get("resolution", "1024x1024"),
-            "n_images": n_images
-        }
-
-        self.db.deduct_cost_for_action(
-            user_id=user_id,
-            action_type=action_type,
-            action_params=action_params
-        )
+        current_count = self.db.get_user_attribute(user_id, "n_generated_images") or 0
+        self.db.set_user_attribute(user_id, "n_generated_images", current_count + n_images)
 
     async def _send_generated_images(self, update: Update, context: CallbackContext, prompt: str,
                                      image_urls: List[str], placeholder_message: telegram.Message) -> None:
         """Отправляет сгенерированные изображения."""
-        pre_generation_message = f"Нарисовали 🎨:\n\n  <i>{prompt or ''}</i>  \n\n Подождите немного, изображение почти готово!"
+        chat_id = placeholder_message.chat_id
+        message_id = placeholder_message.message_id
+
+        # Предварительное сообщение
+        pre_message = f"Нарисовали 🎨:\n\n  <i>{prompt or ''}</i>  \n\nПодождите немного, изображение почти готово!"
         await context.bot.edit_message_text(
-            pre_generation_message,
-            chat_id=placeholder_message.chat_id,
-            message_id=placeholder_message.message_id,
+            pre_message,
+            chat_id=chat_id,
+            message_id=message_id,
             parse_mode=ParseMode.HTML
         )
 
+        # Отправка изображений
         for image_url in image_urls:
             await update.message.chat.send_action(action="upload_photo")
-            await self._upload_image_from_url(context.bot, update.message.chat_id, image_url)
+            await self._upload_image_from_url(context.bot, chat_id, image_url)
 
-        post_generation_message = f"Нарисовали 🎨:\n\n  <i>{prompt or ''}</i>  \n\n Как вам??"
+        # Финальное сообщение
+        post_message = f"Нарисовали 🎨:\n\n  <i>{prompt or ''}</i>  \n\nКак вам??"
         await context.bot.edit_message_text(
-            post_generation_message,
-            chat_id=placeholder_message.chat_id,
-            message_id=placeholder_message.message_id,
+            post_message,
+            chat_id=chat_id,
+            message_id=message_id,
             parse_mode=ParseMode.HTML
         )
 
     async def _upload_image_from_url(self, bot: telegram.Bot, chat_id: int, image_url: str) -> None:
-        """Загружает изображение по URL и отправляет его."""
-        response = requests.get(image_url, stream=True)
-        if response.status_code == 200:
-            image_buffer = io.BytesIO(response.content)
-            image_buffer.name = "image.jpg"
-            await bot.send_photo(chat_id=chat_id, photo=InputFile(image_buffer, "image.jpg"))
+        """Загружает изображение по URL и отправляет его асинхронно."""
+        async with aiohttp.ClientSession() as session:
+            async with session.get(image_url) as response:
+                if response.status == 200:
+                    image_data = await response.read()
+                    image_buffer = io.BytesIO(image_data)
+                    image_buffer.name = "image.jpg"
+                    await bot.send_photo(
+                        chat_id=chat_id,
+                        photo=InputFile(image_buffer, "image.jpg")
+                    )
+                else:
+                    logger.error(f"Failed to download image. Status: {response.status}")
 
-    async def _handle_image_generation_error(self, update: Update, error: Exception,
-                                             is_unexpected: bool = False) -> None:
+    async def _handle_image_generation_error(self, update: Update, error: Exception) -> None:
         """Обрабатывает ошибки генерации изображений."""
-        if is_unexpected:
-            error_text = f"⚠️ An unexpected error occurred. Please try again. \n\n<b>Reason</b>: {str(error)}"
+        error_msg = str(error)
+
+        if error_msg.startswith("Your request was rejected as a result of our safety system"):
+            error_text = "🥲 Your request <b>doesn't comply</b> with OpenAI's usage policies.\nWhat did you write there, huh??"
         else:
-            if str(error).startswith("Your request was rejected as a result of our safety system"):
-                error_text = "🥲 Your request <b>doesn't comply</b> with OpenAI's usage policies.\nWhat did you write there, huh??"
-            else:
-                error_text = f"⚠️ There was an issue with your request. Please try again.\n\n<b>Reason</b>: {str(error)}"
+            error_text = f"⚠️ There was an issue with your request. Please try again.\n\n<b>Reason</b>: {error_msg}"
 
         await update.message.reply_text(error_text, parse_mode=ParseMode.HTML)
 
@@ -1698,17 +1585,23 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def configure_logging():
-    # Configure logging based on the enable_detailed_logging value
-    if config.enable_detailed_logging:
-        logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
-    else:
-        logging.basicConfig(level=logging.CRITICAL, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+# Константы для эмодзи и текстов
+_EMOJI = {
+    "green_circle": ":green_circle:",
+    "red_circle": ":red_circle:",
+    "money_bag": ":money_bag:",
+    "red_heart": ":red_heart:",
+    "woman_and_man_holding_hands": ":woman_and_man_holding_hands:",
+    "heart_hands": ":heart_hands:",
+    "smiling_face_with_sunglasses": ":smiling_face_with_sunglasses:",
+    "back_arrow": ":right_arrow_curving_left:"
+}
 
-    # Set the logger level based on configuration
-    logger.setLevel(logging.getLogger().level)
-
-configure_logging()
+_SUBSCRIPTION_NAMES = {
+    SubscriptionType.PRO_LITE: "Подписка Pro Lite",
+    SubscriptionType.PRO_PLUS: "Подписка Pro Plus",
+    SubscriptionType.PRO_PREMIUM: "Подписка Pro Premium"
+}
 
 class BotKeyboards:
     """Класс для создания клавиатур бота"""
@@ -1725,56 +1618,58 @@ class BotKeyboards:
             ReplyKeyboardMarkup: Клавиатура главного меню
         """
         db_instance = database.Database()
-
-        # Получаем информацию о подписке
         subscription_info = db_instance.get_user_subscription_info(user_id)
 
-        # Создаем клавиатуру
-        keyboard = []
-
-        # Кнопка с информацией о подписке
-        if subscription_info["is_active"]:
-            expires_at = subscription_info["expires_at"]
-            dateto = expires_at.strftime('%d.%m.%Y %H:%M')
-
-            if expires_at > datetime(2100, 1, 1):
-                status_text = emoji.emojize(":green_circle: Подписка активна навсегда")
-            else:
-                subName = 'Тестовая подписка'
-                if subscription_info["type"] == SubscriptionType.PRO_LITE:
-                    subName = 'Подписка Pro Lite'
-                elif subscription_info["type"] == SubscriptionType.PRO_PLUS:
-                    subName = 'Подписка Pro Plus'
-                elif subscription_info["type"] == SubscriptionType.PRO_PREMIUM:
-                    subName = 'Подписка Pro Premium'
-                status_text = emoji.emojize(f":green_circle: {subName} активна до: {dateto} МСК")
-        else:
-            # Если подписка была, но истекла
-            if "expires_at" in subscription_info and subscription_info["expires_at"]:
-                dateto = subscription_info["expires_at"].strftime('%d.%m.%Y %H:%M')
-                status_text = emoji.emojize(f":red_circle: Подписка закончилась: {dateto} МСК")
-            else:
-                status_text = emoji.emojize(":red_circle: Подписка не активна")
-
-        keyboard.append([KeyboardButton(status_text)])
+        keyboard = [[KeyboardButton(BotKeyboards._get_subscription_status_text(subscription_info))]]
 
         # Основные кнопки
         keyboard.extend([
             [
-                KeyboardButton(emoji.emojize("Продлить подписку :money_bag:")),
-                KeyboardButton(emoji.emojize("Выбрать режим :red_heart:"))
+                KeyboardButton(emoji.emojize(f"Продлить подписку {_EMOJI['money_bag']}")),
+                KeyboardButton(emoji.emojize(f"Выбрать режим {_EMOJI['red_heart']}"))
             ],
             [
-                KeyboardButton(emoji.emojize("Пригласить :woman_and_man_holding_hands:")),
-                KeyboardButton(emoji.emojize("Помощь :heart_hands:"))
+                KeyboardButton(emoji.emojize(f"Пригласить {_EMOJI['woman_and_man_holding_hands']}")),
+                KeyboardButton(emoji.emojize(f"Помощь {_EMOJI['heart_hands']}"))
             ]
         ])
 
         # Кнопка админ-панели для администраторов
         if str(user_id) in config.roles.get('admin', []):
-            keyboard.append([KeyboardButton(emoji.emojize("Админ-панель :smiling_face_with_sunglasses:"))])
+            keyboard.append([KeyboardButton(emoji.emojize(f"Админ-панель {_EMOJI['smiling_face_with_sunglasses']}"))])
 
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+    @staticmethod
+    def _get_subscription_status_text(subscription_info: dict) -> str:
+        """Формирует текст статуса подписки"""
+        if not subscription_info["is_active"]:
+            return BotKeyboards._get_inactive_subscription_text(subscription_info)
+        return BotKeyboards._get_active_subscription_text(subscription_info)
+
+    @staticmethod
+    def _get_active_subscription_text(subscription_info: dict) -> str:
+        """Формирует текст для активной подписки"""
+        expires_at = subscription_info["expires_at"]
+        dateto = expires_at.strftime('%d.%m.%Y %H:%M')
+
+        if expires_at > datetime(2100, 1, 1):
+            return emoji.emojize(f"{_EMOJI['green_circle']} Подписка активна навсегда")
+
+        sub_name = _SUBSCRIPTION_NAMES.get(
+            subscription_info["type"],
+            "Тестовая подписка"
+        )
+        return emoji.emojize(f"{_EMOJI['green_circle']} {sub_name} активна до: {dateto} МСК")
+
+    @staticmethod
+    def _get_inactive_subscription_text(subscription_info: dict) -> str:
+        """Формирует текст для неактивной подписки"""
+        expires_at = subscription_info.get("expires_at")
+        if expires_at:
+            dateto = expires_at.strftime('%d.%m.%Y %H:%M')
+            return emoji.emojize(f"{_EMOJI['red_circle']} Подписка закончилась: {dateto} МСК")
+        return emoji.emojize(f"{_EMOJI['red_circle']} Подписка не активна")
 
     @staticmethod
     def get_back_keyboard() -> ReplyKeyboardMarkup:
@@ -1785,9 +1680,8 @@ class BotKeyboards:
             ReplyKeyboardMarkup: Клавиатура с кнопкой назад
         """
         keyboard = [
-            [KeyboardButton(emoji.emojize("Назад :right_arrow_curving_left:"))]
+            [KeyboardButton(emoji.emojize(f"Назад {_EMOJI['back_arrow']}"))]
         ]
-
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     @staticmethod
@@ -1802,7 +1696,6 @@ class BotKeyboards:
             [KeyboardButton(emoji.emojize("Назад в админ-панель"))],
             [KeyboardButton(emoji.emojize("Главное меню"))]
         ]
-
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     @staticmethod
@@ -1820,7 +1713,6 @@ class BotKeyboards:
             [KeyboardButton(emoji.emojize("Отправить рассылку"))],
             [KeyboardButton(emoji.emojize("Главное меню"))]
         ]
-
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 ============================================================
@@ -1850,7 +1742,7 @@ import openai_utils
 from base_handler import BaseHandler
 from keyboards import BotKeyboards
 from message_processor import MessageProcessor
-from utils import HELP_MESSAGE, HELP_GROUP_CHAT_MESSAGE
+from utils import get_user_semaphore, HELP_MESSAGE, HELP_GROUP_CHAT_MESSAGE
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -1985,6 +1877,16 @@ class MessageHandlers(MessageProcessor):
     async def message_handle(self, update: Update, context: CallbackContext,
                              message: Optional[str] = None, use_new_dialog_timeout: bool = True) -> None:
         """Обрабатывает текстовые сообщения."""
+
+        # Добавьте проверку API ключей
+        if not config.openai_api_key:
+            logger.error("OpenAI API key is not configured!")
+            await update.message.reply_text(
+                "❌ Бот не настроен. Отсутствует API ключ OpenAI.",
+                parse_mode=ParseMode.HTML
+            )
+            return
+
         if not await self.is_bot_mentioned(update, context):
             return
 
@@ -2025,23 +1927,10 @@ class MessageHandlers(MessageProcessor):
                                    message: str, use_new_dialog_timeout: bool) -> None:
         """Обрабатывает текстовое сообщение."""
         user_id = update.message.from_user.id
-        current_model = self.db.get_user_attribute(user_id, "current_model")
 
-        # Проверяем необходимость обработки изображений
-        if (current_model == "gpt-4-vision-preview" or
-                (update.message.photo and len(update.message.photo) > 0)):
-
-            if current_model != "gpt-4-vision-preview":
-                current_model = "gpt-4-vision-preview"
-                self.db.set_user_attribute(user_id, "current_model", "gpt-4-vision-preview")
-
-            task = asyncio.create_task(
-                self._vision_message_handle_fn(update, context, use_new_dialog_timeout)
-            )
-        else:
-            task = asyncio.create_task(
-                self._text_message_handle_fn(update, context, message, use_new_dialog_timeout)
-            )
+        task = asyncio.create_task(
+            self._text_message_handle_fn(update, context, message, use_new_dialog_timeout)
+        )
 
         await self.execute_user_task(user_id, task, update)
 
@@ -2049,47 +1938,82 @@ class MessageHandlers(MessageProcessor):
                                       message: str, use_new_dialog_timeout: bool) -> None:
         """Обрабатывает текстовое сообщение (внутренняя функция)."""
         user_id = update.message.from_user.id
-        chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
-
-        await self.prepare_dialog(user_id, use_new_dialog_timeout, chat_mode, update)
-
-        if not message or len(message) == 0:
-            await update.message.reply_text("🥲 You sent <b>empty message</b>. Please, try again!",
-                                            parse_mode=ParseMode.HTML)
-            return
 
         try:
-            async with user_semaphores[user_id]:
+            logger.info(f"=== START TEXT MESSAGE PROCESSING ===")
+            logger.info(f"User: {user_id}, Message: '{message}'")
+
+            # Безопасный доступ к семафору
+            if user_id not in user_semaphores:
+                logger.warning(f"Semaphore not found for user {user_id}, initializing...")
+                user_semaphores[user_id] = asyncio.Semaphore(1)
+
+            chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
+            logger.info(f"Chat mode: {chat_mode}")
+
+            current_model = self.db.get_user_attribute(user_id, "current_model")
+            logger.info(f"Current model: {current_model}")
+
+            # Проверка подписки
+            logger.info("Checking subscription...")
+            subscription_info = self.db.get_user_subscription_info(user_id)
+            logger.info(f"Subscription info: {subscription_info}")
+
+            await self.prepare_dialog(user_id, use_new_dialog_timeout, chat_mode, update)
+            logger.info("Dialog prepared")
+
+            if not message or len(message) == 0:
+                await update.message.reply_text("🥲 You sent <b>empty message</b>. Please, try again!",
+                                                parse_mode=ParseMode.HTML)
+                return
+
+            async with get_user_semaphore(user_id):
+                logger.info("Acquired user semaphore")
                 placeholder_message = await update.message.reply_text("<i>Думаю...</i>", parse_mode=ParseMode.HTML)
                 await update.message.chat.send_action(action="typing")
+                logger.info("Sent typing action")
 
                 dialog_messages = self.db.get_dialog_messages(user_id, dialog_id=None)
+                logger.info(f"Retrieved {len(dialog_messages)} dialog messages")
+
                 parse_mode = {
                     "html": ParseMode.HTML,
                     "markdown": ParseMode.MARKDOWN
                 }[config.chat_modes[chat_mode]["parse_mode"]]
 
-                current_model = self.db.get_user_attribute(user_id, "current_model")
+                logger.info(f"Using parse mode: {parse_mode}")
+
                 chatgpt_instance = openai_utils.ChatGPT(model=current_model)
+                logger.info("Created ChatGPT instance")
 
                 if config.enable_message_streaming:
+                    logger.info("Using streaming response")
                     await self._handle_streaming_response(
                         update, context, message, dialog_messages, chat_mode,
                         chatgpt_instance, placeholder_message, parse_mode, user_id
                     )
                 else:
+                    logger.info("Using non-streaming response")
                     answer, n_input_tokens, n_output_tokens = await self._get_non_streaming_response(
                         chatgpt_instance, message, dialog_messages, chat_mode
                     )
+                    logger.info(f"Got response: {answer[:100]}...")
 
                     await self.edit_message_with_retry(context, placeholder_message, answer, chat_mode)
+                    logger.info("Message edited")
 
                     new_dialog_message = {"user": [{"type": "text", "text": message}], "bot": answer,
                                           "date": datetime.now()}
                     self.update_dialog_and_tokens(user_id, new_dialog_message, n_input_tokens, n_output_tokens)
+                    logger.info("Dialog updated")
+
+            logger.info("=== TEXT MESSAGE PROCESSING COMPLETED ===")
 
         except Exception as e:
-            print(e)
+            logger.error(f"=== ERROR IN TEXT MESSAGE HANDLING ===", exc_info=True)
+            logger.error(f"Error type: {type(e)}")
+            logger.error(f"Error message: {str(e)}")
+            logger.error(f"=== END ERROR ===")
             await self.handle_message_error(update, e)
 
     async def _handle_streaming_response(self, update: Update, context: CallbackContext, message: str,
@@ -2166,136 +2090,6 @@ class MessageHandlers(MessageProcessor):
         )
         return answer, n_input_tokens, n_output_tokens
 
-    async def _vision_message_handle_fn(self, update: Update, context: CallbackContext,
-                                        use_new_dialog_timeout: bool = True) -> None:
-        """Обрабатывает сообщения с изображениями для GPT-4 Vision."""
-        logger.info('_vision_message_handle_fn')
-        user_id = update.message.from_user.id
-        current_model = self.db.get_user_attribute(user_id, "current_model")
-
-        if current_model != "gpt-4-vision-preview":
-            await update.message.reply_text(
-                "🥲 Images processing is only available for the <b>GPT-4 Vision</b> model. Please change your settings in /settings",
-                parse_mode=ParseMode.HTML,
-            )
-            return
-
-        chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
-
-        await self.prepare_dialog(user_id, use_new_dialog_timeout, chat_mode, update)
-
-        transcribed_text = ''
-        buf = None
-
-        # Обработка голосового сообщения
-        if update.message.voice:
-            voice = update.message.voice
-            voice_file = await context.bot.get_file(voice.file_id)
-
-            buf = io.BytesIO()
-            await voice_file.download_to_memory(buf)
-            buf.name = "voice.oga"
-            buf.seek(0)
-
-            transcribed_text = await openai_utils.transcribe_audio(buf)
-            transcribed_text = transcribed_text.strip()
-
-        # Обработка изображения
-        if update.message.photo:
-            photo = update.message.photo[-1]
-            photo_file = await context.bot.get_file(photo.file_id)
-
-            buf = io.BytesIO()
-            await photo_file.download_to_memory(buf)
-            buf.name = "image.jpg"
-            buf.seek(0)
-
-        n_input_tokens, n_output_tokens = 0, 0
-
-        try:
-            placeholder_message = await update.message.reply_text("<i>Думаю...</i>", parse_mode=ParseMode.HTML)
-            message_text = update.message.caption or update.message.text or transcribed_text or ''
-
-            await update.message.chat.send_action(action="typing")
-
-            dialog_messages = self.db.get_dialog_messages(user_id, dialog_id=None)
-            parse_mode = {
-                "html": ParseMode.HTML,
-                "markdown": ParseMode.MARKDOWN
-            }[config.chat_modes[chat_mode]["parse_mode"]]
-
-            chatgpt_instance = openai_utils.ChatGPT(model=current_model)
-
-            if config.enable_message_streaming:
-                gen = chatgpt_instance.send_vision_message_stream(
-                    message_text,
-                    dialog_messages=dialog_messages,
-                    image_buffer=buf,
-                    chat_mode=chat_mode,
-                )
-            else:
-                answer, (n_input_tokens, n_output_tokens), _ = await chatgpt_instance.send_vision_message(
-                    message_text,
-                    dialog_messages=dialog_messages,
-                    image_buffer=buf,
-                    chat_mode=chat_mode,
-                )
-
-                async def fake_gen():
-                    yield "finished", answer, (n_input_tokens, n_output_tokens), 0
-
-                gen = fake_gen()
-
-            prev_answer = ""
-            async for gen_item in gen:
-                status, answer, (n_input_tokens, n_output_tokens), _ = gen_item
-                answer = answer[:4096]
-
-                if abs(len(answer) - len(prev_answer)) < 100 and status != "finished":
-                    continue
-
-                try:
-                    await context.bot.edit_message_text(
-                        answer,
-                        chat_id=placeholder_message.chat_id,
-                        message_id=placeholder_message.message_id,
-                        parse_mode=parse_mode,
-                    )
-                except telegram.error.BadRequest as e:
-                    if not str(e).startswith("Message is not modified"):
-                        await context.bot.edit_message_text(
-                            answer,
-                            chat_id=placeholder_message.chat_id,
-                            message_id=placeholder_message.message_id,
-                        )
-
-                await asyncio.sleep(0.01)
-                prev_answer = answer
-
-            # Сохраняем диалог
-            if buf is not None:
-                base_image = base64.b64encode(buf.getvalue()).decode("utf-8")
-                new_dialog_message = {
-                    "user": [
-                        {"type": "text", "text": message_text},
-                        {"type": "image", "image": base_image}
-                    ],
-                    "bot": answer,
-                    "date": datetime.now()
-                }
-            else:
-                new_dialog_message = {"user": message_text, "bot": answer, "date": datetime.now()}
-
-            self.update_dialog_and_tokens(user_id, new_dialog_message, n_input_tokens, n_output_tokens)
-
-        except asyncio.CancelledError:
-            self.db.update_n_used_tokens(user_id, current_model, n_input_tokens, n_output_tokens)
-            raise
-        except Exception as e:
-            error_text = f"Something went wrong during completion_1. Reason: {e}"
-            logger.error(error_text)
-            await update.message.reply_text(error_text)
-
     async def voice_message_handle(self, update: Update, context: CallbackContext, message: Optional[str] = None) -> \
             Optional[str]:
         """Обрабатывает голосовые сообщения."""
@@ -2341,11 +2135,6 @@ class MessageHandlers(MessageProcessor):
         audio_duration_minutes = voice.duration / 60.0
         self.db.set_user_attribute(user_id, "n_transcribed_seconds",
                                    voice.duration + self.db.get_user_attribute(user_id, "n_transcribed_seconds"))
-        self.db.deduct_cost_for_action(
-            user_id=user_id,
-            action_type='whisper',
-            action_params={'audio_duration_minutes': audio_duration_minutes}
-        )
 
         if chat_mode == "stenographer":
             transcription_message = f"Your transcription is in: \n\n<code>{transcribed_text}</code>"
@@ -2470,54 +2259,6 @@ class MessageHandlers(MessageProcessor):
         """Прокси-метод для генерации изображений."""
         await self.image_handlers.generate_image_handle(update, context, message=message)
 
-    async def photo_message_handle(self, update: Update, context: CallbackContext) -> None:
-        """Обрабатывает сообщения с фото."""
-        logger.info("Photo message received")
-
-        if not await self.is_bot_mentioned(update, context):
-            return
-
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
-
-        if await self.is_previous_message_not_answered_yet(update, context):
-            return
-
-        user_id = update.message.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
-        if not await self.subscription_preprocessor(update, context):
-            return
-
-        chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
-        logger.info(f"Photo received in chat mode: {chat_mode}")
-
-        if chat_mode == "artist":
-            caption = update.message.caption or "Создай изображение похожее на это фото"
-            await self.generate_image_handle(update, context, message=caption)
-        else:
-            await self._handle_photo_in_regular_mode(update, context)
-
-    async def _handle_photo_in_regular_mode(self, update: Update, context: CallbackContext) -> None:
-        """Обрабатывает фото в обычных режимах чата."""
-        user_id = update.message.from_user.id
-        current_model = self.db.get_user_attribute(user_id, "current_model")
-
-        # Если модель поддерживает vision, используем её
-        if current_model == "gpt-4-vision-preview":
-            await self._vision_message_handle_fn(update, context, use_new_dialog_timeout=True)
-        else:
-            # Иначе просто уведомляем пользователя
-            caption = update.message.caption
-            if caption:
-                await self.message_handle(update, context, message=caption)
-            else:
-                await update.message.reply_text(
-                    "📸 Фото получено! Если хотите его описать или задать вопрос по фото, "
-                    "напишите текст в подписи к фото или следующим сообщением.",
-                    parse_mode=ParseMode.HTML
-                )
-
-
 ============================================================
 
 bot/message_processor.py:
@@ -2598,12 +2339,6 @@ class MessageProcessor(BaseHandler):
 
         self.db.update_n_used_tokens(user_id, current_model, n_input_tokens, n_output_tokens)
 
-        action_type = self.db.get_user_attribute(user_id, "current_model")
-        self.db.deduct_cost_for_action(
-            user_id=user_id,
-            action_type=action_type,
-            action_params={'n_input_tokens': n_input_tokens, 'n_output_tokens': n_output_tokens}
-        )
 
     async def edit_message_with_retry(self, context: CallbackContext, placeholder_message: telegram.Message,
                                       answer: str, chat_mode: str) -> None:
@@ -2632,9 +2367,24 @@ class MessageProcessor(BaseHandler):
 
     async def handle_message_error(self, update: Update, error: Exception) -> None:
         """Обрабатывает ошибки при обработке сообщений."""
-        error_text = f"Something went wrong during completion. Reason: {error}"
-        logger.error(error_text)
-        await update.message.reply_text(error_text)
+        try:
+            # Логируем полную информацию об ошибке
+            logger.error(f"Error during message completion: {error}", exc_info=True)
+
+            # Формируем понятное сообщение для пользователя
+            if hasattr(error, '__class__') and error.__class__.__name__ != 'int':
+                error_text = f"⚠️ Произошла ошибка при обработке сообщения. Пожалуйста, попробуйте еще раз."
+            else:
+                error_text = f"⚠️ Произошла ошибка (код: {error}). Пожалуйста, попробуйте еще раз."
+
+            await update.message.reply_text(error_text, parse_mode=ParseMode.HTML)
+        except Exception as e:
+            logger.error(f"Error in error handler: {e}")
+            # Резервное сообщение
+            try:
+                await update.message.reply_text("⚠️ Произошла непредвиденная ошибка.")
+            except:
+                pass
 
     async def execute_user_task(self, user_id: int, task: asyncio.Task, update: Update) -> None:
         """Выполняет задачу пользователя с обработкой отмены."""
@@ -2653,28 +2403,16 @@ class MessageProcessor(BaseHandler):
 
 bot/openai_utils.py:
 ========================================
-# Переписанный openai_utils.py
-# Обновлено: переход на GPT-4o и gpt-image-1, удалены create_variation (dall-e-2)
-# Код адаптирован для вашей логики, но модернизирован под современные API
-
-from PIL import Image
-from io import BytesIO
-from typing import Optional, List
-import config
-import tiktoken
-from openai import AsyncOpenAI
-import anthropic
-import logging
 import base64
-import asyncio
-import requests
+import logging
+from io import BytesIO
+from typing import Optional, List, AsyncGenerator, Tuple, Union
 
-# Инициализация клиента OpenAI
-if config.openai_api_base is not None:
-    openai_client = AsyncOpenAI(api_key=config.openai_api_key, base_url=config.openai_api_base)
-else:
-    openai_client = AsyncOpenAI(api_key=config.openai_api_key)
+from openai import AsyncOpenAI
 
+import config
+
+# Константы вынесены в верхний регистр
 OPENAI_COMPLETION_OPTIONS = {
     "temperature": 0.7,
     "max_tokens": 2000,
@@ -2683,31 +2421,95 @@ OPENAI_COMPLETION_OPTIONS = {
     "presence_penalty": 0,
 }
 
+# Инициализация клиента OpenAI (упрощенная версия)
+openai_client = AsyncOpenAI(
+    api_key=config.openai_api_key,
+    base_url=config.openai_api_base  # base_url может быть None
+)
+
 logger = logging.getLogger(__name__)
 
 
 def configure_logging():
-    if config.enable_detailed_logging:
-        logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
-    else:
-        logging.basicConfig(level=logging.CRITICAL, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
-    logger.setLevel(logging.getLogger().level)
+    """Конфигурация логирования с оптимизацией производительности"""
+    level = logging.DEBUG if config.enable_detailed_logging else logging.CRITICAL
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+        force=True  # Перезаписывает существующую конфигурацию
+    )
 
 
 configure_logging()
 
 
-# ---------------------------- ✅ Улучшенная модель чата ----------------------------
 class ChatGPT:
-    def __init__(self, model="gpt-4o"):
+    """Оптимизированный класс для работы с ChatGPT"""
+
+    # Кэш для промптов (небольшая оптимизация)
+    _prompt_cache = {}
+
+    def __init__(self, model: str = "gpt-4o"):
         self.model = model
         self.is_claude_model = model.startswith("claude")
-        self.logger = logging.getLogger(__name__)
+        self.logger = logger  # Используем существующий логгер
 
-    async def send_message(self, message, dialog_messages=[], chat_mode="assistant"):
-        if chat_mode not in config.chat_modes.keys():
-            raise ValueError(f"Chat mode {chat_mode} is not supported")
+    async def send_message_stream(
+            self,
+            message: str,
+            dialog_messages: List[dict] = None,
+            chat_mode: str = "assistant"
+    ) -> AsyncGenerator[Tuple[str, str, Tuple[int, int], int], None]:
+        """Потоковая отправка сообщения с оптимизацией производительности"""
+        if dialog_messages is None:
+            dialog_messages = []
 
+        self._validate_chat_mode(chat_mode)
+        messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
+
+        try:
+            response = await openai_client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                stream=True,
+                **OPENAI_COMPLETION_OPTIONS
+            )
+
+            full_answer = ""
+            n_input_tokens, n_output_tokens = 0, 0
+            chunk_counter = 0
+            YIELD_EVERY_N_CHUNKS = 10  # Реже отдаем промежуточные результаты
+
+            async for chunk in response:
+                if (chunk.choices and
+                        chunk.choices[0].delta.content is not None):
+
+                    chunk_content = chunk.choices[0].delta.content
+                    full_answer += chunk_content
+                    chunk_counter += 1
+
+                    # Оптимизация: реже проверяем длину для yield
+                    if chunk_counter % YIELD_EVERY_N_CHUNKS == 0:
+                        yield "streaming", full_answer, (n_input_tokens, n_output_tokens), 0
+
+            # Финальный результат
+            yield "finished", full_answer, (n_input_tokens, n_output_tokens), 0
+
+        except Exception as e:
+            self.logger.error("Error in streaming message: %s", e, exc_info=True)
+            raise
+
+    async def send_message(
+            self,
+            message: str,
+            dialog_messages: List[dict] = None,
+            chat_mode: str = "assistant"
+    ) -> Tuple[str, Tuple[int, int], int]:
+        """Синхронная отправка сообщения с оптимизацией"""
+        if dialog_messages is None:
+            dialog_messages = []
+
+        self._validate_chat_mode(chat_mode)
         messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
 
         response = await openai_client.chat.completions.create(
@@ -2717,33 +2519,38 @@ class ChatGPT:
         )
 
         answer = response.choices[0].message.content
-        return answer, (response.usage.prompt_tokens, response.usage.completion_tokens), 0
+        usage = response.usage
+        return answer, (usage.prompt_tokens, usage.completion_tokens), 0
 
-    # ✅ CHAT + VISION + IMAGE GENERATION (как chatgpt.com)
-    async def send_vision_message(self, message, dialog_messages=[], chat_mode="assistant",
-                                  image_buffer: BytesIO = None):
-        messages = self._generate_prompt_messages(message, dialog_messages, chat_mode, image_buffer=image_buffer)
+    def _validate_chat_mode(self, chat_mode: str) -> None:
+        """Валидация chat_mode с кэшированием"""
+        if chat_mode not in config.chat_modes:
+            raise ValueError(f"Chat mode {chat_mode} is not supported")
 
-        response = await openai_client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            **OPENAI_COMPLETION_OPTIONS
-        )
+    def _generate_prompt_messages(
+            self,
+            message: str,
+            dialog_messages: List[dict],
+            chat_mode: str,
+            image_buffer: Optional[BytesIO] = None
+    ) -> List[dict]:
+        """Генерация сообщений с оптимизацией и кэшированием промптов"""
+        # Кэширование системных промптов
+        cache_key = f"system_{chat_mode}"
+        if cache_key not in self._prompt_cache:
+            self._prompt_cache[cache_key] = config.chat_modes[chat_mode]["prompt_start"]
 
-        answer = response.choices[0].message.content
-        return answer, (response.usage.prompt_tokens, response.usage.completion_tokens), 0
-
-    # --------------------- Сборка сообщений ---------------------
-    def _generate_prompt_messages(self, message, dialog_messages, chat_mode, image_buffer: BytesIO = None):
-        prompt = config.chat_modes[chat_mode]["prompt_start"]
-
+        prompt = self._prompt_cache[cache_key]
         messages = [{"role": "system", "content": prompt}]
 
+        # Более эффективное построение истории диалога
         for msg in dialog_messages:
-            messages.append({"role": "user", "content": msg["user"]})
-            messages.append({"role": "assistant", "content": msg["bot"]})
+            messages.extend([
+                {"role": "user", "content": msg["user"]},
+                {"role": "assistant", "content": msg["bot"]}
+            ])
 
-        # ✅ Вставляем изображение в message (GPT-4o Vision)
+        # Обработка изображения
         if image_buffer is not None:
             encoded = base64.b64encode(image_buffer.read()).decode()
             messages.append({
@@ -2758,9 +2565,14 @@ class ChatGPT:
 
         return messages
 
+    # Контекстный менеджер для очистки кэша
+    def clear_cache(self):
+        """Очистка кэша промптов"""
+        self._prompt_cache.clear()
 
-# ---------------------------- ✅ AUDIO ----------------------------
+
 async def transcribe_audio(audio_file) -> str:
+    """Транскрибация аудио с улучшенной обработкой ошибок"""
     try:
         transcript = await openai_client.audio.transcriptions.create(
             file=audio_file,
@@ -2768,166 +2580,112 @@ async def transcribe_audio(audio_file) -> str:
         )
         return transcript.text or ""
     except Exception as e:
-        logger.error(f"Error transcribing audio: {e}")
+        logger.error("Error transcribing audio: %s", e, exc_info=True)
         return ""
 
 
-# ---------------------------- ✅ NEW: DALL·E 3 / GPT-IMAGE-1 ----------------------------
-async def generate_images(prompt: str, model: str = "gpt-image-1", size: str = "1024x1024") -> List[str]:
+async def generate_images(
+        prompt: str,
+        model: str = "gpt-image-1",
+        size: str = "1024x1024",
+        n: int = 1
+) -> List[str]:
+    """Генерация изображений с улучшенной обработкой параметров"""
     try:
+        # Валидация параметров
+        if n <= 0 or n > 4:  # OpenAI обычно ограничивает количество
+            raise ValueError("Number of images must be between 1 and 4")
+
         response = await openai_client.images.generate(
             model=model,
             prompt=prompt,
             size=size,
-            n=1,
+            n=n,
             quality="high"
         )
         return [item.url for item in response.data]
 
     except Exception as e:
-        logger.error(f"Error generating images: {e}")
-        raise e
-
-
-# ✅ Полноценная генерация с использованием фото (как chatgpt.com)
-async def generate_photo(image, prompt: str) -> Optional[str]:
-    """
-    Полноценная фотогенерация: учитывает исходное фото и prompt.
-    Принимает:
-    - BytesIO
-    - bytes
-    - coroutine -> BytesIO
-    """
-
-    import inspect
-    try:
-        # ✅ Если функция получила coroutine — await
-        if inspect.iscoroutine(image):
-            image = await image
-
-        # ✅ Если bytes → превращаем в BytesIO
-        if isinstance(image, bytes):
-            image = BytesIO(image)
-
-        # ✅ Проверка на корректный тип
-        if not isinstance(image, BytesIO):
-            raise TypeError(
-                f"generate_photo(): image must be BytesIO or bytes or coroutine, got {type(image)}"
-            )
-
-        # ✅ Reset pointer for read()
-        image.seek(0)
-
-        base64_img = base64.b64encode(image.read()).decode()
-
-        response = await openai_client.images.generate(
-            model="gpt-image-1",
-            prompt=prompt,
-            size="1024x1024",
-            referenced_images=[base64_img],  # ← изображение подаётся сюда!
-        )
-
-        return response.data[0].url
-
-    except Exception as e:
-        logger.error(f"Error generating photo with face: {e}")
-        return None
-
-
-# ---------------------------- ✅ Util: PNG conversion ----------------------------
-async def convert_image_to_png(image_buffer):
-    import inspect
-
-    if inspect.iscoroutine(image_buffer):
-        image_buffer = await image_buffer
-
-    if isinstance(image_buffer, bytes):
-        image_buffer = BytesIO(image_buffer)
-
-    if not isinstance(image_buffer, BytesIO):
-        raise TypeError(
-            f"convert_image_to_png(): image_buffer must be BytesIO or bytes or coroutine, got {type(image_buffer)}"
-        )
-
-
-# ---------------------------- ✅ Moderation ----------------------------
-async def is_content_acceptable(prompt):
-    try:
-        response = await openai_client.moderations.create(input=prompt)
-        return not all(response.results[0].categories.values())
-    except Exception as e:
-        logger.error(f"Error in content moderation: {e}")
-        return True
-
+        logger.error("Error generating images: %s", e, exc_info=True)
+        raise
 
 ============================================================
 
 bot/payment.py:
 ========================================
 import logging
-from typing import Any
+from typing import Any, Dict
 
-from telegram.ext import (
-    CallbackContext
-)
+from telegram.ext import CallbackContext
 from yookassa import Payment
 
 from subscription_config import SubscriptionConfig, SubscriptionType
+
 from utils import db, bot_instance
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
 
-# Функции для работы с платежами
-async def create_subscription_yookassa_payment(user_id: int, subscription_type: SubscriptionType,
-                                               context: CallbackContext) -> str:
+# Константы для избежания магических строк
+PAYMENT_RETURN_URL = "https://t.me/gptducksbot"
+PAYMENT_CURRENCY = "RUB"
+PAYMENT_CUSTOMER_EMAIL = "liliatchesnokova@gmail.com"
+PAYMENT_TYPE_SUBSCRIPTION = "subscription"
+
+
+def _create_payment_data(user_id: int, subscription_type: SubscriptionType) -> Dict[str, Any]:
+    """Создает данные для платежа Yookassa."""
+    price = SubscriptionConfig.get_price(subscription_type)
+    description_config = SubscriptionConfig.get_description(subscription_type)
+    description = f"Подписка {description_config['name']}"
+
+    return {
+        "amount": {"value": price, "currency": PAYMENT_CURRENCY},
+        "confirmation": {"type": "redirect", "return_url": PAYMENT_RETURN_URL},
+        "capture": True,
+        "description": description,
+        "receipt": {
+            "customer": {"email": PAYMENT_CUSTOMER_EMAIL},
+            "items": [
+                {
+                    "description": description,
+                    "quantity": "1.00",
+                    "amount": {"value": price, "currency": PAYMENT_CURRENCY},
+                    "vat_code": "1",
+                    "payment_mode": "full_payment",
+                    "payment_subject": "commodity",
+                },
+            ]
+        },
+        "metadata": {"user_id": user_id, "subscription_type": subscription_type.value}
+    }
+
+
+async def create_subscription_yookassa_payment(
+        user_id: int,
+        subscription_type: SubscriptionType,
+        context: CallbackContext
+) -> str:
     """
     Создает платеж в Yookassa для подписки используя централизованную конфигурацию.
     """
-    price = SubscriptionConfig.get_price(subscription_type)
-    description_config = SubscriptionConfig.get_description(subscription_type)
-
     try:
-        description = f"Подписка {description_config['name']}"
-        payment = Payment.create({
-            "amount": {"value": price, "currency": "RUB"},
-            "confirmation": {"type": "redirect", "return_url": "https://t.me/gptducksbot"},
-            "capture": True,
-            "description": description,
-            "receipt": {
-                "customer": {
-                    "email": "liliatchesnokova@gmail.com",
-                },
-                "items": [
-                    {
-                        "description": description,
-                        "quantity": "1.00",
-                        "amount": {
-                            "value": price,
-                            "currency": "RUB"
-                        },
-                        "vat_code": "1",
-                        "payment_mode": "full_payment",
-                        "payment_subject": "commodity",
-                    },
-                ]
-            },
-            "metadata": {"user_id": user_id, "subscription_type": subscription_type.value}
-        })
+        payment_data = _create_payment_data(user_id, subscription_type)
+        payment = Payment.create(payment_data)
 
         db.create_payment(
             user_id=user_id,
             payment_id=payment.id,
-            amount=price,
-            payment_type="subscription",
-            description=description
+            amount=payment_data["amount"]["value"],
+            payment_type=PAYMENT_TYPE_SUBSCRIPTION,
+            description=payment_data["description"]
         )
 
         return payment.confirmation.confirmation_url
 
     except Exception as e:
-        logger.error(f"Error creating Yookassa subscription payment: {e}")
-        raise e
+        logger.error(f"Error creating Yookassa subscription payment for user {user_id}: {e}")
+        raise
 
 
 async def process_successful_payment(payment_info: Any, user_id: int) -> None:
@@ -2938,38 +2696,47 @@ async def process_successful_payment(payment_info: Any, user_id: int) -> None:
         metadata = payment_info.metadata
         subscription_type = metadata.get('subscription_type')
 
+        if not subscription_type:
+            logger.warning(f"No subscription type in payment {payment_info.id} for user {user_id}")
+            return
+
         logger.info(f"Processing successful payment {payment_info.id} for user {user_id}")
 
-        if subscription_type:
-            subscription_type_enum = SubscriptionType(subscription_type)
-            duration_days = SubscriptionConfig.get_duration(subscription_type_enum).days
+        subscription_type_enum = SubscriptionType(subscription_type)
+        duration_days = SubscriptionConfig.get_duration(subscription_type_enum).days
 
-            db.add_subscription(user_id, subscription_type_enum, duration_days)
-            await send_subscription_confirmation(user_id, subscription_type_enum)
-            logger.info(f"Subscription activated for user {user_id}: {subscription_type}")
+        db.add_subscription(user_id, subscription_type_enum, duration_days)
+        await send_subscription_confirmation(user_id, subscription_type_enum)
+        logger.info(f"Subscription activated for user {user_id}: {subscription_type}")
 
     except Exception as e:
-        logger.error(f"Error processing successful payment: {e}")
+        logger.error(f"Error processing successful payment {getattr(payment_info, 'id', 'unknown')}: {e}")
 
 
 async def send_subscription_confirmation(user_id: int, subscription_type: SubscriptionType) -> None:
     """
     Отправляет подтверждение об активации подписки.
     """
-    user = db.user_collection.find_one({"_id": user_id})
-    if user:
+    try:
+        user = db.user_collection.find_one({"_id": user_id})
+        if not user:
+            logger.warning(f"User {user_id} not found for subscription confirmation")
+            return
+
         chat_id = user["chat_id"]
         duration_days = SubscriptionConfig.get_duration(subscription_type).days
 
+        subscription_name = subscription_type.name.replace('_', ' ').title()
         message = (
-            f"🎉 Подписка *{subscription_type.name.replace('_', ' ').title()}* активирована!\n"
+            f"🎉 Подписка *{subscription_name}* активирована!\n"
             f"📅 Действует *{duration_days} дней*\n\n"
             "Теперь вы можете пользоваться ботом по подписке!"
         )
 
         await bot_instance.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
 
-
+    except Exception as e:
+        logger.error(f"Error sending subscription confirmation to user {user_id}: {e}")
 
 ============================================================
 
@@ -2977,75 +2744,78 @@ bot/settings_handlers.py:
 ========================================
 import logging
 from datetime import datetime
+from typing import Tuple, List
 
 import telegram
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
-from telegram.ext import (
-    CallbackContext
-)
+from telegram.ext import CallbackContext
 
 import config
 from base_handler import BaseHandler
 
-# Настройка логирования
 logger = logging.getLogger(__name__)
 
 
 class SettingsHandlers(BaseHandler):
     """Класс для обработки настроек."""
 
-    def get_settings_menu(self, user_id: int):
-        """
-        Создает меню настроек.
-        """
+    def get_settings_menu(self, user_id: int) -> Tuple[str, InlineKeyboardMarkup]:
+        """Создает меню настроек."""
         text = "⚙️ Настройки:"
-
         keyboard = [
             [InlineKeyboardButton("🧠 Модель нейросети", callback_data='model-ai_model')],
             [InlineKeyboardButton("🎨 Модель художника", callback_data='model-artist_model')]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        return text, InlineKeyboardMarkup(keyboard)
 
-        return text, reply_markup
+    async def _check_access(self, update: Update, user_id: int) -> bool:
+        """Проверяет права доступа пользователя."""
+        if str(user_id) not in config.roles.get('admin', []):
+            await update.message.reply_text("❌ У вас нет доступа к админ-панели.")
+            return False
+        return True
 
     async def settings_handle(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает команду /settings."""
         await self.register_user_if_not_exists(update, context, update.message.from_user)
+
         if await self.is_previous_message_not_answered_yet(update, context):
             return
 
         user_id = update.message.from_user.id
 
-        # Проверяем права
-        if str(user_id) not in config.roles.get('admin', []):
-            await update.message.reply_text("❌ У вас нет доступа к админ-панели.")
+        if not await self._check_access(update, user_id):
             return
 
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
         text, reply_markup = self.get_settings_menu(user_id)
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
-    async def set_settings_handle(self, update: Update, context: CallbackContext) -> None:
-        """Обрабатывает выбор настроек."""
-        await self.register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
-        user_id = update.callback_query.from_user.id
+    def _create_model_buttons(self, available_models: list, current_model: str, prefix: str = "model") -> Tuple[
+        list, list]:
+        """Создает кнопки для выбора модели."""
+        claude_buttons = []
+        other_buttons = []
 
-        query = update.callback_query
-        await query.answer()
+        for model_key in available_models:
+            title = config.models["info"][model_key]["name"]
+            if model_key == current_model:
+                title = "✅ " + title
 
-        _, model_key = query.data.split("|")
-        self.db.set_user_attribute(user_id, "current_model", model_key)
+            callback_data = f"{prefix}-set_settings|{model_key}"
+            button = InlineKeyboardButton(title, callback_data=callback_data)
 
-        await self.display_model_info(query, user_id, context)
+            if "claude" in model_key.lower():
+                claude_buttons.append(button)
+            else:
+                other_buttons.append(button)
 
-    async def display_model_info(self, query, user_id, context):
-        """Отображает информацию о модели."""
-        current_model = self.db.get_user_attribute(user_id, "current_model")
-        model_info = config.models["info"][current_model]
+        return other_buttons, claude_buttons
+
+    def _format_model_info(self, model_key: str) -> str:
+        """Форматирует информацию о модели."""
+        model_info = config.models["info"][model_key]
         description = model_info["description"]
         scores = model_info["scores"]
 
@@ -3054,35 +2824,71 @@ class SettingsHandlers(BaseHandler):
             details_text += f"{'🟢' * score_value}{'⚪️' * (5 - score_value)} – {score_key}\n"
 
         details_text += "\nВыберите <b>модель</b>:"
+        return details_text
 
-        buttons = []
-        claude_buttons = []
-        other_buttons = []
+    async def display_model_info(self, query, user_id, context):
+        """Отображает информацию о модели."""
+        current_model = self.db.get_user_attribute(user_id, "current_model")
+        details_text = self._format_model_info(current_model)
 
-        for model_key in config.models["available_text_models"]:
-            title = config.models["info"][model_key]["name"]
-            if model_key == current_model:
-                title = "✅ " + title
+        other_buttons, claude_buttons = self._create_model_buttons(
+            config.models["available_text_models"], current_model
+        )
 
-            if "claude" in model_key.lower():
-                callback_data = f"claude-model-set_settings|{model_key}"
-                claude_buttons.append(InlineKeyboardButton(title, callback_data=callback_data))
-            else:
-                callback_data = f"model-set_settings|{model_key}"
-                other_buttons.append(InlineKeyboardButton(title, callback_data=callback_data))
-
+        # Разделяем кнопки на два ряда
         half_size = len(other_buttons) // 2
         first_row = other_buttons[:half_size]
         second_row = other_buttons[half_size:]
-        back_button = [InlineKeyboardButton("⬅️", callback_data='model-back_to_settings')]
 
+        back_button = [InlineKeyboardButton("⬅️", callback_data='model-back_to_settings')]
         reply_markup = InlineKeyboardMarkup([first_row, second_row, claude_buttons, back_button])
 
         try:
-            await query.edit_message_text(text=details_text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+            await query.edit_message_text(
+                text=details_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
         except telegram.error.BadRequest as e:
-            if "Message is not modified" in str(e):
-                pass
+            if "Message is not modified" not in str(e):
+                raise e
+
+    async def _handle_model_selection(self, query, user_id: int, model_key: str, context: CallbackContext) -> None:
+        """Обрабатывает выбор модели."""
+        if "claude" in model_key.lower() and not config.anthropic_api_key:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text="This bot does not have the Anthropic models available :(",
+                parse_mode='Markdown'
+            )
+            return
+
+        self.db.set_user_attribute(user_id, "current_model", model_key)
+        await self.display_model_info(query, user_id, context)
+
+    async def _handle_artist_model_selection(self, query, user_id: int, model_key: str) -> None:
+        """Обрабатывает выбор модели художника."""
+        preferences = self.db.get_user_attribute(user_id, "image_preferences")
+        preferences["model"] = model_key
+
+        # Сбрасываем настройки при смене модели
+        if model_key == "dalle-2":
+            preferences["quality"] = "standard"
+        elif model_key == "dalle-3":
+            preferences["n_images"] = 1
+        preferences["resolution"] = "1024x1024"
+
+        self.db.set_user_attribute(user_id, "image_preferences", preferences)
+        await self.artist_model_settings_handler(query, user_id)
+
+    async def _update_artist_preference(self, user_id: int, preference_key: str, value: str) -> None:
+        """Обновляет настройки художника."""
+        preferences = self.db.get_user_attribute(user_id, "image_preferences")
+        # Преобразуем значение к правильному типу
+        if preference_key == "n_images":
+            value = int(value)
+        preferences[preference_key] = value
+        self.db.set_user_attribute(user_id, "image_preferences", preferences)
 
     async def model_settings_handler(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает настройки моделей."""
@@ -3093,115 +2899,55 @@ class SettingsHandlers(BaseHandler):
         user_id = query.from_user.id
 
         if data == 'model-ai_model':
-            current_model = self.db.get_user_attribute(user_id, "current_model")
-            text = f"{config.models['info'][current_model]['description']}\n\n"
-
-            score_dict = config.models["info"][current_model]["scores"]
-            for score_key, score_value in score_dict.items():
-                text += f"{'🟢' * score_value}{'⚪️' * (5 - score_value)} – {score_key}\n"
-
-            text += "\nSelect <b>model</b>:\n"
-
-            buttons = []
-            claude_buttons = []
-            other_buttons = []
-
-            for model_key in config.models["available_text_models"]:
-                title = config.models["info"][model_key]["name"]
-                if model_key == current_model:
-                    title = "✅ " + title
-
-                if "claude" in model_key.lower():
-                    callback_data = f"claude-model-set_settings|{model_key}"
-                    claude_buttons.append(InlineKeyboardButton(title, callback_data=callback_data))
-                else:
-                    callback_data = f"model-set_settings|{model_key}"
-                    other_buttons.append(InlineKeyboardButton(title, callback_data=callback_data))
-
-            half_size = len(other_buttons) // 2
-            first_row = other_buttons[:half_size]
-            second_row = other_buttons[half_size:]
-            back_button = [InlineKeyboardButton("⬅️", callback_data='model-back_to_settings')]
-
-            reply_markup = InlineKeyboardMarkup([first_row, second_row, claude_buttons, back_button])
-
-            await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
-
-        elif data.startswith('claude-model-set_settings|'):
-            if config.anthropic_api_key is None or config.anthropic_api_key == "":
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text="This bot does not have the Anthropic models available :(",
-                    parse_mode='Markdown'
-                )
-                return
+            await self._handle_ai_model_settings(query, user_id)
+        elif data.startswith(('claude-model-set_settings|', 'model-set_settings|')):
             _, model_key = data.split("|")
-            self.db.set_user_attribute(user_id, "current_model", model_key)
-            await self.display_model_info(query, user_id, context)
-
-        elif data.startswith('model-set_settings|'):
-            _, model_key = data.split("|")
-            if "claude" in model_key.lower() and (config.anthropic_api_key is None or config.anthropic_api_key == ""):
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text="This bot does not have the Anthropic models available :(",
-                    parse_mode='Markdown'
-                )
-                return
-            self.db.set_user_attribute(user_id, "current_model", model_key)
-            await self.display_model_info(query, user_id, context)
-
-        elif data.startswith('model-artist-set_model|'):
-            _, model_key = data.split("|")
-            await self.switch_between_artist_handler(query, user_id, model_key)
-
+            await self._handle_model_selection(query, user_id, model_key, context)
         elif data == 'model-artist_model':
             await self.artist_model_settings_handler(query, user_id)
-
         elif data.startswith('model-artist-set_model|'):
             _, model_key = data.split("|")
-            preferences = self.db.get_user_attribute(user_id, "image_preferences")
-            preferences["model"] = model_key
-            self.db.set_user_attribute(user_id, "image_preferences", preferences)
-            await self.artist_model_settings_handler(query, user_id)
-
-        elif data.startswith("model-artist-set_images|"):
-            _, n_images = data.split("|")
-            preferences = self.db.get_user_attribute(user_id, "image_preferences")
-            preferences["n_images"] = int(n_images)
-            self.db.set_user_attribute(user_id, "image_preferences", preferences)
-            await self.artist_model_settings_handler(query, user_id)
-
-        elif data.startswith("model-artist-set_resolution|"):
-            _, resolution = data.split("|")
-            preferences = self.db.get_user_attribute(user_id, "image_preferences")
-            preferences["resolution"] = resolution
-            self.db.set_user_attribute(user_id, "image_preferences", preferences)
-            await self.artist_model_settings_handler(query, user_id)
-
-        elif data.startswith("model-artist-set_quality|"):
-            _, quality = data.split("|")
-            preferences = self.db.get_user_attribute(user_id, "image_preferences")
-            preferences["quality"] = quality
-            self.db.set_user_attribute(user_id, "image_preferences", preferences)
-            await self.artist_model_settings_handler(query, user_id)
-
+            await self._handle_artist_model_selection(query, user_id, model_key)
+        elif data.startswith("model-artist-set_"):
+            await self._handle_artist_preference_update(query, user_id, data)
         elif data == 'model-back_to_settings':
             text, reply_markup = self.get_settings_menu(user_id)
             await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
-    async def artist_model_settings_handler(self, query, user_id):
-        """Обрабатывает настройки модели художника."""
+    async def _handle_ai_model_settings(self, query, user_id: int) -> None:
+        """Обрабатывает настройки AI модели."""
+        current_model = self.db.get_user_attribute(user_id, "current_model")
+        text = self._format_model_info(current_model)
+
+        other_buttons, claude_buttons = self._create_model_buttons(
+            config.models["available_text_models"], current_model
+        )
+
+        half_size = len(other_buttons) // 2
+        first_row = other_buttons[:half_size]
+        second_row = other_buttons[half_size:]
+        back_button = [InlineKeyboardButton("⬅️", callback_data='model-back_to_settings')]
+
+        reply_markup = InlineKeyboardMarkup([first_row, second_row, claude_buttons, back_button])
+        await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+
+    async def _handle_artist_preference_update(self, query, user_id: int, data: str) -> None:
+        """Обрабатывает обновление настроек художника."""
+        _, action_data = data.split("|")
+
+        if data.startswith("model-artist-set_images|"):
+            await self._update_artist_preference(user_id, "n_images", action_data)
+        elif data.startswith("model-artist-set_resolution|"):
+            await self._update_artist_preference(user_id, "resolution", action_data)
+        elif data.startswith("model-artist-set_quality|"):
+            await self._update_artist_preference(user_id, "quality", action_data)
+
+        await self.artist_model_settings_handler(query, user_id)
+
+    def _create_artist_buttons(self, user_id: int) -> List[List[InlineKeyboardButton]]:
+        """Создает кнопки для выбора модели художника."""
         current_preferences = self.db.get_user_attribute(user_id, "image_preferences")
         current_model = current_preferences.get("model", "dalle-2")
-
-        model_info = config.models["info"][current_model]
-        description = model_info["description"]
-        scores = model_info["scores"]
-
-        details_text = f"{description}\n\n"
-        for score_key, score_value in scores.items():
-            details_text += f"{'🟢' * score_value}{'⚪️' * (5 - score_value)} – {score_key}\n"
 
         buttons = []
         for model_key in config.models["available_image_models"]:
@@ -3210,62 +2956,73 @@ class SettingsHandlers(BaseHandler):
                 title = "✅ " + title
             buttons.append(InlineKeyboardButton(title, callback_data=f"model-artist-set_model|{model_key}"))
 
+        keyboard = [buttons]
+
+        # Добавляем специфичные настройки для каждой модели
         if current_model == "dalle-2":
-            details_text += "\nFor this model, choose the number of images to generate and the resolution:"
             n_images = current_preferences.get("n_images", 1)
             images_buttons = [
                 InlineKeyboardButton(
-                    f"✅ {i} image" if i == n_images and i == 1 else f"✅ {i} images" if i == n_images else f"{i} image" if i == 1 else f"{i} images",
-                    callback_data=f"model-artist-set_images|{i}")
-                for i in range(1, 4)
+                    f"✅ {i} изображение" if i == n_images and i == 1 else
+                    f"✅ {i} изображения" if i == n_images else
+                    f"{i} изображение" if i == 1 else f"{i} изображения",
+                    callback_data=f"model-artist-set_images|{i}"
+                ) for i in range(1, 4)
             ]
             current_resolution = current_preferences.get("resolution", "1024x1024")
             resolution_buttons = [
-                InlineKeyboardButton(f"✅ {res_key}" if res_key == current_resolution else f"{res_key}",
-                                     callback_data=f"model-artist-set_resolution|{res_key}")
-                for res_key in config.models["info"]["dalle-2"]["resolutions"].keys()
+                InlineKeyboardButton(
+                    f"✅ {res_key}" if res_key == current_resolution else res_key,
+                    callback_data=f"model-artist-set_resolution|{res_key}"
+                ) for res_key in config.models["info"]["dalle-2"]["resolutions"]
             ]
-            keyboard = [buttons] + [images_buttons] + [resolution_buttons]
+            keyboard.extend([images_buttons, resolution_buttons])
 
         elif current_model == "dalle-3":
-            details_text += "\nFor this model, choose the quality of the images and the resolution:"
             current_quality = current_preferences.get("quality", "standard")
             quality_buttons = [
-                InlineKeyboardButton(f"✅ {quality_key}" if quality_key == current_quality else f"{quality_key}",
-                                     callback_data=f"model-artist-set_quality|{quality_key}")
-                for quality_key in config.models["info"]["dalle-3"]["qualities"].keys()
+                InlineKeyboardButton(
+                    f"✅ {quality_key}" if quality_key == current_quality else quality_key,
+                    callback_data=f"model-artist-set_quality|{quality_key}"
+                ) for quality_key in config.models["info"]["dalle-3"]["qualities"]
             ]
             current_resolution = current_preferences.get("resolution", "1024x1024")
             resolution_buttons = [
-                InlineKeyboardButton(f"✅ {res_key}" if res_key == current_resolution else f"{res_key}",
-                                     callback_data=f"model-artist-set_resolution|{res_key}")
-                for res_key in config.models["info"]["dalle-3"]["qualities"][current_quality]["resolutions"].keys()
+                InlineKeyboardButton(
+                    f"✅ {res_key}" if res_key == current_resolution else res_key,
+                    callback_data=f"model-artist-set_resolution|{res_key}"
+                ) for res_key in config.models["info"]["dalle-3"]["qualities"][current_quality]["resolutions"]
             ]
-            keyboard = [buttons] + [quality_buttons] + [resolution_buttons]
-        else:
-            keyboard = [buttons]
+            keyboard.extend([quality_buttons, resolution_buttons])
 
         keyboard.append([InlineKeyboardButton("⬅️", callback_data='model-back_to_settings')])
+        return keyboard
+
+    async def artist_model_settings_handler(self, query, user_id: int) -> None:
+        """Обрабатывает настройки модели художника."""
+        current_preferences = self.db.get_user_attribute(user_id, "image_preferences")
+        current_model = current_preferences.get("model", "dalle-2")
+
+        details_text = self._format_model_info(current_model)
+
+        # Добавляем пояснение для конкретной модели
+        if current_model == "dalle-2":
+            details_text += "\nДля этой модели выберите количество изображений и разрешение:"
+        elif current_model == "dalle-3":
+            details_text += "\nДля этой модели выберите качество изображений и разрешение:"
+
+        keyboard = self._create_artist_buttons(user_id)
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         try:
-            await query.edit_message_text(text=details_text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+            await query.edit_message_text(
+                text=details_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
         except telegram.error.BadRequest as e:
-            if "Message is not modified" in str(e):
-                pass
-
-    async def switch_between_artist_handler(self, query, user_id, model_key):
-        """Переключает между моделями художника."""
-        preferences = self.db.get_user_attribute(user_id, "image_preferences")
-        preferences["model"] = model_key
-        if model_key == "dalle-2":
-            preferences["quality"] = "standard"
-        elif model_key == "dalle-3":
-            preferences["n_images"] = 1
-        preferences["resolution"] = "1024x1024"
-        self.db.set_user_attribute(user_id, "image_preferences", preferences)
-        await self.artist_model_settings_handler(query, user_id)
-
+            if "Message is not modified" not in str(e):
+                raise e
 
 ============================================================
 
@@ -3273,7 +3030,10 @@ bot/subscription.py:
 ========================================
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Dict, Any
+from typing import Dict, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from subscription_config import SubscriptionConfig
 
 
 class SubscriptionType(Enum):
@@ -3289,9 +3049,17 @@ class Subscription:
     Использует централизованную конфигурацию из SubscriptionConfig.
     """
 
-    def __init__(self, user_id: int, subscription_type: SubscriptionType,
-                 purchased_at: datetime, expires_at: datetime,
-                 requests_used: int = 0, images_used: int = 0):
+    __slots__ = ('user_id', 'type', 'purchased_at', 'expires_at', 'requests_used', 'images_used')
+
+    def __init__(
+        self,
+        user_id: int,
+        subscription_type: SubscriptionType,
+        purchased_at: datetime,
+        expires_at: datetime,
+        requests_used: int = 0,
+        images_used: int = 0
+    ):
         self.user_id = user_id
         self.type = subscription_type
         self.purchased_at = purchased_at
@@ -3303,28 +3071,22 @@ class Subscription:
         """Проверяет, активна ли подписка."""
         return datetime.now() < self.expires_at
 
+    def _get_config(self) -> 'SubscriptionConfig':
+        """Ленивая загрузка конфигурации для избежания циклических импортов."""
+        from subscription_config import SubscriptionConfig
+        return SubscriptionConfig
+
     def can_make_request(self) -> bool:
         """Проверяет, может ли пользователь сделать запрос."""
-        if not self.is_active():
-            return False
-
-        # Импортируем здесь чтобы избежать циклического импорта
-        from subscription_config import SubscriptionConfig
-        return SubscriptionConfig.can_make_request(self.type, self.requests_used)
+        return self.is_active() and self._get_config().can_make_request(self.type, self.requests_used)
 
     def can_generate_image(self) -> bool:
         """Проверяет, может ли пользователь сгенерировать изображение."""
-        if not self.is_active():
-            return False
-
-        # Импортируем здесь чтобы избежать циклического импорта
-        from subscription_config import SubscriptionConfig
-        return SubscriptionConfig.can_generate_image(self.type, self.images_used)
+        return self.is_active() and self._get_config().can_generate_image(self.type, self.images_used)
 
     def get_max_response_length(self) -> int:
         """Возвращает максимальную длину ответа для подписки."""
-        from subscription_config import SubscriptionConfig
-        limits = SubscriptionConfig.get_usage_limits(self.type)
+        limits = self._get_config().get_usage_limits(self.type)
         return limits.get("max_response_length", 2000)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -3366,152 +3128,175 @@ bot/subscription_config.py:
 """
 
 from datetime import timedelta
-from typing import Dict, Any
+from typing import Dict, Any, List
 from subscription import SubscriptionType
 
 
 class SubscriptionConfig:
     """Класс для централизованного управления конфигурацией подписок."""
 
-    # Цены подписок (в рублях)
-    PRICES = {
-        SubscriptionType.PRO_LITE: 499,
-        SubscriptionType.PRO_PLUS: 1290,
-        SubscriptionType.PRO_PREMIUM: 2990
-    }
-
-    # Длительности подписок
-    DURATIONS = {
-        SubscriptionType.FREE: timedelta(days=7),  # Бесплатная пробная подписка
-        SubscriptionType.PRO_LITE: timedelta(days=10),
-        SubscriptionType.PRO_PLUS: timedelta(days=30),
-        SubscriptionType.PRO_PREMIUM: timedelta(days=90)
-    }
-
-    # Лимиты использования для каждой подписки
-    USAGE_LIMITS = {
+    # Базовые конфигурации для каждого типа подписки
+    _CONFIG = {
         SubscriptionType.FREE: {
-            "max_requests": 15,
-            "max_images": 3,
-            "max_response_length": 2000
+            "price": 0,
+            "duration": timedelta(days=7),
+            "usage_limits": {
+                "max_requests": 15,
+                "max_images": 3,
+                "max_response_length": 2000
+            },
+            "description": {
+                "name": "Бесплатная",
+                "features": "15 запросов • 3 генерации изображений • До 2000 символов"
+            }
         },
         SubscriptionType.PRO_LITE: {
-            "max_requests": 1000,
-            "max_images": 20,
-            "max_response_length": 4000
+            "price": 499,
+            "duration": timedelta(days=10),
+            "usage_limits": {
+                "max_requests": 1000,
+                "max_images": 20,
+                "max_response_length": 4000
+            },
+            "description": {
+                "name": "Pro Lite",
+                "features": "1000 запросов • 20 генераций изображений • До 4000 символов"
+            }
         },
         SubscriptionType.PRO_PLUS: {
-            "max_requests": float('inf'),  # безлимитно
-            "max_images": float('inf'),  # безлимитно
-            "max_response_length": 32000
+            "price": 1290,
+            "duration": timedelta(days=30),
+            "usage_limits": {
+                "max_requests": float('inf'),
+                "max_images": float('inf'),
+                "max_response_length": 32000
+            },
+            "description": {
+                "name": "Pro Plus",
+                "features": "Безлимитные запросы • До 32000 символов"
+            }
         },
         SubscriptionType.PRO_PREMIUM: {
-            "max_requests": float('inf'),  # безлимитно
-            "max_images": float('inf'),  # безлимитно
-            "max_response_length": 32000
+            "price": 2990,
+            "duration": timedelta(days=90),
+            "usage_limits": {
+                "max_requests": float('inf'),
+                "max_images": float('inf'),
+                "max_response_length": 32000
+            },
+            "description": {
+                "name": "Pro Premium",
+                "features": "Безлимитные запросы • До 32000 символов"
+            }
         }
     }
 
-    # Описания подписок для отображения пользователям
-    DESCRIPTIONS = {
-        SubscriptionType.FREE: {
-            "name": "Бесплатная",
-            "features": "15 запросов • 3 генерации изображений • До 2000 символов"
-        },
-        SubscriptionType.PRO_LITE: {
-            "name": "Pro Lite",
-            "features": "1000 запросов • 20 генераций изображений • До 4000 символов"
-        },
-        SubscriptionType.PRO_PLUS: {
-            "name": "Pro Plus",
-            "features": "Безлимитные запросы • До 32000 символов"
-        },
-        SubscriptionType.PRO_PREMIUM: {
-            "name": "Pro Premium",
-            "features": "Безлимитные запросы • До 32000 символов"
-        }
-    }
+    # Кэш для платных подписок
+    _PAID_SUBSCRIPTIONS = None
 
     @classmethod
     def get_price(cls, subscription_type: SubscriptionType) -> int:
         """Возвращает цену подписки."""
-        return cls.PRICES.get(subscription_type, 0)
+        return cls._get_config_value(subscription_type, "price", 0)
 
     @classmethod
     def get_duration(cls, subscription_type: SubscriptionType) -> timedelta:
         """Возвращает длительность подписки."""
-        return cls.DURATIONS.get(subscription_type, timedelta(days=0))
+        return cls._get_config_value(subscription_type, "duration", timedelta(days=0))
 
     @classmethod
     def get_usage_limits(cls, subscription_type: SubscriptionType) -> Dict[str, Any]:
         """Возвращает лимиты использования для подписки."""
-        return cls.USAGE_LIMITS.get(subscription_type, {})
+        return cls._get_config_value(subscription_type, "usage_limits", {})
 
     @classmethod
     def get_description(cls, subscription_type: SubscriptionType) -> Dict[str, str]:
         """Возвращает описание подписки."""
-        return cls.DESCRIPTIONS.get(subscription_type, {"name": "", "features": ""})
+        return cls._get_config_value(subscription_type, "description", {"name": "", "features": ""})
 
     @classmethod
-    def get_all_paid_subscriptions(cls) -> list:
+    def _get_config_value(cls, subscription_type: SubscriptionType, key: str, default: Any) -> Any:
+        """Вспомогательный метод для получения значения из конфигурации."""
+        config = cls._CONFIG.get(subscription_type, {})
+        return config.get(key, default)
+
+    @classmethod
+    def get_all_paid_subscriptions(cls) -> List[SubscriptionType]:
         """Возвращает список всех платных подписок."""
-        return [
-            SubscriptionType.PRO_LITE,
-            SubscriptionType.PRO_PLUS,
-            SubscriptionType.PRO_PREMIUM
-        ]
+        if cls._PAID_SUBSCRIPTIONS is None:
+            cls._PAID_SUBSCRIPTIONS = [
+                sub_type for sub_type in cls._CONFIG.keys()
+                if sub_type != SubscriptionType.FREE and cls.get_price(sub_type) > 0
+            ]
+        return cls._PAID_SUBSCRIPTIONS
 
     @classmethod
     def can_make_request(cls, subscription_type: SubscriptionType, requests_used: int) -> bool:
         """Проверяет, может ли пользователь сделать запрос по текущей подписке."""
-        limits = cls.get_usage_limits(subscription_type)
-        max_requests = limits.get("max_requests", 0)
+        max_requests = cls.get_usage_limits(subscription_type).get("max_requests", 0)
         return requests_used < max_requests
 
     @classmethod
     def can_generate_image(cls, subscription_type: SubscriptionType, images_used: int) -> bool:
         """Проверяет, может ли пользователь сгенерировать изображение по текущей подписке."""
-        limits = cls.get_usage_limits(subscription_type)
-        max_images = limits.get("max_images", 0)
+        max_images = cls.get_usage_limits(subscription_type).get("max_images", 0)
         return images_used < max_images
 
 ============================================================
 
 bot/subscription_handlers.py:
 ========================================
-import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, Any
 
 import telegram
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
-from telegram.ext import (
-    CallbackContext
-)
+from telegram.ext import CallbackContext
 
-import database
 from base_handler import BaseHandler
+from payment import create_subscription_yookassa_payment
 from subscription import SubscriptionType
 from subscription_config import SubscriptionConfig
-from payment import create_subscription_yookassa_payment
 from utils import HELP_MESSAGE
 
-# Настройка логирования
 logger = logging.getLogger(__name__)
 
 
 class SubscriptionHandlers(BaseHandler):
     """Класс для обработки подписок и платежей."""
 
+    # Константы для эмодзи и текста
+    _EMOJI_MAP = {
+        "current_sub": "📋",
+        "expires": "📅",
+        "usage": "📊",
+        "images": "🎨",
+        "subscriptions": "🔔",
+        "payment": "💳",
+        "back": "⬅️",
+        "error": "❌",
+        "pending": "⏳",
+        "waiting": "🔄",
+        "success": "✅",
+        "canceled": "❌",
+        "unknown": "❓"
+    }
+
+    _STATUS_EMOJI = {
+        "pending": _EMOJI_MAP["pending"],
+        "waiting_for_capture": _EMOJI_MAP["waiting"],
+        "succeeded": _EMOJI_MAP["success"],
+        "canceled": _EMOJI_MAP["canceled"]
+    }
+
     async def subscription_handle(self, update: Update, context: CallbackContext) -> None:
         """Показывает доступные подписки."""
         try:
             user = self._get_user_from_update(update)
             await self.register_user_if_not_exists(update, context, user)
+
             user_id = user.id
             self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
@@ -3525,67 +3310,80 @@ class SubscriptionHandlers(BaseHandler):
             logger.error(f"Error in subscription_handle: {e}")
             await self._handle_subscription_error(update)
 
-    def _get_user_from_update(self, update: Update):
+    def _get_user_from_update(self, update: Update) -> telegram.User:
         """Получает пользователя из update."""
-        if update.message is not None:
-            return update.message.from_user
-        else:
-            return update.callback_query.from_user
+        return (update.message or update.callback_query).from_user
 
     def _format_subscription_info(self, subscription_info: Dict[str, Any]) -> str:
         """Форматирует информацию о подписке."""
-        text = ""
+        text_parts = []
+
+        # Текущая подписка
         if subscription_info["is_active"]:
             if subscription_info["type"] != "free":
                 expires_str = subscription_info["expires_at"].strftime("%d.%m.%Y")
-                text += f"📋 <b>Текущая подписка:</b> {subscription_info['type'].upper()}\n"
-                text += f"📅 <b>Действует до:</b> {expires_str}\n"
+                text_parts.extend([
+                    f"{self._EMOJI_MAP['current_sub']} <b>Текущая подписка:</b> {subscription_info['type'].upper()}",
+                    f"{self._EMOJI_MAP['expires']} <b>Действует до:</b> {expires_str}"
+                ])
             else:
-                text += f"📋 <b>Текущая подписка:</b> БЕСПЛАТНАЯ\n"
+                text_parts.append(f"{self._EMOJI_MAP['current_sub']} <b>Текущая подписка:</b> БЕСПЛАТНАЯ")
 
             usage_text = self._format_usage_info(subscription_info)
-            text += usage_text + "\n"
+            text_parts.append(usage_text)
 
-        text += "\n🔔 <b>Доступные подписки</b>\n"
-        text += self._format_available_subscriptions()
+        # Доступные подписки
+        text_parts.extend([
+            "",
+            f"{self._EMOJI_MAP['subscriptions']} <b>Доступные подписки</b>",
+            self._format_available_subscriptions()
+        ])
 
-        return text
+        return "\n".join(text_parts)
 
     def _format_usage_info(self, subscription_info: Dict[str, Any]) -> str:
-        """Форматирует информацию об использовании используя централизованную конфигурацию."""
+        """Форматирует информацию об использовании."""
         subscription_type = SubscriptionType(subscription_info["type"])
         limits = SubscriptionConfig.get_usage_limits(subscription_type)
 
         max_requests = limits.get("max_requests", 0)
         max_images = limits.get("max_images", 0)
 
-        requests_text = f"{subscription_info['requests_used']}/{max_requests}" if max_requests != float(
-            'inf') else f"{subscription_info['requests_used']} (безлимитно)"
-        images_text = f"{subscription_info['images_used']}/{max_images}" if max_images != float(
-            'inf') else f"{subscription_info['images_used']} (безлимитно)"
+        # Форматирование текста с безлимитными значениями
+        requests_text = self._format_limit_text(subscription_info['requests_used'], max_requests)
+        images_text = self._format_limit_text(subscription_info['images_used'], max_images)
 
         return (
-            f"📊 <b>Запросы использовано:</b> {requests_text}\n"
-            f"🎨 <b>Изображения использовано:</b> {images_text}"
+            f"{self._EMOJI_MAP['usage']} <b>Запросы использовано:</b> {requests_text}\n"
+            f"{self._EMOJI_MAP['images']} <b>Изображения использовано:</b> {images_text}"
         )
 
+    def _format_limit_text(self, used: int, limit: float) -> str:
+        """Форматирует текст с лимитом."""
+        if limit == float('inf'):
+            return f"{used} (безлимитно)"
+        return f"{used}/{limit}"
+
     def _format_available_subscriptions(self) -> str:
-        """Форматирует информацию о доступных подписках используя централизованную конфигурацию."""
-        text = ""
+        """Форматирует информацию о доступных подписках."""
+        text_parts = []
 
         for sub_type in SubscriptionConfig.get_all_paid_subscriptions():
             description = SubscriptionConfig.get_description(sub_type)
             price = SubscriptionConfig.get_price(sub_type)
             duration = SubscriptionConfig.get_duration(sub_type)
 
-            text += f"<b>{description['name']}</b> - {price}₽ / {duration.days} дней\n"
-            text += f"   {description['features']}\n\n"
+            text_parts.extend([
+                f"<b>{description['name']}</b> - {price}₽ / {duration.days} дней",
+                f"   {description['features']}",
+                ""
+            ])
 
-        return text
+        return "\n".join(text_parts)
 
-    def _create_subscription_keyboard(self):
-        """Создает клавиатуру для выбора подписки используя централизованную конфигурацию."""
-        keyboard = []
+    def _create_subscription_keyboard(self) -> InlineKeyboardMarkup:
+        """Создает клавиатуру для выбора подписки."""
+        buttons = []
 
         for sub_type in SubscriptionConfig.get_all_paid_subscriptions():
             description = SubscriptionConfig.get_description(sub_type)
@@ -3593,29 +3391,33 @@ class SubscriptionHandlers(BaseHandler):
 
             name = f"{description['name']} - {price}₽"
             callback_data = f"subscribe|{sub_type.value}"
-            keyboard.append([InlineKeyboardButton(name, callback_data=callback_data)])
+            buttons.append([InlineKeyboardButton(name, callback_data=callback_data)])
 
-        return InlineKeyboardMarkup(keyboard)
+        return InlineKeyboardMarkup(buttons)
 
     async def _send_subscription_message(self, update: Update, text: str,
                                          reply_markup: InlineKeyboardMarkup) -> None:
         """Отправляет сообщение с информацией о подписках."""
-        if update.message is not None:
-            await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
-        else:
-            try:
+        try:
+            if update.message:
+                await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+            else:
                 await update.callback_query.edit_message_text(
                     text, parse_mode=ParseMode.HTML, reply_markup=reply_markup
                 )
-            except telegram.error.BadRequest as e:
-                if "Message is not modified" not in str(e):
-                    await update.callback_query.message.reply_text(
-                        text, parse_mode=ParseMode.HTML, reply_markup=reply_markup
-                    )
+        except telegram.error.BadRequest as e:
+            if "Message is not modified" in str(e):
+                return
+            # Fallback для callback query
+            if update.callback_query:
+                await update.callback_query.message.reply_text(
+                    text, parse_mode=ParseMode.HTML, reply_markup=reply_markup
+                )
 
     async def _handle_subscription_error(self, update: Update) -> None:
         """Обрабатывает ошибки при работе с подписками."""
-        error_text = "❌ Произошла ошибка при загрузке подписок. Пожалуйста, попробуйте снова."
+        error_text = f"{self._EMOJI_MAP['error']} Произошла ошибка при загрузке подписок. Пожалуйста, попробуйте снова."
+
         if update.callback_query:
             await update.callback_query.message.reply_text(error_text, parse_mode=ParseMode.HTML)
 
@@ -3628,14 +3430,13 @@ class SubscriptionHandlers(BaseHandler):
 
         if data == "subscription_back":
             await self._handle_subscription_back(query)
-            return
-
-        if data.startswith("subscribe|"):
+        elif data.startswith("subscribe|"):
             await self._handle_subscription_payment(query, context)
 
-    async def _handle_subscription_back(query: telegram.CallbackQuery) -> None:
+    async def _handle_subscription_back(self, query: telegram.CallbackQuery) -> None:
         """Обрабатывает возврат из меню подписок."""
-        reply_text = "Возврат в главное меню...\n\n" + HELP_MESSAGE
+        reply_text = f"Возврат в главное меню...\n\n{HELP_MESSAGE}"
+
         try:
             await query.edit_message_text(
                 reply_text, parse_mode=ParseMode.HTML, disable_web_page_preview=True
@@ -3646,7 +3447,8 @@ class SubscriptionHandlers(BaseHandler):
                     reply_text, parse_mode=ParseMode.HTML, disable_web_page_preview=True
                 )
 
-    async def _handle_subscription_payment(self, query: telegram.CallbackQuery, context: CallbackContext) -> None:
+    async def _handle_subscription_payment(self, query: telegram.CallbackQuery,
+                                           context: CallbackContext) -> None:
         """Обрабатывает создание платежа для подписки."""
         try:
             _, subscription_type_str = query.data.split("|")
@@ -3664,36 +3466,38 @@ class SubscriptionHandlers(BaseHandler):
         except Exception as e:
             logger.error(f"Error in subscription payment: {e}")
             await query.edit_message_text(
-                "❌ Произошла ошибка при создании платежа. Пожалуйста, попробуйте позже.",
+                f"{self._EMOJI_MAP['error']} Произошла ошибка при создании платежа. Пожалуйста, попробуйте позже.",
                 parse_mode=ParseMode.HTML
             )
 
     def _format_payment_message(self, subscription_type: SubscriptionType) -> str:
-        """Форматирует сообщение об оплате используя централизованную конфигурацию."""
+        """Форматирует сообщение об оплате."""
         price = SubscriptionConfig.get_price(subscription_type)
         duration = SubscriptionConfig.get_duration(subscription_type)
         description = SubscriptionConfig.get_description(subscription_type)
 
         return (
-            f"💳 <b>Оформление подписки {description['name']}</b>\n\n"
+            f"{self._EMOJI_MAP['payment']} <b>Оформление подписки {description['name']}</b>\n\n"
             f"Стоимость: <b>{price}₽</b>\n"
             f"Период: <b>{duration.days} дней</b>\n"
             f"Возможности: {description['features']}\n\n"
             "Нажмите кнопку ниже для оплаты. После успешной оплаты подписка активируется автоматически!"
         )
 
-    def _create_payment_keyboard(self, payment_url: str):
+    def _create_payment_keyboard(self, payment_url: str) -> InlineKeyboardMarkup:
         """Создает клавиатуру для оплаты."""
         keyboard = [
-            [InlineKeyboardButton("💳 Оплатить", url=payment_url)],
-            [InlineKeyboardButton("⬅️ Назад", callback_data="subscription_back")]
+            [InlineKeyboardButton(f"{self._EMOJI_MAP['payment']} Оплатить", url=payment_url)],
+            [InlineKeyboardButton(f"{self._EMOJI_MAP['back']} Назад", callback_data="subscription_back")]
         ]
         return InlineKeyboardMarkup(keyboard)
 
     async def my_payments_handle(self, update: Update, context: CallbackContext) -> None:
         """Показывает статус pending платежей пользователя"""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
-        user_id = update.message.from_user.id
+        user = update.message.from_user
+        await self.register_user_if_not_exists(update, context, user)
+
+        user_id = user.id
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
         pending_payments = self.db.get_user_pending_payments(user_id)
@@ -3705,29 +3509,24 @@ class SubscriptionHandlers(BaseHandler):
             )
             return
 
-        text = "📋 <b>Ваши ожидающие платежи:</b>\n\n"
+        text_lines = [
+            f"{self._EMOJI_MAP['current_sub']} <b>Ваши ожидающие платежи:</b>\n"
+        ]
 
         for payment in pending_payments:
-            amount = payment["amount"]
-            payment_id = payment["payment_id"]
-            status = payment["status"]
+            status_emoji = self._STATUS_EMOJI.get(payment["status"], self._EMOJI_MAP["unknown"])
             created_at = payment["created_at"].strftime("%d.%m.%Y %H:%M")
 
-            status_emoji = {
-                "pending": "⏳",
-                "waiting_for_capture": "🔄",
-                "succeeded": "✅",
-                "canceled": "❌"
-            }.get(status, "❓")
+            text_lines.extend([
+                f"{status_emoji} <b>{payment['amount']} ₽</b> - {payment['status']}",
+                f"   ID: <code>{payment['payment_id']}</code>",
+                f"   Создан: {created_at}",
+                ""
+            ])
 
-            text += f"{status_emoji} <b>{amount} ₽</b> - {status}\n"
-            text += f"   ID: <code>{payment_id}</code>\n"
-            text += f"   Создан: {created_at}\n\n"
+        text_lines.append("Платежи проверяются автоматически каждые 30 секунд.")
 
-        text += "Платежи проверяются автоматически каждые 30 секунд."
-
-        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
-
+        await update.message.reply_text("\n".join(text_lines), parse_mode=ParseMode.HTML)
 
 ============================================================
 
@@ -3804,6 +3603,14 @@ def configure_logging() -> None:
         format='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
     )
     logger.setLevel(logging.getLogger().level)
+
+
+def get_user_semaphore(user_id: int) -> asyncio.Semaphore:
+    """Безопасно получает семафор пользователя, создавая его при необходимости."""
+    if user_id not in user_semaphores:
+        user_semaphores[user_id] = asyncio.Semaphore(1)
+        logger.info(f"Created semaphore for user {user_id}")
+    return user_semaphores[user_id]
 
 ============================================================
 

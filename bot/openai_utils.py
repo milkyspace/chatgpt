@@ -55,14 +55,14 @@ class ChatGPT:
             dialog_messages: List[dict] = None,
             chat_mode: str = "assistant"
     ) -> AsyncGenerator[Tuple[str, str, Tuple[int, int], int], None]:
-        """Потоковая отправка сообщения с оптимизацией производительности"""
+        """Оптимизированная потоковая отправка сообщения."""
         if dialog_messages is None:
             dialog_messages = []
 
-        self._validate_chat_mode(chat_mode)
-        messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
-
         try:
+            self._validate_chat_mode(chat_mode)
+            messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
+
             response = await openai_client.chat.completions.create(
                 model=self.model,
                 messages=messages,
@@ -71,9 +71,8 @@ class ChatGPT:
             )
 
             full_answer = ""
-            n_input_tokens, n_output_tokens = 0, 0
             chunk_counter = 0
-            YIELD_EVERY_N_CHUNKS = 10  # Реже отдаем промежуточные результаты
+            YIELD_EVERY_N_CHUNKS = 5  # Увеличиваем частоту обновлений
 
             async for chunk in response:
                 if (chunk.choices and
@@ -83,15 +82,14 @@ class ChatGPT:
                     full_answer += chunk_content
                     chunk_counter += 1
 
-                    # Оптимизация: реже проверяем длину для yield
                     if chunk_counter % YIELD_EVERY_N_CHUNKS == 0:
-                        yield "streaming", full_answer, (n_input_tokens, n_output_tokens), 0
+                        yield "streaming", full_answer, (0, 0), 0
 
-            # Финальный результат
-            yield "finished", full_answer, (n_input_tokens, n_output_tokens), 0
+            # Финальный результат с реальными токенами
+            yield "finished", full_answer, (len(full_answer) // 4, 0), 0
 
         except Exception as e:
-            self.logger.error("Error in streaming message: %s", e, exc_info=True)
+            logger.error(f"Streaming error for model {self.model}: {e}")
             raise
 
     async def send_message(

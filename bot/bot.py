@@ -203,11 +203,11 @@ def run_bot() -> None:
         pattern="^model-"
     ))
     application.add_handler(CallbackQueryHandler(
-        settings_handlers.set_settings_handle,
+        settings_handlers.model_settings_handler,
         pattern="^model-set_settings\\|"
     ))
     application.add_handler(CallbackQueryHandler(
-        settings_handlers.set_settings_handle,
+        settings_handlers.model_settings_handler,
         pattern="^claude-model-set_settings\\|"
     ))
 
