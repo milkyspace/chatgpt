@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 from aiogram import Bot, Dispatcher
+from aiogram.types import BotCommand
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 
@@ -8,6 +9,7 @@ from config import cfg
 from router_public import router as public_router
 from router_admin import router as admin_router
 from services.payments_monitor import PaymentMonitor
+
 
 import logging
 
@@ -19,6 +21,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def _set_commands(bot):
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Запуск и главное меню"),
+        BotCommand(command="new", description="Начать новый чат"),
+        BotCommand(command="mode", description="Выбрать режим"),
+        BotCommand(command="subscription", description="Моя подписка"),
+        BotCommand(command="help", description="Помощь"),
+    ])
+
 async def main():
     logging.basicConfig(level=logging.INFO)
     logging.info(f"✅ BOT_TOKEN: {cfg.bot_token[:10]}…")
@@ -27,6 +38,8 @@ async def main():
         token=cfg.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
+    await _set_commands(bot)
+    
     dp = Dispatcher()
     dp.include_router(public_router)
     dp.include_router(admin_router)

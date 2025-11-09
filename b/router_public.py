@@ -1,20 +1,30 @@
 from __future__ import annotations
+
+from datetime import datetime, timezone
+
 from aiogram import Router, F
-from aiogram.types import Message as TgMessage, CallbackQuery, InputMediaPhoto
-from aiogram.filters import CommandStart, Command
-from sqlalchemy.ext.asyncio import AsyncSession
-from db import AsyncSessionMaker
+from aiogram.filters import Command, CommandStart
+from aiogram.types import Message as TgMessage, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from sqlalchemy import select
+from sqlalchemy import update
+
 from config import cfg
-from models import ChatSession
-from sqlalchemy import select, insert, update
-from services.subscriptions import ensure_user, get_limits
-from services.usage import can_spend_request, spend_request, can_spend_image, spend_image
-from services.chat import ChatService
-from services.images import ImageService
-from keyboards import main_menu, subscriptions_keyboard
-from utils import store_message, get_history, trim_messages
+from db import AsyncSessionMaker
+from keyboards import plan_buy_keyboard
+from keyboards import top_panel, keyboards_for_modes
+from models import (
+    User,
+    ChatSession,
+    UserSubscription,
+    Usage,
+)
+from payments.yoomoney import YooMoneyProvider
 from queue_bg import AsyncWorkerPool
 from services.chat import ChatService
+from services.images import ImageService
+from services.subscriptions import ensure_user, get_limits
+from services.usage import can_spend_request, spend_request, can_spend_image, spend_image
+from utils import store_message, get_history, trim_messages
 
 router = Router()
 
@@ -37,16 +47,74 @@ async def _shutdown(bot):
     await img_pool.stop()
 
 
+async def _render_status_line(session, user_id: int) -> str:
+    sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
+    usage = await session.scalar(select(Usage).where(Usage.user_id == user_id))
+    now = datetime.now(timezone.utc)
+
+    if not sub or not sub.expires_at or sub.expires_at <= now:
+        status = "🔴 Неактивна"
+        expires = "—"
+        plan_name = "Trial истёк" if (sub and sub.is_trial) else "Нет"
+        limits = "Запросы: 0 / Изображения: 0"
+    else:
+        plan_code = sub.plan_code or "trial"
+        plan_conf = cfg.plans.get(plan_code, None)
+        status = "🟢 Активна"
+        expires = sub.expires_at.astimezone().strftime("%d.%m.%Y %H:%M")
+        if sub.is_trial:
+            plan_name = "Trial"
+            max_req, max_img, _ = cfg.trial_max_requests, cfg.trial_max_images, 4000
+        else:
+            plan_name = plan_conf.title if plan_conf else plan_code
+            max_req = plan_conf.max_requests
+            max_img = plan_conf.max_image_generations
+        ur = usage.used_requests if usage else 0
+        ui = usage.used_images if usage else 0
+        limits = f"Запросы: {('∞' if max_req is None else f'{ur}/{max_req}')}, " \
+                 f"Изобр.: {('∞' if max_img is None else f'{ui}/{max_img}')}"
+
+    return (f"<b>Подписка:</b> {status}\n"
+            f"<b>Тариф:</b> {plan_name}\n"
+            f"<b>Действует до:</b> {expires}\n"
+            f"<b>Лимиты:</b> {limits}")
+
+
 @router.message(CommandStart())
 async def start(m: TgMessage):
-    ref_code = m.text.split(" ", 1)[1] if (m.text and " " in m.text) else None
+    ref_code = None
+    if m.text and " " in m.text:
+        ref_code = m.text.split(" ", 1)[1].strip()
+
     async with AsyncSessionMaker() as session:
-        user = await ensure_user(session, m.from_user.id, m.from_user.username, m.from_user.first_name,
-                                 m.from_user.last_name, ref_code)
+        user = await ensure_user(session, m.from_user.id, m.from_user.username,
+                                 m.from_user.first_name, m.from_user.last_name, ref_code)
+        status = await _render_status_line(session, m.from_user.id)
+
+    me = await m.bot.get_me()  # ← вот здесь получаем имя бота
     await m.answer(
-        "Привет! Я AI-бот с доступом к ChatGPT и генерации изображений.\nВыберите режим или напишите сообщение.",
-        reply_markup=main_menu(ref_code=user.referral_code)
+        status,
+        reply_markup=top_panel(me.username, user.referral_code)  # ← передаём его сюда
     )
+
+
+@router.callback_query(F.data == "panel:mode")
+async def panel_mode(cq: CallbackQuery):
+    await cq.message.edit_reply_markup(reply_markup=keyboards_for_modes())
+    await cq.answer("Выберите режим")
+
+
+@router.callback_query(F.data == "panel:help")
+async def panel_help(cq: CallbackQuery):
+    await cq.message.answer("Справка: /help")
+    await cq.answer()
+
+
+@router.callback_query(F.data == "panel:admin")
+async def panel_admin(cq: CallbackQuery):
+    # Просто показать /admin
+    await cq.message.answer("Откройте /admin для доступа к панели администратора.")
+    await cq.answer()
 
 
 @router.callback_query(F.data.startswith("mode:"))
@@ -68,9 +136,33 @@ async def switch_mode(cq: CallbackQuery):
     await cq.answer()
 
 
+def format_plan_info(code: str) -> str:
+    plan = cfg.plans[code]
+    limits = []
+    limits.append("Запросы: ∞" if plan.max_requests is None else f"Запросы: до {plan.max_requests}")
+    limits.append(
+        "Генерации: ∞" if plan.max_image_generations is None else f"Генерации: до {plan.max_image_generations}")
+    limits.append(f"Длина запроса: до {plan.max_text_len} символов")
+    return (f"<b>{plan.title}</b>\n"
+            f"Стоимость: <b>{plan.price_rub} ₽</b> / {plan.duration_days} дней\n"
+            f"{' • '.join(limits)}")
+
+
 @router.callback_query(F.data == "subs:show")
 async def show_subs(cq: CallbackQuery):
-    await cq.message.answer("Выберите подписку:", reply_markup=subscriptions_keyboard())
+    text = (
+        "💳 <b>Доступные подписки</b>\n\n"
+        f"{format_plan_info('pro_lite')}\n\n"
+        f"{format_plan_info('pro_plus')}\n\n"
+        f"{format_plan_info('pro_premium')}\n\n"
+        "Выберите нужный тариф для оплаты."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Купить Pro Lite", callback_data="buy:pro_lite")],
+        [InlineKeyboardButton(text="Купить Pro Plus", callback_data="buy:pro_plus")],
+        [InlineKeyboardButton(text="Купить Pro Premium", callback_data="buy:pro_premium")],
+    ])
+    await cq.message.answer(text, reply_markup=kb)
     await cq.answer()
 
 
@@ -78,18 +170,24 @@ async def show_subs(cq: CallbackQuery):
 async def buy(cq: CallbackQuery):
     plan = cq.data.split(":", 1)[1]
     plan_conf = cfg.plans[plan]
+    provider = YooMoneyProvider() if cfg.payment_provider == "yoomoney" else None
     description = f"Оплата плана {plan_conf.title}"
-    # создаем ссылку на оплату
-    provider_url: str
-    if cfg.payment_provider == "yoomoney":
-        from payments.yoomoney import YooMoneyProvider
-        provider = YooMoneyProvider()
-    else:
-        from payments.mock import MockPaymentProvider
-        provider = MockPaymentProvider()
 
-    provider_url = await provider.create_invoice(cq.from_user.id, plan, plan_conf.price_rub, description)
-    await cq.message.answer(f"Ссылка на оплату: {provider_url}\nПосле оплаты подписка активируется автоматически.")
+    # создаем платёж
+    pay_url = await provider.create_invoice(cq.from_user.id, plan, plan_conf.price_rub, description)
+
+    # красивый текст + красивая кнопка
+    text = (
+        f"🧾 <b>Счёт на оплату</b>\n\n"
+        f"<b>Тариф:</b> {plan_conf.title}\n"
+        f"<b>Стоимость:</b> {plan_conf.price_rub} ₽ за {plan_conf.duration_days} дней\n"
+        f"<b>Что входит:</b>\n"
+        f"• Запросы: {'∞' if plan_conf.max_requests is None else plan_conf.max_requests}\n"
+        f"• Генерации изображений: {'∞' if plan_conf.max_image_generations is None else plan_conf.max_image_generations}\n"
+        f"• Длина запроса: до {plan_conf.max_text_len} символов\n\n"
+        f"Нажмите кнопку ниже, чтобы перейти к оплате 👇"
+    )
+    await cq.message.answer(text, reply_markup=plan_buy_keyboard(plan, pay_url))
     await cq.answer()
 
 
@@ -186,3 +284,84 @@ async def new_chat(cq: CallbackQuery):
         await session.commit()
     await cq.message.answer("Создан новый чат. Пишите сообщение.")
     await cq.answer()
+
+
+@router.callback_query(F.data == "chat:list")
+async def chat_list(cq: CallbackQuery):
+    PAGE_SIZE = 10
+    page = 1
+    if cq.message and cq.message.reply_markup:
+        # можно реализовать пагинацию через callback_data вида chat:list:2
+        pass
+    async with AsyncSessionMaker() as session:
+        rows = (await session.execute(
+            select(ChatSession).where(ChatSession.user_id == cq.from_user.id).order_by(ChatSession.id.desc()).limit(100)
+        )).scalars().all()
+
+    if not rows:
+        await cq.message.answer("У вас пока нет сохранённых чатов.")
+        await cq.answer()
+        return
+
+    lines = []
+    for s in rows[:PAGE_SIZE]:
+        mark = "🟢" if s.is_active else "⚪️"
+        lines.append(f"{mark} <b>{s.title}</b> — {s.mode} (#{s.id})")
+    text = "📁 <b>Ваши чаты</b>\n" + "\n".join(lines)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Активировать первый", callback_data=f"chat:activate:{rows[0].id}")],
+        [InlineKeyboardButton(text="Создать новый", callback_data="chat:new")]
+    ])
+    await cq.message.answer(text, reply_markup=kb)
+    await cq.answer()
+
+
+@router.callback_query(F.data.startswith("chat:activate:"))
+async def chat_activate(cq: CallbackQuery):
+    sess_id = int(cq.data.split(":")[-1])
+    async with AsyncSessionMaker() as session:
+        await session.execute(update(ChatSession).where(
+            ChatSession.user_id == cq.from_user.id, ChatSession.is_active == True
+        ).values(is_active=False))
+        await session.execute(update(ChatSession).where(
+            ChatSession.id == sess_id, ChatSession.user_id == cq.from_user.id
+        ).values(is_active=True))
+        await session.commit()
+    await cq.message.answer(f"✔️ Активирован чат #{sess_id}")
+    await cq.answer()
+
+
+async def show_subscription_panel(m: TgMessage):
+    async with AsyncSessionMaker() as session:
+        status = await _render_status_line(session, m.from_user.id)
+        user_row = (await session.execute(select(User).where(User.id == m.from_user.id))).scalars().first()
+    me = await m.bot.get_me()
+    await m.answer(status, reply_markup=top_panel(me.username, user_row.referral_code))
+
+
+@router.message(Command("subscription"))
+async def cmd_subscription(m: TgMessage):
+    await show_subscription_panel(m)
+
+
+@router.message(Command("help"))
+async def cmd_help(m: TgMessage):
+    await m.answer(
+        "ℹ️ Помощь\n\n"
+        "• /start — главное меню\n"
+        "• /new — новый чат\n"
+        "• /mode — выбрать режим (ассистент/изображения/редактор/...)\n"
+        "• /subscription — информация о подписке и лимитах\n"
+        "• Просто отправьте текст — и получите ответ\n"
+        "• Отправьте фото — и выберите нужный режим обработки"
+    )
+
+
+@router.message(Command("mode"))
+async def cmd_mode(m: TgMessage):
+    await m.answer("Выберите режим:", reply_markup=keyboards_for_modes())
+
+
+@router.message(Command("subscription"))
+async def cmd_subscription(m: TgMessage):
+    await show_subscription_panel(m)

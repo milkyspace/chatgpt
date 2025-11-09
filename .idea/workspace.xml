@@ -6,8 +6,11 @@
   <component name="ChangeListManager">
     <list default="true" id="c49b2697-deab-421e-88ce-4ba8723f2a80" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/b/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/b/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/b/payments/yoomoney.py" beforeDir="false" afterPath="$PROJECT_DIR$/b/payments/yoomoney.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/b/bot.py" beforeDir="false" afterPath="$PROJECT_DIR$/b/bot.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/b/keyboards.py" beforeDir="false" afterPath="$PROJECT_DIR$/b/keyboards.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/b/providers/openai_provider.py" beforeDir="false" afterPath="$PROJECT_DIR$/b/providers/openai_provider.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/b/router_public.py" beforeDir="false" afterPath="$PROJECT_DIR$/b/router_public.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
