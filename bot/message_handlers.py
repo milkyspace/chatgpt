@@ -156,6 +156,16 @@ class MessageHandlers(MessageProcessor):
     async def message_handle(self, update: Update, context: CallbackContext,
                              message: Optional[str] = None, use_new_dialog_timeout: bool = True) -> None:
         """Обрабатывает текстовые сообщения."""
+
+        # Добавьте проверку API ключей
+        if not config.openai_api_key:
+            logger.error("OpenAI API key is not configured!")
+            await update.message.reply_text(
+                "❌ Бот не настроен. Отсутствует API ключ OpenAI.",
+                parse_mode=ParseMode.HTML
+            )
+            return
+
         if not await self.is_bot_mentioned(update, context):
             return
 
@@ -220,50 +230,77 @@ class MessageHandlers(MessageProcessor):
                                       message: str, use_new_dialog_timeout: bool) -> None:
         """Обрабатывает текстовое сообщение (внутренняя функция)."""
         user_id = update.message.from_user.id
-        chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
-
-        await self.prepare_dialog(user_id, use_new_dialog_timeout, chat_mode, update)
-
-        if not message or len(message) == 0:
-            await update.message.reply_text("🥲 You sent <b>empty message</b>. Please, try again!",
-                                            parse_mode=ParseMode.HTML)
-            return
 
         try:
+            logger.info(f"=== START TEXT MESSAGE PROCESSING ===")
+            logger.info(f"User: {user_id}, Message: '{message}'")
+
+            chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
+            logger.info(f"Chat mode: {chat_mode}")
+
+            current_model = self.db.get_user_attribute(user_id, "current_model")
+            logger.info(f"Current model: {current_model}")
+
+            # Проверка подписки
+            logger.info("Checking subscription...")
+            subscription_info = self.db.get_user_subscription_info(user_id)
+            logger.info(f"Subscription info: {subscription_info}")
+
+            await self.prepare_dialog(user_id, use_new_dialog_timeout, chat_mode, update)
+            logger.info("Dialog prepared")
+
+            if not message or len(message) == 0:
+                await update.message.reply_text("🥲 You sent <b>empty message</b>. Please, try again!",
+                                                parse_mode=ParseMode.HTML)
+                return
+
             async with user_semaphores[user_id]:
+                logger.info("Acquired user semaphore")
                 placeholder_message = await update.message.reply_text("<i>Думаю...</i>", parse_mode=ParseMode.HTML)
                 await update.message.chat.send_action(action="typing")
+                logger.info("Sent typing action")
 
                 dialog_messages = self.db.get_dialog_messages(user_id, dialog_id=None)
+                logger.info(f"Retrieved {len(dialog_messages)} dialog messages")
+
                 parse_mode = {
                     "html": ParseMode.HTML,
                     "markdown": ParseMode.MARKDOWN
                 }[config.chat_modes[chat_mode]["parse_mode"]]
 
-                current_model = self.db.get_user_attribute(user_id, "current_model")
+                logger.info(f"Using parse mode: {parse_mode}")
+
                 chatgpt_instance = openai_utils.ChatGPT(model=current_model)
+                logger.info("Created ChatGPT instance")
 
                 if config.enable_message_streaming:
+                    logger.info("Using streaming response")
                     await self._handle_streaming_response(
                         update, context, message, dialog_messages, chat_mode,
                         chatgpt_instance, placeholder_message, parse_mode, user_id
                     )
                 else:
+                    logger.info("Using non-streaming response")
                     answer, n_input_tokens, n_output_tokens = await self._get_non_streaming_response(
                         chatgpt_instance, message, dialog_messages, chat_mode
                     )
+                    logger.info(f"Got response: {answer[:100]}...")
 
                     await self.edit_message_with_retry(context, placeholder_message, answer, chat_mode)
+                    logger.info("Message edited")
 
                     new_dialog_message = {"user": [{"type": "text", "text": message}], "bot": answer,
                                           "date": datetime.now()}
                     self.update_dialog_and_tokens(user_id, new_dialog_message, n_input_tokens, n_output_tokens)
+                    logger.info("Dialog updated")
 
+            logger.info("=== TEXT MESSAGE PROCESSING COMPLETED ===")
 
         except Exception as e:
-
-            logger.error(f"Error in text message handling: {e}", exc_info=True)
-
+            logger.error(f"=== ERROR IN TEXT MESSAGE HANDLING ===", exc_info=True)
+            logger.error(f"Error type: {type(e)}")
+            logger.error(f"Error message: {str(e)}")
+            logger.error(f"=== END ERROR ===")
             await self.handle_message_error(update, e)
 
     async def _handle_streaming_response(self, update: Update, context: CallbackContext, message: str,

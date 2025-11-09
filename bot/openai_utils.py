@@ -1,18 +1,11 @@
-# Переписанный openai_utils.py
-# Обновлено: переход на GPT-4o и gpt-image-1, удалены create_variation (dall-e-2)
-# Код адаптирован для вашей логики, но модернизирован под современные API
-
-from PIL import Image
+import base64
+import logging
 from io import BytesIO
 from typing import Optional, List
-import config
-import tiktoken
+
 from openai import AsyncOpenAI
-import anthropic
-import logging
-import base64
-import asyncio
-import requests
+
+import config
 
 # Инициализация клиента OpenAI
 if config.openai_api_base is not None:
@@ -50,19 +43,38 @@ class ChatGPT:
         self.logger = logging.getLogger(__name__)
 
     async def send_message(self, message, dialog_messages=[], chat_mode="assistant"):
-        if chat_mode not in config.chat_modes.keys():
-            raise ValueError(f"Chat mode {chat_mode} is not supported")
+        try:
+            logger.info(f"=== OPENAI API CALL ===")
+            logger.info(f"Model: {self.model}")
+            logger.info(f"Chat mode: {chat_mode}")
+            logger.info(f"Message length: {len(message)}")
+            logger.info(f"Dialog messages count: {len(dialog_messages)}")
 
-        messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
+            if chat_mode not in config.chat_modes.keys():
+                raise ValueError(f"Chat mode {chat_mode} is not supported")
 
-        response = await openai_client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            **OPENAI_COMPLETION_OPTIONS
-        )
+            messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
+            logger.info(f"Generated {len(messages)} messages for API")
 
-        answer = response.choices[0].message.content
-        return answer, (response.usage.prompt_tokens, response.usage.completion_tokens), 0
+            logger.info("Sending request to OpenAI...")
+            response = await openai_client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                **OPENAI_COMPLETION_OPTIONS
+            )
+            logger.info("Received response from OpenAI")
+
+            answer = response.choices[0].message.content
+            tokens_used = (response.usage.prompt_tokens, response.usage.completion_tokens)
+            logger.info(f"Answer length: {len(answer)}, Tokens: {tokens_used}")
+
+            return answer, tokens_used, 0
+
+        except Exception as e:
+            logger.error(f"=== OPENAI API ERROR ===", exc_info=True)
+            logger.error(f"API Error type: {type(e)}")
+            logger.error(f"API Error message: {str(e)}")
+            raise e
 
     # ✅ CHAT + VISION + IMAGE GENERATION (как chatgpt.com)
     async def send_vision_message(self, message, dialog_messages=[], chat_mode="assistant",
