@@ -113,14 +113,34 @@ async def panel_mode(cq: CallbackQuery):
 
 @router.callback_query(F.data == "panel:help")
 async def panel_help(cq: CallbackQuery):
-    await cq.message.answer("Справка: /help")
+    text = (
+        "ℹ️ <b>Помощь</b>\n\n"
+        "Доступные команды:\n"
+        "• /start — главное меню\n"
+        "• /new — новый чат\n"
+        "• /mode — выбрать режим\n"
+        "• /subscription — информация о подписке\n"
+        "• Просто отправьте текст — и получите ответ\n\n"
+        "Поддержка: @your_support_username"
+    )
+    await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")]
+    ]))
     await cq.answer()
 
 
 @router.callback_query(F.data == "panel:admin")
 async def panel_admin(cq: CallbackQuery):
-    # Просто показать /admin
-    await cq.message.answer("Откройте /admin для доступа к панели администратора.")
+    await cq.message.edit_text(
+        "🛡 <b>Админ-панель</b>\n\n"
+        "— Управление пользователями\n"
+        "— Отправка рассылок\n"
+        "— Проверка платежей\n\n"
+        "⚠️ Доступ только администраторам.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")]
+        ])
+    )
     await cq.answer()
 
 
@@ -251,33 +271,18 @@ async def on_photo(m: TgMessage):
 
 @router.message(F.text & ~F.via_bot)
 async def on_text(m: TgMessage):
+    """Обрабатывает обычные текстовые сообщения в текущем режиме."""
     text = m.text.strip()
-    async with AsyncSessionMaker() as session:
-        max_req, max_img, max_text_len = await get_limits(session, m.from_user.id)
-        if not await can_spend_request(session, m.from_user.id):
-            await m.answer("Лимит текстовых запросов исчерпан.")
-            return
-        res = await session.execute(
-            select(ChatSession).where(ChatSession.user_id == m.from_user.id, ChatSession.is_active == True))
-        chat_sess = res.scalars().first()
-        if not chat_sess:
-            chat_sess = ChatSession(user_id=m.from_user.id, title="Chat", mode="assistant", is_active=True)
-            session.add(chat_sess)
-            await session.commit()
-        await store_message(session, chat_sess.id, "user", text)
-        history = await get_history(session, chat_sess.id, limit=30)
-        history = trim_messages(tokens_est=0, messages=history, max_len=max_text_len)
+    user_id = m.from_user.id
 
-    chat_service = ChatService()
+    # режим (например assistant / image) — получаем из базы, но пока пусть дефолт
+    mode = "assistant"
 
-    async def job():
-        # Используем streaming
-        reply_text = await chat_service.stream_reply(m.bot, m.chat.id, history, max_text_len)
-        async with AsyncSessionMaker() as session:
-            await spend_request(session, m.from_user.id)
-            await store_message(session, chat_sess.id, "assistant", reply_text)
-
-    await chat_pool.submit(job)
+    if mode == "assistant":
+        chat_service = ChatService()
+        await chat_service.handle_user_message(text, m.bot, m.chat.id)
+    else:
+        await m.answer("⚙️ Другие режимы пока в разработке.")
 
 
 @router.callback_query(F.data == "chat:new")
@@ -364,6 +369,18 @@ async def cmd_help(m: TgMessage):
     )
 
 
+@router.callback_query(F.data == "panel:main")
+async def panel_main(cq: CallbackQuery):
+    async with AsyncSessionMaker() as session:
+        status = await _render_status_line(session, cq.from_user.id)
+        user_row = (await session.execute(
+            select(User).where(User.id == cq.from_user.id)
+        )).scalars().first()
+    me = await cq.bot.get_me()
+    await cq.message.edit_text(status, reply_markup=top_panel(me.username, user_row.referral_code))
+    await cq.answer()
+
+
 @router.message(Command("mode"))
 async def cmd_mode(m: TgMessage):
     await m.answer("Выберите режим:", reply_markup=keyboards_for_modes())
@@ -372,3 +389,26 @@ async def cmd_mode(m: TgMessage):
 @router.message(Command("subscription"))
 async def cmd_subscription(m: TgMessage):
     await show_subscription_panel(m)
+
+@router.message(Command("help"))
+async def cmd_help(m: TgMessage):
+    text = (
+        "ℹ️ <b>Помощь</b>\n\n"
+        "Команды:\n"
+        "• /start — главное меню\n"
+        "• /mode — выбор режима\n"
+        "• /subscription — информация о подписке\n"
+        "• /new — новый чат\n\n"
+        "Просто отправьте текст, и бот ответит вам 🤖"
+    )
+    await m.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")]
+    ]))
+
+
+@router.message(Command("admin"))
+async def cmd_admin(m: TgMessage):
+    await m.answer("🛡 <b>Админ-панель</b>.\n\nФункции: управление пользователями, рассылки, проверка подписок.",
+                   reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                       [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")]
+                   ]))

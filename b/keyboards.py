@@ -32,15 +32,15 @@ def keyboards_for_modes() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💬 Ассистент", callback_data="mode:assistant"),
          InlineKeyboardButton(text="🎨 Генерация", callback_data="mode:image")],
         [InlineKeyboardButton(text="🛠 Редактор фото", callback_data="mode:editor"),
-         InlineKeyboardButton(text="➕ Добавить людей", callback_data="mode:add_people")],
-        [InlineKeyboardButton(text="🤳 Селфи со звёздой", callback_data="mode:celebrity_selfie")],
+         InlineKeyboardButton(text="🤳 Селфи со звёздой", callback_data="mode:celebrity_selfie")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")],  # ← новая кнопка
     ])
 
 def top_panel(bot_username: str, ref_code: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💳 Подлить подписку", callback_data="subs:show"),
          InlineKeyboardButton(text="🎛 Режим", callback_data="panel:mode")],
-        [InlineKeyboardButton(text="👥 Пригласить", url=f"https://t.me/{bot_username}?start={ref_code}")],
+        InlineKeyboardButton(text="👥 Пригласить", url=f"https://t.me/{bot_username}?start={ref_code}"),
         [InlineKeyboardButton(text="❓ Помощь", callback_data="panel:help"),
          InlineKeyboardButton(text="🛡 Админ-панель", callback_data="panel:admin")],
     ])
