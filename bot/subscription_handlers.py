@@ -44,7 +44,6 @@ class SubscriptionHandlers(BaseHandler):
             logger.error(f"Error in subscription_handle: {e}")
             await self._handle_subscription_error(update)
 
-    @staticmethod
     def _get_user_from_update(self, update: Update):
         """Получает пользователя из update."""
         if update.message is not None:
@@ -71,7 +70,6 @@ class SubscriptionHandlers(BaseHandler):
 
         return text
 
-    @staticmethod
     def _format_usage_info(self, subscription_info: Dict[str, Any]) -> str:
         """Форматирует информацию об использовании используя централизованную конфигурацию."""
         subscription_type = SubscriptionType(subscription_info["type"])
@@ -90,7 +88,6 @@ class SubscriptionHandlers(BaseHandler):
             f"🎨 <b>Изображения использовано:</b> {images_text}"
         )
 
-    @staticmethod
     def _format_available_subscriptions(self) -> str:
         """Форматирует информацию о доступных подписках используя централизованную конфигурацию."""
         text = ""
@@ -105,7 +102,6 @@ class SubscriptionHandlers(BaseHandler):
 
         return text
 
-    @staticmethod
     def _create_subscription_keyboard(self):
         """Создает клавиатуру для выбора подписки используя централизованную конфигурацию."""
         keyboard = []
@@ -120,7 +116,6 @@ class SubscriptionHandlers(BaseHandler):
 
         return InlineKeyboardMarkup(keyboard)
 
-    @staticmethod
     async def _send_subscription_message(self, update: Update, text: str,
                                          reply_markup: InlineKeyboardMarkup) -> None:
         """Отправляет сообщение с информацией о подписках."""
@@ -137,7 +132,6 @@ class SubscriptionHandlers(BaseHandler):
                         text, parse_mode=ParseMode.HTML, reply_markup=reply_markup
                     )
 
-    @staticmethod
     async def _handle_subscription_error(self, update: Update) -> None:
         """Обрабатывает ошибки при работе с подписками."""
         error_text = "❌ Произошла ошибка при загрузке подписок. Пожалуйста, попробуйте снова."
@@ -158,7 +152,6 @@ class SubscriptionHandlers(BaseHandler):
         if data.startswith("subscribe|"):
             await self._handle_subscription_payment(query, context)
 
-    @staticmethod
     async def _handle_subscription_back(query: telegram.CallbackQuery) -> None:
         """Обрабатывает возврат из меню подписок."""
         reply_text = "Возврат в главное меню...\n\n" + HELP_MESSAGE
@@ -194,7 +187,6 @@ class SubscriptionHandlers(BaseHandler):
                 parse_mode=ParseMode.HTML
             )
 
-    @staticmethod
     def _format_payment_message(self, subscription_type: SubscriptionType) -> str:
         """Форматирует сообщение об оплате используя централизованную конфигурацию."""
         price = SubscriptionConfig.get_price(subscription_type)
@@ -209,7 +201,6 @@ class SubscriptionHandlers(BaseHandler):
             "Нажмите кнопку ниже для оплаты. После успешной оплаты подписка активируется автоматически!"
         )
 
-    @staticmethod
     def _create_payment_keyboard(self, payment_url: str):
         """Создает клавиатуру для оплаты."""
         keyboard = [
