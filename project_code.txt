@@ -563,9 +563,14 @@ class BaseHandler(ABC):
         return False
 
     async def subscription_preprocessor(self, update: Update, context: CallbackContext) -> bool:
-        """Проверяет возможность выполнения запроса по подписке."""
+        """Оптимизированная проверка подписки."""
         try:
             user_id = update.effective_user.id
+
+            # Быстрая проверка существования пользователя
+            if not self.db.check_if_user_exists(user_id):
+                await self.register_user_if_not_exists(update, context, update.effective_user)
+
             subscription_info = self.db.get_user_subscription_info(user_id)
 
             if not subscription_info["is_active"]:
@@ -578,11 +583,7 @@ class BaseHandler(ABC):
 
             return await self._check_subscription_limits(subscription_info, update)
         except Exception as e:
-            logger.error(f"Error in subscription preprocessor: {e}", exc_info=True)
-            await update.message.reply_text(
-                "❌ Ошибка проверки подписки. Пожалуйста, попробуйте еще раз.",
-                parse_mode=ParseMode.HTML
-            )
+            logger.error(f"Subscription preprocessor error: {e}")
             return False
 
     async def _check_subscription_limits(self, subscription_info: Dict[str, Any], update: Update) -> bool:
@@ -789,6 +790,18 @@ def run_bot() -> None:
     application.add_handler(MessageHandler(filters.VOICE & user_filter,
                                            message_handlers.voice_message_handle))
 
+    # Для обработки фотографий с подписями
+    application.add_handler(MessageHandler(
+        filters.PHOTO & filters.ChatType.PRIVATE,
+        image_handlers.process_image_message_handle
+    ))
+
+    # Для обработки фотографий в группах (если бот упомянут)
+    application.add_handler(MessageHandler(
+        filters.PHOTO & filters.ChatType.GROUPS & filters.Entity("mention"),
+        image_handlers.process_image_message_handle
+    ))
+
     # Добавляем обработчики подписок
     application.add_handler(
         CommandHandler("subscription", subscription_handlers.subscription_handle, filters=user_filter))
@@ -809,11 +822,11 @@ def run_bot() -> None:
         pattern="^model-"
     ))
     application.add_handler(CallbackQueryHandler(
-        settings_handlers.set_settings_handle,
+        settings_handlers.model_settings_handler,
         pattern="^model-set_settings\\|"
     ))
     application.add_handler(CallbackQueryHandler(
-        settings_handlers.set_settings_handle,
+        settings_handlers.model_settings_handler,
         pattern="^claude-model-set_settings\\|"
     ))
 
@@ -1006,6 +1019,52 @@ class ChatModeHandlers(BaseHandler):
             parse_mode=ParseMode.HTML
         )
 
+============================================================
+
+bot/code_collector.py:
+========================================
+import os
+import glob
+
+
+def simple_collect_code(output_file="project_code.txt"):
+    """
+    Простая версия для сбора Python файлов
+    """
+    # Ищем все .py файлы в текущей директории и поддиректориях
+    py_files = glob.glob('**/*.py', recursive=True)
+
+    # Исключаем системные директории
+    exclude_dirs = ['__pycache__', '.git', 'venv', 'env']
+    filtered_files = [f for f in py_files if not any(exclude in f for exclude in exclude_dirs)]
+
+    # Сортируем по имени
+    filtered_files.sort()
+
+    with open(output_file, 'w', encoding='utf-8') as out_file:
+        for file_path in filtered_files:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as in_file:
+                    content = in_file.read()
+
+                out_file.write(f"{file_path}:\n")
+                out_file.write("=" * 40 + "\n")
+                out_file.write(content)
+                out_file.write("\n\n" + "=" * 60 + "\n\n")
+
+                print(f"Добавлен: {file_path}")
+
+            except Exception as e:
+                print(f"Ошибка с файлом {file_path}: {e}")
+
+    print(f"\nГотово! Файлы сохранены в {output_file}")
+
+
+# Запуск
+if __name__ == "__main__":
+    simple_collect_code()
+
+============================================================
 
 bot/config.py:
 ========================================
@@ -1061,12 +1120,15 @@ bot/database.py:
 ========================================
 from typing import Optional, Any, List, Dict
 import pymongo
+import logging
 from pymongo import UpdateOne
 import uuid
 from datetime import datetime, timedelta
 import config
 from subscription import SubscriptionType
-from subscription_config import SubscriptionConfig
+
+# Настройка логирования
+logger = logging.getLogger(__name__)
 
 
 class Database:
@@ -1207,17 +1269,32 @@ class Database:
         return dialog_id
 
     def get_user_attribute(self, user_id: int, key: str) -> Any:
-        """Получение атрибута пользователя с проекцией для оптимизации"""
-        user = self._get_user_document(user_id, {key: 1})
-        return user.get(key)
+        """Оптимизированное получение атрибута пользователя."""
+        try:
+            result = self.user_collection.find_one(
+                {"_id": user_id},
+                {key: 1}
+            )
+            return result.get(key) if result else None
+        except Exception as e:
+            logger.error(f"Error getting attribute {key} for user {user_id}: {e}")
+            return None
 
     def set_user_attribute(self, user_id: int, key: str, value: Any) -> None:
-        """Установка атрибута пользователя с обновлением last_interaction"""
-        self.check_if_user_exists(user_id, raise_exception=True)
-        self.user_collection.update_one(
-            {"_id": user_id},
-            {"$set": {key: value, "last_interaction": datetime.now()}}
-        )
+        """Оптимизированная установка атрибута с bulk operations."""
+        try:
+            self.user_collection.update_one(
+                {"_id": user_id},
+                {
+                    "$set": {
+                        key: value,
+                        "last_interaction": datetime.now()
+                    }
+                },
+                upsert=False
+            )
+        except Exception as e:
+            logger.error(f"Error setting attribute {key} for user {user_id}: {e}")
 
     def update_n_used_tokens(self, user_id: int, model: str, n_input_tokens: int, n_output_tokens: int) -> None:
         """Обновление счетчиков токенов с атомарными операциями"""
@@ -1434,6 +1511,7 @@ class Database:
             "status": {"$in": ["pending", "waiting_for_capture"]}
         }))
 
+
 ============================================================
 
 bot/image_handlers.py:
@@ -1441,8 +1519,9 @@ bot/image_handlers.py:
 import io
 import logging
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, List
 
+import asyncio
 import aiohttp
 import telegram
 from telegram import Update, InputFile
@@ -1452,7 +1531,6 @@ from telegram.ext import CallbackContext
 import openai_utils
 from base_handler import BaseHandler
 
-# Настройка логирования
 logger = logging.getLogger(__name__)
 
 
@@ -1463,8 +1541,8 @@ class ImageHandlers(BaseHandler):
                                     message: Optional[str] = None) -> None:
         """Обрабатывает генерацию изображений."""
         user = update.message.from_user
-        await self.register_user_if_not_exists(update, context, user)
 
+        await self.register_user_if_not_exists(update, context, user)
         if await self.is_previous_message_not_answered_yet(update, context):
             return
 
@@ -1477,6 +1555,7 @@ class ImageHandlers(BaseHandler):
         await update.message.chat.send_action(action="upload_photo")
 
         prompt = message or update.message.text
+
         placeholder_message = await update.message.reply_text(
             "<i>Рисуем...</i>",
             parse_mode=ParseMode.HTML
@@ -1484,88 +1563,199 @@ class ImageHandlers(BaseHandler):
 
         try:
             image_urls = await self._generate_images(user_id, prompt)
-            await self._send_generated_images(update, context, prompt, image_urls, placeholder_message)
+
+            await self._send_generated_images(
+                update,
+                context,
+                prompt,
+                image_urls,
+                placeholder_message
+            )
 
         except Exception as e:
             await self._handle_image_generation_error(update, e)
 
     async def _generate_images(self, user_id: int, prompt: str) -> List[str]:
-        """Генерирует изображения через OpenAI."""
-        user_preferences = self.db.get_user_attribute(user_id, "image_preferences") or {}
+        """Генерация изображений через OpenAI API."""
+        prefs = self.db.get_user_attribute(user_id, "image_preferences") or {}
 
-        model = user_preferences.get("model", "dalle-2")
-        n_images = user_preferences.get("n_images", 3)
-        resolution = user_preferences.get("resolution", "1024x1024")
+        model = prefs.get("model", "dall-e-3")
+        resolution = prefs.get("resolution", "1024x1024")
 
-        image_urls = await openai_utils.generate_images(
-            prompt=prompt,
-            model=model,
-            n_images=n_images,
-            size=resolution
-        )
+        try:
+            # Обертываем синхронный вызов в asyncio.to_thread
+            image_urls = await asyncio.to_thread(
+                openai_utils.generate_images,
+                prompt=prompt,
+                model=model,
+                size=resolution
+            )
+            return image_urls
 
-        self._update_image_usage_stats(user_id, n_images)
-        return image_urls
+        except Exception as e:
+            # Fallback для DALL-E 3 → DALL-E 2
+            if any(keyword in str(e).lower() for keyword in ["rejected", "safety", "billing", "quota"]):
+                logger.warning("FALLBACK dalle-3 → dalle-2")
+                try:
+                    image_urls = await asyncio.to_thread(
+                        openai_utils.generate_images,
+                        prompt=prompt,
+                        model="dall-e-2",
+                        size="1024x1024"
+                    )
+                    return image_urls
+                except Exception:
+                    raise e
+            else:
+                raise
 
     def _update_image_usage_stats(self, user_id: int, n_images: int) -> None:
-        """Обновляет статистику использования изображений."""
-        current_count = self.db.get_user_attribute(user_id, "n_generated_images") or 0
-        self.db.set_user_attribute(user_id, "n_generated_images", current_count + n_images)
+        count = self.db.get_user_attribute(user_id, "n_generated_images") or 0
+        self.db.set_user_attribute(user_id, "n_generated_images", count + n_images)
 
-    async def _send_generated_images(self, update: Update, context: CallbackContext, prompt: str,
-                                     image_urls: List[str], placeholder_message: telegram.Message) -> None:
-        """Отправляет сгенерированные изображения."""
+    async def _send_generated_images(self, update: Update, context: CallbackContext,
+                                     prompt: str, image_urls: List[str],
+                                     placeholder_message: telegram.Message) -> None:
+        chat_id = placeholder_message.chat_id
+        m_id = placeholder_message.message_id
+
+        try:
+            await context.bot.edit_message_text(
+                f"🖼 Генерируем...\n\n<i>{prompt}</i>",
+                chat_id=chat_id,
+                message_id=m_id,
+                parse_mode=ParseMode.HTML
+            )
+        except telegram.error.BadRequest:
+            pass
+
+        async with aiohttp.ClientSession() as session:
+            for url in image_urls:
+                await update.message.chat.send_action(action="upload_photo")
+                await self._send_one_image(session, context.bot, chat_id, url)
+
+        await context.bot.edit_message_text(
+            f"Готово 🎨\n\n<i>{prompt}</i>",
+            chat_id=chat_id,
+            message_id=m_id,
+            parse_mode=ParseMode.HTML
+        )
+
+    async def _send_one_image(self, session: aiohttp.ClientSession, bot: telegram.Bot, chat_id: int, url: str):
+        """Скачивание и отправка изображения."""
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                logger.error(f"Failed download {url} — {resp.status}")
+                return
+
+            img = io.BytesIO(await resp.read())
+            img.name = "image.jpg"
+
+            await bot.send_photo(chat_id=chat_id, photo=InputFile(img))
+
+    async def _handle_image_generation_error(self, update: Update, error: Exception) -> None:
+        msg = str(error)
+
+        if msg.startswith("Your request was rejected"):
+            text = (
+                "🚫 <b>Запрос отклонён политиками OpenAI.</b>\n"
+                "Попробуй сформулировать мягче 🫣"
+            )
+        else:
+            text = (
+                "⚠️ Ошибка при генерации изображения.\n"
+                f"<b>Причина:</b> {msg}"
+            )
+
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
+    async def process_image_message_handle(self, update: Update, context: CallbackContext,
+                                           message: Optional[str] = None) -> None:
+        """Обрабатывает сообщения с изображениями для редактирования/улучшения."""
+        user = update.message.from_user
+
+        await self.register_user_if_not_exists(update, context, user)
+        if await self.is_previous_message_not_answered_yet(update, context):
+            return
+
+        user_id = user.id
+        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+        if not await self.subscription_preprocessor(update, context):
+            return
+
+        # Проверяем, есть ли фото в сообщении
+        if not update.message.photo:
+            await update.message.reply_text(
+                "❌ Пожалуйста, отправьте изображение для обработки.",
+                parse_mode=ParseMode.HTML
+            )
+            return
+
+        await update.message.chat.send_action(action="upload_photo")
+
+        placeholder_message = await update.message.reply_text(
+            "<i>Обрабатываю изображение...</i>",
+            parse_mode=ParseMode.HTML
+        )
+
+        try:
+            # Получаем изображение
+            photo = update.message.photo[-1]
+            file = await context.bot.get_file(photo.file_id)
+            img_bytes = await file.download_as_bytearray()
+
+            # Получаем промпт (текст сообщения или переданный параметр)
+            prompt = message or update.message.caption or "Улучши это изображение"
+
+            # Генерируем новое изображение на основе загруженного
+            result_url = await asyncio.to_thread(
+                openai_utils.generate_image_with_input,
+                prompt,
+                img_bytes
+            )
+
+            # Отправляем результат
+            await self._send_edited_image(context, placeholder_message, result_url, prompt)
+
+            # Обновляем статистику использования
+            self._update_image_usage_stats(user_id, 1)
+
+        except Exception as e:
+            await self._handle_image_generation_error(update, e)
+
+    async def _send_edited_image(self, context: CallbackContext, placeholder_message: telegram.Message,
+                                 image_url: str, prompt: str) -> None:
+        """Отправляет отредактированное изображение."""
         chat_id = placeholder_message.chat_id
         message_id = placeholder_message.message_id
 
-        # Предварительное сообщение
-        pre_message = f"Нарисовали 🎨:\n\n  <i>{prompt or ''}</i>  \n\nПодождите немного, изображение почти готово!"
-        await context.bot.edit_message_text(
-            pre_message,
-            chat_id=chat_id,
-            message_id=message_id,
-            parse_mode=ParseMode.HTML
-        )
+        try:
+            await context.bot.edit_message_text(
+                f"🎨 Обрабатываю...\n\n<i>{prompt}</i>",
+                chat_id=chat_id,
+                message_id=message_id,
+                parse_mode=ParseMode.HTML
+            )
+        except telegram.error.BadRequest:
+            pass
 
-        # Отправка изображений
-        for image_url in image_urls:
-            await update.message.chat.send_action(action="upload_photo")
-            await self._upload_image_from_url(context.bot, chat_id, image_url)
-
-        # Финальное сообщение
-        post_message = f"Нарисовали 🎨:\n\n  <i>{prompt or ''}</i>  \n\nКак вам??"
-        await context.bot.edit_message_text(
-            post_message,
-            chat_id=chat_id,
-            message_id=message_id,
-            parse_mode=ParseMode.HTML
-        )
-
-    async def _upload_image_from_url(self, bot: telegram.Bot, chat_id: int, image_url: str) -> None:
-        """Загружает изображение по URL и отправляет его асинхронно."""
+        # Скачиваем и отправляем изображение
         async with aiohttp.ClientSession() as session:
-            async with session.get(image_url) as response:
-                if response.status == 200:
-                    image_data = await response.read()
-                    image_buffer = io.BytesIO(image_data)
-                    image_buffer.name = "image.jpg"
-                    await bot.send_photo(
+            async with session.get(image_url) as resp:
+                if resp.status == 200:
+                    img = io.BytesIO(await resp.read())
+                    img.name = "edited_image.jpg"
+
+                    await context.bot.send_photo(
                         chat_id=chat_id,
-                        photo=InputFile(image_buffer, "image.jpg")
+                        photo=InputFile(img),
+                        caption=f"Готово 🎨\n\n<i>{prompt}</i>",
+                        parse_mode=ParseMode.HTML
                     )
-                else:
-                    logger.error(f"Failed to download image. Status: {response.status}")
 
-    async def _handle_image_generation_error(self, update: Update, error: Exception) -> None:
-        """Обрабатывает ошибки генерации изображений."""
-        error_msg = str(error)
-
-        if error_msg.startswith("Your request was rejected as a result of our safety system"):
-            error_text = "🥲 Your request <b>doesn't comply</b> with OpenAI's usage policies.\nWhat did you write there, huh??"
-        else:
-            error_text = f"⚠️ There was an issue with your request. Please try again.\n\n<b>Reason</b>: {error_msg}"
-
-        await update.message.reply_text(error_text, parse_mode=ParseMode.HTML)
+        # Удаляем placeholder сообщение
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
 
 ============================================================
 
@@ -1915,10 +2105,10 @@ class MessageHandlers(MessageProcessor):
 
         # Обработка специальных режимов
         if chat_mode == "artist":
-            await self.generate_image_handle(update, context, message=message)
+            await self.image_handlers.generate_image_handle(update, context, message=processed_message)
             return
         elif chat_mode == "stenographer":
-            await self.voice_message_handle(update, context, message=message)
+            await self.voice_message_handle(update, context, message=processed_message)
             return
 
         await self._handle_text_message(update, context, processed_message, use_new_dialog_timeout)
@@ -2128,7 +2318,9 @@ class MessageHandlers(MessageProcessor):
         buf.name = "voice.oga"
         buf.seek(0)
 
-        transcribed_text = await openai_utils.transcribe_audio(buf)
+        # Обертываем синхронный вызов в asyncio.to_thread
+        transcribed_text = await asyncio.to_thread(openai_utils.transcribe_audio, buf)
+
         text = f"🎤: <i>{transcribed_text}</i>"
 
         user_id = update.message.from_user.id
@@ -2253,11 +2445,6 @@ class MessageHandlers(MessageProcessor):
             _message = _message.replace("@" + context.bot.username, "").strip()
 
         return _message
-
-    async def generate_image_handle(self, update: Update, context: CallbackContext,
-                                    message: Optional[str] = None) -> None:
-        """Прокси-метод для генерации изображений."""
-        await self.image_handlers.generate_image_handle(update, context, message=message)
 
 ============================================================
 
@@ -2408,6 +2595,7 @@ import logging
 from io import BytesIO
 from typing import Optional, List, AsyncGenerator, Tuple, Union
 
+import openai
 from openai import AsyncOpenAI
 
 import config
@@ -2460,14 +2648,14 @@ class ChatGPT:
             dialog_messages: List[dict] = None,
             chat_mode: str = "assistant"
     ) -> AsyncGenerator[Tuple[str, str, Tuple[int, int], int], None]:
-        """Потоковая отправка сообщения с оптимизацией производительности"""
+        """Оптимизированная потоковая отправка сообщения."""
         if dialog_messages is None:
             dialog_messages = []
 
-        self._validate_chat_mode(chat_mode)
-        messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
-
         try:
+            self._validate_chat_mode(chat_mode)
+            messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
+
             response = await openai_client.chat.completions.create(
                 model=self.model,
                 messages=messages,
@@ -2476,9 +2664,8 @@ class ChatGPT:
             )
 
             full_answer = ""
-            n_input_tokens, n_output_tokens = 0, 0
             chunk_counter = 0
-            YIELD_EVERY_N_CHUNKS = 10  # Реже отдаем промежуточные результаты
+            YIELD_EVERY_N_CHUNKS = 5  # Увеличиваем частоту обновлений
 
             async for chunk in response:
                 if (chunk.choices and
@@ -2488,15 +2675,14 @@ class ChatGPT:
                     full_answer += chunk_content
                     chunk_counter += 1
 
-                    # Оптимизация: реже проверяем длину для yield
                     if chunk_counter % YIELD_EVERY_N_CHUNKS == 0:
-                        yield "streaming", full_answer, (n_input_tokens, n_output_tokens), 0
+                        yield "streaming", full_answer, (0, 0), 0
 
-            # Финальный результат
-            yield "finished", full_answer, (n_input_tokens, n_output_tokens), 0
+            # Финальный результат с реальными токенами
+            yield "finished", full_answer, (len(full_answer) // 4, 0), 0
 
         except Exception as e:
-            self.logger.error("Error in streaming message: %s", e, exc_info=True)
+            logger.error(f"Streaming error for model {self.model}: {e}")
             raise
 
     async def send_message(
@@ -2584,30 +2770,86 @@ async def transcribe_audio(audio_file) -> str:
         return ""
 
 
-async def generate_images(
-        prompt: str,
-        model: str = "gpt-image-1",
-        size: str = "1024x1024",
-        n: int = 1
-) -> List[str]:
-    """Генерация изображений с улучшенной обработкой параметров"""
+async def generate_images(prompt: str, model: str = "dall-e-3", n_images: int = 1, size: str = "1024x1024") -> List[
+    str]:
+    """Генерирует изображения по текстовому описанию."""
     try:
-        # Валидация параметров
-        if n <= 0 or n > 4:  # OpenAI обычно ограничивает количество
-            raise ValueError("Number of images must be between 1 and 4")
+        # DALL-E 3 поддерживает только 1 изображение за запрос
+        if model == "dall-e-3":
+            n_images = 1
+            # DALL-E 3 имеет фиксированный размер 1024x1024, 1792x1024, или 1024x1792
+            if size not in ["1024x1024", "1792x1024", "1024x1792"]:
+                size = "1024x1024"
 
-        response = await openai_client.images.generate(
-            model=model,
-            prompt=prompt,
-            size=size,
-            n=n,
-            quality="high"
-        )
-        return [item.url for item in response.data]
+        # DALL-E 2 поддерживает разные размеры и количество
+        elif model == "dall-e-2":
+            if size not in ["256x256", "512x512", "1024x1024"]:
+                size = "1024x1024"
+            n_images = min(n_images, 10)  # Максимум 10 изображений для DALL-E 2
+
+        image_urls = []
+
+        # Для DALL-E 3 делаем один запрос
+        if model == "dall-e-3":
+            response = await openai.images.generate(
+                model=model,
+                prompt=prompt,
+                size=size,
+                quality="standard",
+                n=1,
+            )
+            image_urls.append(response.data[0].url)
+
+        # Для DALL-E 2 можем сгенерировать несколько изображений
+        elif model == "dall-e-2":
+            response = await openai.images.generate(
+                model=model,
+                prompt=prompt,
+                size=size,
+                n=n_images,
+            )
+            image_urls = [img.url for img in response.data]
+
+        return image_urls
 
     except Exception as e:
-        logger.error("Error generating images: %s", e, exc_info=True)
+        logger.error(f"Error generating images: {e}")
         raise
+
+
+async def generate_image_with_input(prompt: str, image_bytes: bytes) -> bytes:
+    response = await openai_client.images.edit(
+        model="gpt-image-1",
+        prompt=prompt,
+        image=[
+            {
+                "name": "input.png",
+                "bytes": image_bytes
+            }
+        ],
+        size="1024x1024"
+    )
+
+    # Достаём base64
+    b64 = response.data[0].b64_json
+    return base64.b64decode(b64)
+
+
+async def generate_image(prompt: str) -> str:
+    """Генерирует изображение по текстовому описанию."""
+    try:
+        response = await openai.images.generate(
+            model="dall-e-3",
+            prompt=prompt,
+            size="1024x1024",
+            quality="standard",
+            n=1,
+        )
+        return response.data[0].url
+    except Exception as e:
+        logger.error(f"Error generating image: {e}")
+        raise
+
 
 ============================================================
 
@@ -2792,6 +3034,10 @@ class SettingsHandlers(BaseHandler):
         text, reply_markup = self.get_settings_menu(user_id)
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
+    async def set_settings_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает установку настроек - прокси метод для model_settings_handler."""
+        await self.model_settings_handler(update, context)
+
     def _create_model_buttons(self, available_models: list, current_model: str, prefix: str = "model") -> Tuple[
         list, list]:
         """Создает кнопки для выбора модели."""
@@ -2872,9 +3118,9 @@ class SettingsHandlers(BaseHandler):
         preferences["model"] = model_key
 
         # Сбрасываем настройки при смене модели
-        if model_key == "dalle-2":
+        if model_key == "dall-e-2":
             preferences["quality"] = "standard"
-        elif model_key == "dalle-3":
+        elif model_key == "dall-e-3":
             preferences["n_images"] = 1
         preferences["resolution"] = "1024x1024"
 
@@ -2947,7 +3193,7 @@ class SettingsHandlers(BaseHandler):
     def _create_artist_buttons(self, user_id: int) -> List[List[InlineKeyboardButton]]:
         """Создает кнопки для выбора модели художника."""
         current_preferences = self.db.get_user_attribute(user_id, "image_preferences")
-        current_model = current_preferences.get("model", "dalle-2")
+        current_model = current_preferences.get("model", "dall-e-2")
 
         buttons = []
         for model_key in config.models["available_image_models"]:
@@ -2959,7 +3205,7 @@ class SettingsHandlers(BaseHandler):
         keyboard = [buttons]
 
         # Добавляем специфичные настройки для каждой модели
-        if current_model == "dalle-2":
+        if current_model == "dall-e-2":
             n_images = current_preferences.get("n_images", 1)
             images_buttons = [
                 InlineKeyboardButton(
@@ -2974,24 +3220,24 @@ class SettingsHandlers(BaseHandler):
                 InlineKeyboardButton(
                     f"✅ {res_key}" if res_key == current_resolution else res_key,
                     callback_data=f"model-artist-set_resolution|{res_key}"
-                ) for res_key in config.models["info"]["dalle-2"]["resolutions"]
+                ) for res_key in config.models["info"]["dall-e-2"]["resolutions"]
             ]
             keyboard.extend([images_buttons, resolution_buttons])
 
-        elif current_model == "dalle-3":
+        elif current_model == "dall-e-3":
             current_quality = current_preferences.get("quality", "standard")
             quality_buttons = [
                 InlineKeyboardButton(
                     f"✅ {quality_key}" if quality_key == current_quality else quality_key,
                     callback_data=f"model-artist-set_quality|{quality_key}"
-                ) for quality_key in config.models["info"]["dalle-3"]["qualities"]
+                ) for quality_key in config.models["info"]["dall-e-3"]["qualities"]
             ]
             current_resolution = current_preferences.get("resolution", "1024x1024")
             resolution_buttons = [
                 InlineKeyboardButton(
                     f"✅ {res_key}" if res_key == current_resolution else res_key,
                     callback_data=f"model-artist-set_resolution|{res_key}"
-                ) for res_key in config.models["info"]["dalle-3"]["qualities"][current_quality]["resolutions"]
+                ) for res_key in config.models["info"]["dall-e-3"]["qualities"][current_quality]["resolutions"]
             ]
             keyboard.extend([quality_buttons, resolution_buttons])
 
@@ -3001,14 +3247,14 @@ class SettingsHandlers(BaseHandler):
     async def artist_model_settings_handler(self, query, user_id: int) -> None:
         """Обрабатывает настройки модели художника."""
         current_preferences = self.db.get_user_attribute(user_id, "image_preferences")
-        current_model = current_preferences.get("model", "dalle-2")
+        current_model = current_preferences.get("model", "dall-e-2")
 
         details_text = self._format_model_info(current_model)
 
         # Добавляем пояснение для конкретной модели
-        if current_model == "dalle-2":
+        if current_model == "dall-e-2":
             details_text += "\nДля этой модели выберите количество изображений и разрешение:"
-        elif current_model == "dalle-3":
+        elif current_model == "dall-e-3":
             details_text += "\nДля этой модели выберите качество изображений и разрешение:"
 
         keyboard = self._create_artist_buttons(user_id)
@@ -3603,6 +3849,9 @@ def configure_logging() -> None:
         format='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
     )
     logger.setLevel(logging.getLogger().level)
+    logging.getLogger('pymongo').setLevel(logging.WARNING)
+    logging.getLogger('apscheduler').setLevel(logging.WARNING)
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
 
 
 def get_user_semaphore(user_id: int) -> asyncio.Semaphore:
