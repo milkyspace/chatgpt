@@ -31,6 +31,7 @@ class AppConfig(BaseModel):
     payment_check_interval_min: int = int(os.getenv("PAYMENT_CHECK_INTERVAL_MIN", "1"))
     yookassa_shop_id: str | None = os.getenv("YOOKASSA_SHOP_ID")
     yookassa_secret_key: str | None = os.getenv("YOOKASSA_SECRET_KEY")
+    yookassa_invoice_email: str | None = os.getenv("YOOKASSA_INVOICE_EMAIL")
     payment_provider: str = os.getenv("PAYMENT_PROVIDER", "yoomoney")  # yoomoney|mock
 
     # Тестовый период

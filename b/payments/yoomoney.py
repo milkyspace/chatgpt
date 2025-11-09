@@ -6,13 +6,17 @@ from yookassa import Configuration, Payment as YooPayment
 import uuid
 
 import logging
+
 logger = logging.getLogger(__name__)
+
 
 class YooMoneyProvider:
     """ЮKassa с ручной проверкой статуса (без вебхуков)."""
+
     def __init__(self):
         Configuration.account_id = cfg.yookassa_shop_id
         Configuration.secret_key = cfg.yookassa_secret_key
+        self.email = cfg.yookassa_invoice_email
 
     async def create_invoice(self, user_id: int, plan_code: str, amount_rub: int, description: str) -> str:
         """Создает платёж и возвращает redirect URL"""
@@ -29,6 +33,24 @@ class YooMoneyProvider:
                 },
                 "capture": True,
                 "description": description or f"План {plan_code}",
+                "receipt": {
+                    "customer": {
+                        "email": self.email,
+                    },
+                    "items": [
+                        {
+                            "description": description,
+                            "quantity": "1.00",
+                            "amount": {
+                                "value": f"{amount_rub:.2f}",
+                                "currency": "RUB"
+                            },
+                            "vat_code": "1",
+                            "payment_mode": "full_payment",
+                            "payment_subject": "commodity",
+                        },
+                    ]
+                },
                 "metadata": {
                     "user_id": str(user_id),
                     "plan_code": plan_code
