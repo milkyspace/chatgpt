@@ -8,9 +8,9 @@ from telegram.ext import (CallbackContext)
 from telegram.constants import ParseMode
 
 import config
-import database
-import bot.base_handler as BaseHandler
-from keyboards import BotKeyboards
+from ..handlers.base_handler import BaseHandler
+from ..keyboards import BotKeyboards
+from ..database import database
 
 # Глобальные переменные
 db = database.Database()

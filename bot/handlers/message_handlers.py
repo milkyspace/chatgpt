@@ -3,8 +3,8 @@ import io
 from datetime import datetime
 from typing import Optional, Any, List
 import emoji
-import openai_utils
-from keyboards import BotKeyboards
+from .. import openai_utils
+from ..keyboards import BotKeyboards
 
 from typing import Tuple
 import telegram
@@ -18,11 +18,13 @@ from telegram.ext import (CallbackContext)
 from telegram.constants import ParseMode
 
 import config
-import database
-import bot.base_handler as BaseHandler
-import bot.ai_response_handler as AIResponseHandler
-import bot.error_handler as ErrorHandler
-import bot.user_manager as UserManager
+from ..database import database
+from ..handlers.base_handler import BaseHandler
+from ..handlers.ai_response_handler import AIResponseHandler
+from ..handlers.error_handler import ErrorHandler
+from ..user.user_manager import UserManager
+from ..message_processor import MessageProcessor
+from ..photo_editor_mixin import PhotoEditorMixin
 
 # Глобальные переменные
 db = database.Database()

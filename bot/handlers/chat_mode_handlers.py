@@ -1,4 +1,4 @@
-import bot.base_handler as BaseHandler
+from ..handlers.base_handler import BaseHandler
 
 import logging
 import asyncio
@@ -9,7 +9,7 @@ from telegram.ext import (CallbackContext)
 from telegram.constants import ParseMode
 
 import config
-import database
+from ..database import database
 
 # Глобальные переменные
 db = database.Database()
@@ -19,6 +19,7 @@ user_tasks: Dict[int, asyncio.Task] = {}
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
+
 
 class ChatModeHandlers(BaseHandler):
     """Класс для обработки режимов чата."""

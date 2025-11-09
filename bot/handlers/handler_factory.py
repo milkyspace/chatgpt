@@ -2,7 +2,7 @@ import logging
 import asyncio
 from typing import Dict, Any
 
-from bot import database
+from ..database import database
 from .subscription_handlers import SubscriptionHandlers
 from .image_handlers import ImageHandlers
 from .chat_mode_handlers import ChatModeHandlers

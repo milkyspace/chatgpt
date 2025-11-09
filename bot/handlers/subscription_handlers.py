@@ -1,8 +1,9 @@
 from yookassa import Payment
 
-import bot.base_handler as BaseHandler
-import bot.subscription_config as SubscriptionConfig
-import bot.subscription as SubscriptionType
+from ..handlers.base_handler import BaseHandler
+from ..subscription.subscription_config import SubscriptionConfig
+from ..subscription.subscription_config import SubscriptionType
+from ..database import database
 
 import logging
 import asyncio
@@ -11,9 +12,6 @@ import telegram
 from telegram import (Update, User, InlineKeyboardButton, InlineKeyboardMarkup)
 from telegram.ext import (CallbackContext)
 from telegram.constants import ParseMode
-import database
-from subscription import SubscriptionType
-from subscription_config import SubscriptionConfig
 
 # Глобальные переменные
 db = database.Database()

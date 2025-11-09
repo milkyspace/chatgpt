@@ -1,5 +1,4 @@
-import bot.base_handler as BaseHandler
-
+from ..handlers.base_handler import BaseHandler
 import logging
 import asyncio
 import io
@@ -9,11 +8,11 @@ import telegram
 from telegram import (Update, InputFile)
 from telegram.ext import (CallbackContext)
 from telegram.constants import ParseMode
-from bot.error_handler import ErrorHandler
-from bot.ai_response_handler import AIResponseHandler
+from ..handlers.error_handler import ErrorHandler
+from ..handlers.ai_response_handler import AIResponseHandler
 
-import database
-import openai_utils
+from ..database import database
+from .. import openai_utils
 
 # Глобальные переменные
 db = database.Database()

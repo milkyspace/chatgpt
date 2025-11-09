@@ -10,8 +10,8 @@ from telegram.constants import ParseMode
 
 import config
 import bot.database as database
-from bot.subscription import SubscriptionType
-from bot.subscription_config import SubscriptionConfig
+from ..subscription.subscription_config import SubscriptionType
+from ..subscription.subscription_config import SubscriptionConfig
 
 # Глобальные переменные
 db = database.Database()

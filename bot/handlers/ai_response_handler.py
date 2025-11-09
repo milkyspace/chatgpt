@@ -4,7 +4,7 @@ import telegram
 from typing import Dict, Any
 from telegram.ext import (CallbackContext)
 from telegram.constants import ParseMode
-import bot.database as database
+from ..database import database
 
 # Глобальные переменные
 db = database.Database()

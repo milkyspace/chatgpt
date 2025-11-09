@@ -5,8 +5,23 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="c49b2697-deab-421e-88ce-4ba8723f2a80" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/bot/config/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/bot/user/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/bot.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/bot.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/config/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/database.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/database/database.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/handlers/admin_handlers.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/handlers/admin_handlers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/handlers/ai_response_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/handlers/ai_response_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/handlers/base_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/handlers/base_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/handlers/chat_mode_handlers.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/handlers/chat_mode_handlers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/handlers/error_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/handlers/error_handler.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/bot/handlers/handler_factory.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/handlers/handler_factory.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/subscription/subscription_config.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/subscription/subscription_config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/handlers/image_handlers.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/handlers/image_handlers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/handlers/message_handlers.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/handlers/message_handlers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/handlers/settings_handlers.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/handlers/settings_handlers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/handlers/subscription_handlers.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/handlers/subscription_handlers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/user_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/user/user_manager.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -63,10 +78,11 @@
 }]]></component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/bot/database" />
+      <recent name="$PROJECT_DIR$/bot/config" />
+      <recent name="$PROJECT_DIR$/bot/user" />
       <recent name="$PROJECT_DIR$/bot/router" />
       <recent name="$PROJECT_DIR$/bot/subscription" />
-      <recent name="$PROJECT_DIR$/bot/handlers" />
-      <recent name="$PROJECT_DIR$/bot" />
     </key>
   </component>
   <component name="SharedIndexes">
