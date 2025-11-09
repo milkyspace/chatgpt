@@ -5,9 +5,10 @@
 import logging
 import asyncio
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 import telegram
+from telegram import Update
 from telegram.ext import (
     Application, ApplicationBuilder, CallbackContext, CommandHandler,
     MessageHandler, CallbackQueryHandler, AIORateLimiter, filters
