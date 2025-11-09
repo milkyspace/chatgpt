@@ -40,7 +40,7 @@ def top_panel(bot_username: str, ref_code: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💳 Подлить подписку", callback_data="subs:show"),
          InlineKeyboardButton(text="🎛 Режим", callback_data="panel:mode")],
-        InlineKeyboardButton(text="👥 Пригласить", url=f"https://t.me/{bot_username}?start={ref_code}"),
+        [InlineKeyboardButton(text="👥 Пригласить", url=f"https://t.me/{bot_username}?start={ref_code}")],
         [InlineKeyboardButton(text="❓ Помощь", callback_data="panel:help"),
          InlineKeyboardButton(text="🛡 Админ-панель", callback_data="panel:admin")],
     ])
