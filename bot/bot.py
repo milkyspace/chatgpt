@@ -20,8 +20,8 @@ import config
 import database
 from subscription import SubscriptionType
 from subscription_config import SubscriptionConfig
-from bot.handler_factory import HandlerFactory
-from bot.router_config import RouterConfig
+from handler_factory import HandlerFactory
+from router_config import RouterConfig
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
