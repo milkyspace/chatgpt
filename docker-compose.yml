@@ -21,6 +21,8 @@ services:
       dockerfile: Dockerfile
     command: python3 b/bot.py
     restart: always
+    env_file:
+      - .env
     depends_on:
       - mariadb
     environment:
