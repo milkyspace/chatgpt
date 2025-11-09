@@ -22,25 +22,32 @@ router = Router()
 chat_pool = AsyncWorkerPool(cfg.workers_chat)
 img_pool = AsyncWorkerPool(cfg.workers_images)
 
+
 @router.startup()
-async def _startup(_):
+async def _startup(bot):
+    """Запуск фоновых пулов при старте бота."""
     await chat_pool.start()
     await img_pool.start()
 
+
 @router.shutdown()
-async def _shutdown(_):
+async def _shutdown(bot):
+    """Остановка фоновых пулов при завершении работы."""
     await chat_pool.stop()
     await img_pool.stop()
+
 
 @router.message(CommandStart())
 async def start(m: TgMessage):
     ref_code = m.text.split(" ", 1)[1] if (m.text and " " in m.text) else None
     async with AsyncSessionMaker() as session:
-        user = await ensure_user(session, m.from_user.id, m.from_user.username, m.from_user.first_name, m.from_user.last_name, ref_code)
+        user = await ensure_user(session, m.from_user.id, m.from_user.username, m.from_user.first_name,
+                                 m.from_user.last_name, ref_code)
     await m.answer(
         "Привет! Я AI-бот с доступом к ChatGPT и генерации изображений.\nВыберите режим или напишите сообщение.",
         reply_markup=main_menu(ref_code=user.referral_code)
     )
+
 
 @router.callback_query(F.data.startswith("mode:"))
 async def switch_mode(cq: CallbackQuery):
@@ -60,10 +67,12 @@ async def switch_mode(cq: CallbackQuery):
     await cq.message.answer(f"Режим переключен: {mode}")
     await cq.answer()
 
+
 @router.callback_query(F.data == "subs:show")
 async def show_subs(cq: CallbackQuery):
     await cq.message.answer("Выберите подписку:", reply_markup=subscriptions_keyboard())
     await cq.answer()
+
 
 @router.callback_query(F.data.startswith("buy:"))
 async def buy(cq: CallbackQuery):
@@ -83,6 +92,7 @@ async def buy(cq: CallbackQuery):
     await cq.message.answer(f"Ссылка на оплату: {provider_url}\nПосле оплаты подписка активируется автоматически.")
     await cq.answer()
 
+
 @router.message(F.photo)
 async def on_photo(m: TgMessage):
     """Принимаем фото. Работаем в выбранном режиме: editor/add_people/celebrity_selfie."""
@@ -90,7 +100,8 @@ async def on_photo(m: TgMessage):
     mode = "editor"
     async with AsyncSessionMaker() as session:
         # узнаем активную сессию и лимиты
-        res = await session.execute(select(ChatSession).where(ChatSession.user_id == m.from_user.id, ChatSession.is_active == True))
+        res = await session.execute(
+            select(ChatSession).where(ChatSession.user_id == m.from_user.id, ChatSession.is_active == True))
         chat_sess = res.scalars().first()
         if chat_sess:
             mode = chat_sess.mode
@@ -132,6 +143,7 @@ async def on_photo(m: TgMessage):
 
     await img_pool.submit(job)
 
+
 @router.message(F.text & ~F.via_bot)
 async def on_text(m: TgMessage):
     text = m.text.strip()
@@ -140,7 +152,8 @@ async def on_text(m: TgMessage):
         if not await can_spend_request(session, m.from_user.id):
             await m.answer("Лимит текстовых запросов исчерпан.")
             return
-        res = await session.execute(select(ChatSession).where(ChatSession.user_id == m.from_user.id, ChatSession.is_active == True))
+        res = await session.execute(
+            select(ChatSession).where(ChatSession.user_id == m.from_user.id, ChatSession.is_active == True))
         chat_sess = res.scalars().first()
         if not chat_sess:
             chat_sess = ChatSession(user_id=m.from_user.id, title="Chat", mode="assistant", is_active=True)
@@ -160,6 +173,7 @@ async def on_text(m: TgMessage):
             await store_message(session, chat_sess.id, "assistant", reply_text)
 
     await chat_pool.submit(job)
+
 
 @router.callback_query(F.data == "chat:new")
 async def new_chat(cq: CallbackQuery):
