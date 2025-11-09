@@ -192,31 +192,11 @@ class ImageHandlers(BaseHandler):
             await file.download_to_memory(img_buffer)
             img_buffer.seek(0)
 
-            # Конвертируем в правильный формат для DALL-E 2
-            with Image.open(img_buffer) as img:
-                # Конвертируем в RGBA (добавляем альфа-канал)
-                if img.mode != 'RGBA':
-                    img = img.convert('RGBA')
-
-                # Сохраняем в PNG формате
-                png_buffer = io.BytesIO()
-                img.save(png_buffer, format='PNG', optimize=True)
-                png_buffer.seek(0)
-
-                # Проверяем размер файла
-                if png_buffer.getbuffer().nbytes > 4 * 1024 * 1024:  # 4MB
-                    # Уменьшаем размер изображения если нужно
-                    png_buffer = io.BytesIO()
-                    if img.size[0] > 1024 or img.size[1] > 1024:
-                        img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
-                    img.save(png_buffer, format='PNG', optimize=True)
-                    png_buffer.seek(0)
-
             # Получаем промпт (текст сообщения или переданный параметр)
             prompt = message or update.message.caption or "Улучши это изображение"
 
-            # Генерируем новое изображение на основе загруженного
-            result_url = await openai_utils.generate_image_with_input(prompt, png_buffer.getvalue())
+            # Пробуем разные подходы
+            result_url = await self._try_image_generation_methods(prompt, img_buffer, placeholder_message, context)
 
             # Отправляем результат
             await self._send_edited_image(context, placeholder_message, result_url, prompt)
@@ -227,27 +207,129 @@ class ImageHandlers(BaseHandler):
         except Exception as e:
             await self._handle_image_generation_error(update, e)
 
+    async def _try_image_generation_methods(self, prompt: str, img_buffer: io.BytesIO,
+                                            placeholder_message: telegram.Message,
+                                            context: CallbackContext) -> str:
+        """Пробует разные методы генерации изображений."""
+
+        # Метод 1: Прямое редактирование с DALL-E 2
+        try:
+            await context.bot.edit_message_text(
+                "🔄 Редактирую изображение...",
+                chat_id=placeholder_message.chat_id,
+                message_id=placeholder_message.message_id,
+                parse_mode=ParseMode.HTML
+            )
+
+            # Конвертируем изображение
+            with Image.open(img_buffer) as img:
+                # Пробуем разные форматы
+                if img.mode not in ['RGBA', 'LA', 'L']:
+                    img = img.convert('RGBA')
+
+                # Убедимся, что изображение квадратное (требование DALL-E)
+                if img.size[0] != img.size[1]:
+                    size = min(img.size[0], img.size[1])
+                    img = img.resize((size, size), Image.Resampling.LANCZOS)
+
+                png_buffer = io.BytesIO()
+                img.save(png_buffer, format='PNG', optimize=True)
+                png_buffer.seek(0)
+
+            return await openai_utils.generate_image_with_input(prompt, png_buffer.getvalue())
+
+        except Exception as e:
+            logger.warning(f"Method 1 (DALL-E 2 editing) failed: {e}")
+
+        # Метод 2: Генерация с DALL-E 3 по описанию
+        try:
+            await context.bot.edit_message_text(
+                "🎨 Генерирую новое изображение...",
+                chat_id=placeholder_message.chat_id,
+                message_id=placeholder_message.message_id,
+                parse_mode=ParseMode.HTML
+            )
+
+            image_urls = await openai_utils.generate_images(
+                prompt=prompt,
+                model="dall-e-3",
+                n_images=1,
+                size="1024x1024"
+            )
+            return image_urls[0]
+
+        except Exception as e:
+            logger.warning(f"Method 2 (DALL-E 3 generation) failed: {e}")
+
+        # Метод 3: Генерация с DALL-E 2 по описанию
+        try:
+            await context.bot.edit_message_text(
+                "🎨 Генерирую изображение...",
+                chat_id=placeholder_message.chat_id,
+                message_id=placeholder_message.message_id,
+                parse_mode=ParseMode.HTML
+            )
+
+            image_urls = await openai_utils.generate_images(
+                prompt=prompt,
+                model="dall-e-2",
+                n_images=1,
+                size="1024x1024"
+            )
+            return image_urls[0]
+
+        except Exception as e:
+            logger.warning(f"Method 3 (DALL-E 2 generation) failed: {e}")
+            raise Exception("Все методы генерации изображений не сработали. Пожалуйста, попробуйте другой промпт.")
+
     async def _handle_image_generation_error(self, update: Update, error: Exception) -> None:
-        """Обрабатывает ошибки генерации изображения с безопасным HTML."""
+        """Обрабатывает ошибки генерации изображения с полезными подсказками."""
         error_msg = str(error)
 
-        # Безопасное форматирование сообщения об ошибке
-        if "rejected" in error_msg.lower() or "safety" in error_msg.lower():
+        # Более информативные сообщения об ошибках
+        if "500" in error_msg or "server_error" in error_msg:
             text = (
-                "🚫 <b>Запрос отклонён политиками OpenAI.</b>\n"
-                "Попробуй сформулировать мягче 🫣"
+                "🔧 <b>Временная проблема с сервером OpenAI</b>\n\n"
+                "Это внутренняя ошибка сервера. Пожалуйста:\n"
+                "• Попробуйте через несколько минут\n"
+                "• Используйте другой промпт\n"
+                "• Отправьте другое изображение\n\n"
+                "Если проблема повторяется, свяжитесь с поддержкой."
+            )
+        elif "rejected" in error_msg.lower() or "safety" in error_msg.lower():
+            text = (
+                "🚫 <b>Запрос отклонён политиками безопасности</b>\n\n"
+                "Попробуйте:\n"
+                "• Сформулировать промпт мягче\n"
+                "• Использовать более нейтральное описание\n"
+                "• Выбрать другое изображение"
             )
         elif "billing" in error_msg.lower() or "quota" in error_msg.lower():
             text = (
-                "💳 <b>Проблема с биллингом OpenAI.</b>\n"
-                "Пожалуйста, попробуйте позже или свяжитесь с поддержкой."
+                "💳 <b>Проблема с биллингом или лимитами</b>\n\n"
+                "Проверьте:\n"
+                "• Баланс аккаунта OpenAI\n"
+                "• Лимиты использования API\n"
+                "• Активность подписки"
+            )
+        elif "invalid_image" in error_msg.lower():
+            text = (
+                "🖼️ <b>Проблема с форматом изображения</b>\n\n"
+                "Попробуйте:\n"
+                "• Отправить изображение в формате PNG\n"
+                "• Убедиться, что размер меньше 4MB\n"
+                "• Использовать квадратное изображение"
             )
         else:
-            # Экранируем специальные символы для безопасного отображения
-            safe_error_msg = error_msg.replace('<', '&lt;').replace('>', '&gt;')
+            # Безопасное отображение ошибки
+            safe_error_msg = error_msg.replace('<', '&lt;').replace('>', '&gt;')[:200]
             text = (
-                "⚠️ <b>Ошибка при генерации изображения.</b>\n"
-                f"<b>Причина:</b> {safe_error_msg}"
+                "⚠️ <b>Ошибка при генерации изображения</b>\n\n"
+                f"<code>{safe_error_msg}</code>\n\n"
+                "Попробуйте:\n"
+                "• Изменить описание изображения\n"
+                "• Использовать более простой промпт\n"
+                "• Попробовать позже"
             )
 
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
