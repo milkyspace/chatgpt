@@ -108,9 +108,24 @@ class MessageProcessor(BaseHandler):
 
     async def handle_message_error(self, update: Update, error: Exception) -> None:
         """Обрабатывает ошибки при обработке сообщений."""
-        error_text = f"Something went wrong during completion. Reason: {error}"
-        logger.error(error_text)
-        await update.message.reply_text(error_text)
+        try:
+            # Логируем полную информацию об ошибке
+            logger.error(f"Error during message completion: {error}", exc_info=True)
+
+            # Формируем понятное сообщение для пользователя
+            if hasattr(error, '__class__') and error.__class__.__name__ != 'int':
+                error_text = f"⚠️ Произошла ошибка при обработке сообщения. Пожалуйста, попробуйте еще раз."
+            else:
+                error_text = f"⚠️ Произошла ошибка (код: {error}). Пожалуйста, попробуйте еще раз."
+
+            await update.message.reply_text(error_text, parse_mode=ParseMode.HTML)
+        except Exception as e:
+            logger.error(f"Error in error handler: {e}")
+            # Резервное сообщение
+            try:
+                await update.message.reply_text("⚠️ Произошла непредвиденная ошибка.")
+            except:
+                pass
 
     async def execute_user_task(self, user_id: int, task: asyncio.Task, update: Update) -> None:
         """Выполняет задачу пользователя с обработкой отмены."""

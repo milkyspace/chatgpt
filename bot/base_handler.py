@@ -105,18 +105,26 @@ class BaseHandler(ABC):
 
     async def subscription_preprocessor(self, update: Update, context: CallbackContext) -> bool:
         """Проверяет возможность выполнения запроса по подписке."""
-        user_id = update.effective_user.id
-        subscription_info = self.db.get_user_subscription_info(user_id)
+        try:
+            user_id = update.effective_user.id
+            subscription_info = self.db.get_user_subscription_info(user_id)
 
-        if not subscription_info["is_active"]:
+            if not subscription_info["is_active"]:
+                await update.message.reply_text(
+                    "❌ Для использования бота требуется активная подписка. "
+                    "Пожалуйста, приобретите подписку через /subscription",
+                    parse_mode=ParseMode.HTML
+                )
+                return False
+
+            return await self._check_subscription_limits(subscription_info, update)
+        except Exception as e:
+            logger.error(f"Error in subscription preprocessor: {e}", exc_info=True)
             await update.message.reply_text(
-                "❌ Для использования бота требуется активная подписка. "
-                "Пожалуйста, приобретите подписку через /subscription",
+                "❌ Ошибка проверки подписки. Пожалуйста, попробуйте еще раз.",
                 parse_mode=ParseMode.HTML
             )
             return False
-
-        return await self._check_subscription_limits(subscription_info, update)
 
     async def _check_subscription_limits(self, subscription_info: Dict[str, Any], update: Update) -> bool:
         """Проверяет лимиты подписки используя централизованную конфигурацию."""

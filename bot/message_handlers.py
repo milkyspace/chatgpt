@@ -259,8 +259,11 @@ class MessageHandlers(MessageProcessor):
                                           "date": datetime.now()}
                     self.update_dialog_and_tokens(user_id, new_dialog_message, n_input_tokens, n_output_tokens)
 
+
         except Exception as e:
-            print(e)
+
+            logger.error(f"Error in text message handling: {e}", exc_info=True)
+
             await self.handle_message_error(update, e)
 
     async def _handle_streaming_response(self, update: Update, context: CallbackContext, message: str,
@@ -463,9 +466,9 @@ class MessageHandlers(MessageProcessor):
             self.db.update_n_used_tokens(user_id, current_model, n_input_tokens, n_output_tokens)
             raise
         except Exception as e:
-            error_text = f"Something went wrong during completion_1. Reason: {e}"
-            logger.error(error_text)
-            await update.message.reply_text(error_text)
+            logger.error(f"Error in vision message handling: {e}", exc_info=True)
+            error_text = f"⚠️ Ошибка при обработке изображения. Пожалуйста, попробуйте еще раз."
+            await update.message.reply_text(error_text, parse_mode=ParseMode.HTML)
 
     async def voice_message_handle(self, update: Update, context: CallbackContext, message: Optional[str] = None) -> \
             Optional[str]:
