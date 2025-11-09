@@ -1,10 +1,10 @@
 import logging
 from datetime import datetime
 
-import telegram
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import CallbackContext
+import telegram
 
 import config
 from base_handler import BaseHandler
@@ -16,7 +16,7 @@ class ChatModeHandlers(BaseHandler):
     """Класс для обработки режимов чата."""
 
     @staticmethod
-    def get_chat_mode_menu(page_index: int) -> tuple[str, InlineKeyboardMarkup]:
+    def get_chat_mode_menu(page_index: int):
         """Создает меню выбора режима чата."""
         n_chat_modes_per_page = config.n_chat_modes_per_page
         chat_mode_keys = list(config.chat_modes.keys())
@@ -30,12 +30,15 @@ class ChatModeHandlers(BaseHandler):
         page_chat_mode_keys = chat_mode_keys[start_idx:end_idx]
 
         # Создаем кнопки режимов (по 2 в строке)
-        keyboard = [
-            [InlineKeyboardButton(config.chat_modes[key]["name"],
-                                  callback_data=f"set_chat_mode|{key}")
-             for key in page_chat_mode_keys[i:i + 2]]
-            for i in range(0, len(page_chat_mode_keys), 2)
-        ]
+        keyboard = []
+        for i in range(0, len(page_chat_mode_keys), 2):
+            row = [
+                InlineKeyboardButton(
+                    config.chat_modes[key]["name"],
+                    callback_data=f"set_chat_mode|{key}"
+                ) for key in page_chat_mode_keys[i:i + 2]
+            ]
+            keyboard.append(row)
 
         # Добавляем пагинацию если нужно
         if total_modes > n_chat_modes_per_page:
