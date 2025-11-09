@@ -194,7 +194,6 @@ class MessageHandlers(MessageProcessor):
 
         # Обработка специальных режимов
         if chat_mode == "artist":
-            # Используем image_handlers вместо self.generate_image_handle
             await self.image_handlers.generate_image_handle(update, context, message=processed_message)
             return
         elif chat_mode == "stenographer":

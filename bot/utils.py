@@ -69,6 +69,9 @@ def configure_logging() -> None:
         format='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
     )
     logger.setLevel(logging.getLogger().level)
+    logging.getLogger('pymongo').setLevel(logging.WARNING)
+    logging.getLogger('apscheduler').setLevel(logging.WARNING)
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
 
 
 def get_user_semaphore(user_id: int) -> asyncio.Semaphore:
