@@ -12,17 +12,23 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def configure_logging():
-    # Configure logging based on the enable_detailed_logging value
-    if config.enable_detailed_logging:
-        logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
-    else:
-        logging.basicConfig(level=logging.CRITICAL, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+# Константы для эмодзи и текстов
+_EMOJI = {
+    "green_circle": ":green_circle:",
+    "red_circle": ":red_circle:",
+    "money_bag": ":money_bag:",
+    "red_heart": ":red_heart:",
+    "woman_and_man_holding_hands": ":woman_and_man_holding_hands:",
+    "heart_hands": ":heart_hands:",
+    "smiling_face_with_sunglasses": ":smiling_face_with_sunglasses:",
+    "back_arrow": ":right_arrow_curving_left:"
+}
 
-    # Set the logger level based on configuration
-    logger.setLevel(logging.getLogger().level)
-
-configure_logging()
+_SUBSCRIPTION_NAMES = {
+    SubscriptionType.PRO_LITE: "Подписка Pro Lite",
+    SubscriptionType.PRO_PLUS: "Подписка Pro Plus",
+    SubscriptionType.PRO_PREMIUM: "Подписка Pro Premium"
+}
 
 class BotKeyboards:
     """Класс для создания клавиатур бота"""
@@ -39,56 +45,58 @@ class BotKeyboards:
             ReplyKeyboardMarkup: Клавиатура главного меню
         """
         db_instance = database.Database()
-
-        # Получаем информацию о подписке
         subscription_info = db_instance.get_user_subscription_info(user_id)
 
-        # Создаем клавиатуру
-        keyboard = []
-
-        # Кнопка с информацией о подписке
-        if subscription_info["is_active"]:
-            expires_at = subscription_info["expires_at"]
-            dateto = expires_at.strftime('%d.%m.%Y %H:%M')
-
-            if expires_at > datetime(2100, 1, 1):
-                status_text = emoji.emojize(":green_circle: Подписка активна навсегда")
-            else:
-                subName = 'Тестовая подписка'
-                if subscription_info["type"] == SubscriptionType.PRO_LITE:
-                    subName = 'Подписка Pro Lite'
-                elif subscription_info["type"] == SubscriptionType.PRO_PLUS:
-                    subName = 'Подписка Pro Plus'
-                elif subscription_info["type"] == SubscriptionType.PRO_PREMIUM:
-                    subName = 'Подписка Pro Premium'
-                status_text = emoji.emojize(f":green_circle: {subName} активна до: {dateto} МСК")
-        else:
-            # Если подписка была, но истекла
-            if "expires_at" in subscription_info and subscription_info["expires_at"]:
-                dateto = subscription_info["expires_at"].strftime('%d.%m.%Y %H:%M')
-                status_text = emoji.emojize(f":red_circle: Подписка закончилась: {dateto} МСК")
-            else:
-                status_text = emoji.emojize(":red_circle: Подписка не активна")
-
-        keyboard.append([KeyboardButton(status_text)])
+        keyboard = [[KeyboardButton(BotKeyboards._get_subscription_status_text(subscription_info))]]
 
         # Основные кнопки
         keyboard.extend([
             [
-                KeyboardButton(emoji.emojize("Продлить подписку :money_bag:")),
-                KeyboardButton(emoji.emojize("Выбрать режим :red_heart:"))
+                KeyboardButton(emoji.emojize(f"Продлить подписку {_EMOJI['money_bag']}")),
+                KeyboardButton(emoji.emojize(f"Выбрать режим {_EMOJI['red_heart']}"))
             ],
             [
-                KeyboardButton(emoji.emojize("Пригласить :woman_and_man_holding_hands:")),
-                KeyboardButton(emoji.emojize("Помощь :heart_hands:"))
+                KeyboardButton(emoji.emojize(f"Пригласить {_EMOJI['woman_and_man_holding_hands']}")),
+                KeyboardButton(emoji.emojize(f"Помощь {_EMOJI['heart_hands']}"))
             ]
         ])
 
         # Кнопка админ-панели для администраторов
         if str(user_id) in config.roles.get('admin', []):
-            keyboard.append([KeyboardButton(emoji.emojize("Админ-панель :smiling_face_with_sunglasses:"))])
+            keyboard.append([KeyboardButton(emoji.emojize(f"Админ-панель {_EMOJI['smiling_face_with_sunglasses']}"))])
 
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+    @staticmethod
+    def _get_subscription_status_text(subscription_info: dict) -> str:
+        """Формирует текст статуса подписки"""
+        if not subscription_info["is_active"]:
+            return BotKeyboards._get_inactive_subscription_text(subscription_info)
+        return BotKeyboards._get_active_subscription_text(subscription_info)
+
+    @staticmethod
+    def _get_active_subscription_text(subscription_info: dict) -> str:
+        """Формирует текст для активной подписки"""
+        expires_at = subscription_info["expires_at"]
+        dateto = expires_at.strftime('%d.%m.%Y %H:%M')
+
+        if expires_at > datetime(2100, 1, 1):
+            return emoji.emojize(f"{_EMOJI['green_circle']} Подписка активна навсегда")
+
+        sub_name = _SUBSCRIPTION_NAMES.get(
+            subscription_info["type"],
+            "Тестовая подписка"
+        )
+        return emoji.emojize(f"{_EMOJI['green_circle']} {sub_name} активна до: {dateto} МСК")
+
+    @staticmethod
+    def _get_inactive_subscription_text(subscription_info: dict) -> str:
+        """Формирует текст для неактивной подписки"""
+        expires_at = subscription_info.get("expires_at")
+        if expires_at:
+            dateto = expires_at.strftime('%d.%m.%Y %H:%M')
+            return emoji.emojize(f"{_EMOJI['red_circle']} Подписка закончилась: {dateto} МСК")
+        return emoji.emojize(f"{_EMOJI['red_circle']} Подписка не активна")
 
     @staticmethod
     def get_back_keyboard() -> ReplyKeyboardMarkup:
@@ -99,9 +107,8 @@ class BotKeyboards:
             ReplyKeyboardMarkup: Клавиатура с кнопкой назад
         """
         keyboard = [
-            [KeyboardButton(emoji.emojize("Назад :right_arrow_curving_left:"))]
+            [KeyboardButton(emoji.emojize(f"Назад {_EMOJI['back_arrow']}"))]
         ]
-
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     @staticmethod
@@ -116,7 +123,6 @@ class BotKeyboards:
             [KeyboardButton(emoji.emojize("Назад в админ-панель"))],
             [KeyboardButton(emoji.emojize("Главное меню"))]
         ]
-
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     @staticmethod
@@ -134,5 +140,4 @@ class BotKeyboards:
             [KeyboardButton(emoji.emojize("Отправить рассылку"))],
             [KeyboardButton(emoji.emojize("Главное меню"))]
         ]
-
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)

@@ -74,12 +74,6 @@ class MessageProcessor(BaseHandler):
 
         self.db.update_n_used_tokens(user_id, current_model, n_input_tokens, n_output_tokens)
 
-        action_type = self.db.get_user_attribute(user_id, "current_model")
-        self.db.deduct_cost_for_action(
-            user_id=user_id,
-            action_type=action_type,
-            action_params={'n_input_tokens': n_input_tokens, 'n_output_tokens': n_output_tokens}
-        )
 
     async def edit_message_with_retry(self, context: CallbackContext, placeholder_message: telegram.Message,
                                       answer: str, chat_mode: str) -> None:

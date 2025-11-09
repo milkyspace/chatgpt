@@ -3,36 +3,31 @@ import logging
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
-from telegram.ext import (
-    CallbackContext
-)
+from telegram.ext import CallbackContext
 
 import config
 from base_handler import BaseHandler
 from keyboards import BotKeyboards
 
-# Настройка логирования
 logger = logging.getLogger(__name__)
 
 
 class AdminHandlers(BaseHandler):
     """Класс для обработки админ-панели."""
 
-    async def admin_panel_handle(self, update: Update, context: CallbackContext) -> None:
-        """Обрабатывает команду админ-панели."""
+    VALID_ROLES = ['admin', 'beta_tester', 'friend', 'regular_user', 'trial_user']
+
+    async def _admin_precheck(self, update: Update, context: CallbackContext, user_id: int) -> bool:
+        """Выполняет стандартные проверки для админ-команд."""
         await self.register_user_if_not_exists(update, context, update.message.from_user)
-        user_id = update.message.from_user.id
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
         if not self._is_admin(user_id):
-            await update.message.reply_text("❌ У вас нет доступа к админ-панели.")
-            return
-
-        await self._show_admin_panel(update, context)
+            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+            return False
+        return True
 
     def _is_admin(self, user_id: int) -> bool:
         """Проверяет, является ли пользователь администратором."""
@@ -48,14 +43,20 @@ class AdminHandlers(BaseHandler):
         else:
             await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
+    async def admin_panel_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает команду админ-панели."""
+        user_id = update.message.from_user.id
+
+        if not await self._admin_precheck(update, context, user_id):
+            return
+
+        await self._show_admin_panel(update, context)
+
     async def show_users_handle(self, update: Update, context: CallbackContext) -> None:
         """Показывает список пользователей."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
         user_id = update.message.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if not self._is_admin(user_id):
-            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        if not await self._admin_precheck(update, context, user_id):
             return
 
         users = self.db.get_users_and_roles()
@@ -64,7 +65,8 @@ class AdminHandlers(BaseHandler):
             await update.message.reply_text("📝 Пользователей не найдено.")
             return
 
-        text = "👥 <b>Список пользователей:</b>\n\n"
+        text_lines = ["👥 <b>Список пользователей:</b>\n\n"]
+
         for i, user in enumerate(users[:50], 1):
             username = user.get('username', 'Нет username')
             first_name = user.get('first_name', 'Нет имени')
@@ -74,25 +76,29 @@ class AdminHandlers(BaseHandler):
             if isinstance(last_interaction, datetime):
                 last_interaction = last_interaction.strftime("%d.%m.%Y %H:%M")
 
-            text += f"{i}. ID: {user['_id']}\n"
-            text += f"   👤: {first_name} (@{username})\n"
-            text += f"   🏷️: {role}\n"
-            text += f"   ⏰: {last_interaction}\n\n"
+            text_lines.extend([
+                f"{i}. ID: {user['_id']}\n",
+                f"   👤: {first_name} (@{username})\n",
+                f"   🏷️: {role}\n",
+                f"   ⏰: {last_interaction}\n\n"
+            ])
 
         if len(users) > 50:
-            text += f"\n... и еще {len(users) - 50} пользователей"
+            text_lines.append(f"\n... и еще {len(users) - 50} пользователей")
 
         reply_markup = BotKeyboards.get_back_to_admin_keyboard()
-        await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+        await update.message.reply_text(''.join(text_lines), parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+
+    async def _show_command_help(self, update: Update, command: str, help_text: str) -> None:
+        """Показывает справку по команде."""
+        reply_markup = BotKeyboards.get_back_to_admin_keyboard()
+        await update.message.reply_text(help_text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
     async def edit_user_handle(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает запрос на редактирование пользователя."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
         user_id = update.message.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if not self._is_admin(user_id):
-            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        if not await self._admin_precheck(update, context, user_id):
             return
 
         text = (
@@ -101,20 +107,16 @@ class AdminHandlers(BaseHandler):
             "<code>/edit_user USER_ID ROLE</code>\n\n"
             "Пример:\n"
             "<code>/edit_user 123456789 admin</code>\n\n"
-            "Доступные роли: admin, beta_tester, friend, regular_user, trial_user"
+            f"Доступные роли: {', '.join(self.VALID_ROLES)}"
         )
 
-        reply_markup = BotKeyboards.get_back_to_admin_keyboard()
-        await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+        await self._show_command_help(update, "edit_user", text)
 
     async def broadcast_handle(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает запрос на рассылку."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
         user_id = update.message.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if not self._is_admin(user_id):
-            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        if not await self._admin_precheck(update, context, user_id):
             return
 
         text = (
@@ -125,13 +127,31 @@ class AdminHandlers(BaseHandler):
             "<code>/broadcast Всем привет! Это тестовая рассылка.</code>"
         )
 
-        reply_markup = BotKeyboards.get_back_to_admin_keyboard()
-        await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+        await self._show_command_help(update, "broadcast", text)
+
+    async def get_user_data_handle(self, update: Update, context: CallbackContext) -> None:
+        """Обрабатывает запрос на получение данных пользователя."""
+        user_id = update.message.from_user.id
+
+        if not await self._admin_precheck(update, context, user_id):
+            return
+
+        text = (
+            "👤 <b>Получение данных пользователя</b>\n\n"
+            "Для получения данных отправьте команду в формате:\n"
+            "<code>/user_data USER_ID</code>\n\n"
+            "Пример:\n"
+            "<code>/user_data 123456789</code>\n\n"
+            "Или отправьте username пользователя:\n"
+            "<code>/user_data @username</code>"
+        )
+
+        await self._show_command_help(update, "user_data", text)
 
     async def handle_main_menu_back(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает возврат в главное меню из админ-панели."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
         user_id = update.message.from_user.id
+        await self.register_user_if_not_exists(update, context, update.message.from_user)
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
         reply_markup = await BotKeyboards.get_main_keyboard(user_id)
@@ -143,23 +163,18 @@ class AdminHandlers(BaseHandler):
 
     async def handle_admin_panel_back(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает возврат в админ-панель."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
         user_id = update.message.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
-        if not self._is_admin(user_id):
-            await update.message.reply_text("❌ У вас нет доступа к админ-панели.")
+        if not await self._admin_precheck(update, context, user_id):
             return
 
         await self._show_admin_panel(update, context)
 
     async def edit_user_command(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает команду /edit_user."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
         user_id = update.message.from_user.id
 
-        if not self._is_admin(user_id):
-            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        if not await self._admin_precheck(update, context, user_id):
             return
 
         if not context.args or len(context.args) < 2:
@@ -178,15 +193,13 @@ class AdminHandlers(BaseHandler):
                 await update.message.reply_text(f"❌ Пользователь с ID {target_user_id} не найден.")
                 return
 
-            valid_roles = ['admin', 'beta_tester', 'friend', 'regular_user', 'trial_user']
-            if new_role not in valid_roles:
+            if new_role not in self.VALID_ROLES:
                 await update.message.reply_text(
-                    f"❌ Неверная роль. Допустимые роли: {', '.join(valid_roles)}"
+                    f"❌ Неверная роль. Допустимые роли: {', '.join(self.VALID_ROLES)}"
                 )
                 return
 
             self.db.set_user_attribute(target_user_id, "role", new_role)
-
             await update.message.reply_text(
                 f"✅ Роль пользователя {target_user_id} успешно изменена на '{new_role}'"
             )
@@ -199,11 +212,9 @@ class AdminHandlers(BaseHandler):
 
     async def broadcast_command(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает команду /broadcast."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
         user_id = update.message.from_user.id
 
-        if not self._is_admin(user_id):
-            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        if not await self._admin_precheck(update, context, user_id):
             return
 
         if not context.args:
@@ -250,7 +261,6 @@ class AdminHandlers(BaseHandler):
 
         if data.startswith("confirm_broadcast|"):
             message_text = data.split("|", 1)[1]
-
             await query.edit_message_text("🔄 Начинаю рассылку...")
 
             all_user_ids = self.db.get_all_user_ids()
@@ -283,29 +293,6 @@ class AdminHandlers(BaseHandler):
             )
 
             await query.edit_message_text(result_text, parse_mode=ParseMode.HTML)
-
-    async def get_user_data_handle(self, update: Update, context: CallbackContext) -> None:
-        """Обрабатывает запрос на получение данных пользователя."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
-        user_id = update.message.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
-        if not self._is_admin(user_id):
-            await update.message.reply_text("❌ У вас нет доступа к этой команде.")
-            return
-
-        text = (
-            "👤 <b>Получение данных пользователя</b>\n\n"
-            "Для получения данных отправьте команду в формате:\n"
-            "<code>/user_data USER_ID</code>\n\n"
-            "Пример:\n"
-            "<code>/user_data 123456789</code>\n\n"
-            "Или отправьте username пользователя:\n"
-            "<code>/user_data @username</code>"
-        )
-
-        reply_markup = BotKeyboards.get_back_to_admin_keyboard()
-        await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
 
     async def get_user_data_command(self, update: Update, context: CallbackContext) -> None:
         """Обрабатывает команду /user_data."""
@@ -376,51 +363,57 @@ class AdminHandlers(BaseHandler):
         """Форматирует подробную информацию о пользователе."""
         user_id = user_data['_id']
 
-        text = f"👤 <b>Данные пользователя</b>\n\n"
-        text += f"<b>ID:</b> <code>{user_id}</code>\n"
-        text += f"<b>Username:</b> @{user_data.get('username', 'не указан')}\n"
-        text += f"<b>Имя:</b> {user_data.get('first_name', 'не указано')}\n"
-        text += f"<b>Фамилия:</b> {user_data.get('last_name', 'не указана')}\n"
-        text += f"<b>Chat ID:</b> <code>{user_data.get('chat_id', 'не указан')}</code>\n"
-        text += f"<b>Роль:</b> {user_data.get('role', 'не указана')}\n\n"
+        text_lines = [
+            f"👤 <b>Данные пользователя</b>\n\n",
+            f"<b>ID:</b> <code>{user_id}</code>\n",
+            f"<b>Username:</b> @{user_data.get('username', 'не указан')}\n",
+            f"<b>Имя:</b> {user_data.get('first_name', 'не указано')}\n",
+            f"<b>Фамилия:</b> {user_data.get('last_name', 'не указана')}\n",
+            f"<b>Chat ID:</b> <code>{user_data.get('chat_id', 'не указан')}</code>\n",
+            f"<b>Роль:</b> {user_data.get('role', 'не указана')}\n\n"
+        ]
 
         # Информация о подписке
         subscription_info = self.db.get_user_subscription_info(user_id)
         if subscription_info["is_active"]:
             expires_at = subscription_info["expires_at"].strftime("%d.%m.%Y %H:%M")
-            text += f"<b>Подписка:</b> {subscription_info['type']}\n"
-            text += f"<b>Действует до:</b> {expires_at}\n"
-            text += f"<b>Запросов использовано:</b> {subscription_info['requests_used']}\n"
-            text += f"<b>Изображений использовано:</b> {subscription_info['images_used']}\n\n"
+            text_lines.extend([
+                f"<b>Подписка:</b> {subscription_info['type']}\n",
+                f"<b>Действует до:</b> {expires_at}\n",
+                f"<b>Запросов использовано:</b> {subscription_info['requests_used']}\n",
+                f"<b>Изображений использовано:</b> {subscription_info['images_used']}\n\n"
+            ])
         else:
-            text += "<b>Подписка:</b> не активна\n\n"
+            text_lines.append("<b>Подписка:</b> не активна\n\n")
 
         # Статистика использования
-        text += "<b>Статистика использования:</b>\n"
+        text_lines.append("<b>Статистика использования:</b>\n")
 
         n_used_tokens = user_data.get('n_used_tokens', {})
         if n_used_tokens:
             for model, tokens in n_used_tokens.items():
                 input_tokens = tokens.get('n_input_tokens', 0)
                 output_tokens = tokens.get('n_output_tokens', 0)
-                text += f"  {model}: {input_tokens} ввод / {output_tokens} вывод\n"
+                text_lines.append(f"  {model}: {input_tokens} ввод / {output_tokens} вывод\n")
         else:
-            text += "  Токены: не использовались\n"
+            text_lines.append("  Токены: не использовались\n")
 
         n_generated_images = user_data.get('n_generated_images', 0)
-        text += f"  Сгенерировано изображений: {n_generated_images}\n"
+        text_lines.append(f"  Сгенерировано изображений: {n_generated_images}\n")
 
         n_transcribed_seconds = user_data.get('n_transcribed_seconds', 0)
-        text += f"  Расшифровано аудио: {n_transcribed_seconds} сек.\n\n"
+        text_lines.append(f"  Расшифровано аудио: {n_transcribed_seconds} сек.\n\n")
 
         # Финансовая информация
         financials = self.db.get_user_financials(user_id)
-        text += "<b>Финансовая информация:</b>\n"
-        text += f"  Баланс RUB: {user_data.get('rub_balance', 0)}₽\n"
-        text += f"  Баланс EUR: {user_data.get('euro_balance', 0)}€\n"
-        text += f"  Всего пополнено: {financials.get('total_topup', 0)}₽\n"
-        text += f"  Всего потрачено: {user_data.get('total_spent', 0)}₽\n"
-        text += f"  Пожертвовано: {financials.get('total_donated', 0)}₽\n\n"
+        text_lines.extend([
+            "<b>Финансовая информация:</b>\n",
+            f"  Баланс RUB: {user_data.get('rub_balance', 0)}₽\n",
+            f"  Баланс EUR: {user_data.get('euro_balance', 0)}€\n",
+            f"  Всего пополнено: {financials.get('total_topup', 0)}₽\n",
+            f"  Всего потрачено: {user_data.get('total_spent', 0)}₽\n",
+            f"  Пожертвовано: {financials.get('total_donated', 0)}₽\n\n"
+        ])
 
         # Информация о активности
         first_seen = user_data.get('first_seen', 'неизвестно')
@@ -431,12 +424,16 @@ class AdminHandlers(BaseHandler):
         if isinstance(last_interaction, datetime):
             last_interaction = last_interaction.strftime("%d.%m.%Y %H:%M")
 
-        text += f"<b>Первое посещение:</b> {first_seen}\n"
-        text += f"<b>Последняя активность:</b> {last_interaction}\n"
+        text_lines.extend([
+            f"<b>Первое посещение:</b> {first_seen}\n",
+            f"<b>Последняя активность:</b> {last_interaction}\n"
+        ])
 
         current_model = user_data.get('current_model', 'не указана')
         current_chat_mode = user_data.get('current_chat_mode', 'не указан')
-        text += f"<b>Текущая модель:</b> {current_model}\n"
-        text += f"<b>Режим чата:</b> {current_chat_mode}\n"
+        text_lines.extend([
+            f"<b>Текущая модель:</b> {current_model}\n",
+            f"<b>Режим чата:</b> {current_chat_mode}\n"
+        ])
 
-        return text
+        return ''.join(text_lines)

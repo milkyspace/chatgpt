@@ -557,11 +557,6 @@ class MessageHandlers(MessageProcessor):
         audio_duration_minutes = voice.duration / 60.0
         self.db.set_user_attribute(user_id, "n_transcribed_seconds",
                                    voice.duration + self.db.get_user_attribute(user_id, "n_transcribed_seconds"))
-        self.db.deduct_cost_for_action(
-            user_id=user_id,
-            action_type='whisper',
-            action_params={'audio_duration_minutes': audio_duration_minutes}
-        )
 
         if chat_mode == "stenographer":
             transcription_message = f"Your transcription is in: \n\n<code>{transcribed_text}</code>"
