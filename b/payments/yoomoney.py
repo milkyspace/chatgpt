@@ -1,7 +1,12 @@
 from __future__ import annotations
+
+import requests
 from config import cfg
 from yookassa import Configuration, Payment as YooPayment
 import uuid
+
+import logging
+logger = logging.getLogger(__name__)
 
 class YooMoneyProvider:
     """ЮKassa с ручной проверкой статуса (без вебхуков)."""
@@ -10,13 +15,28 @@ class YooMoneyProvider:
         Configuration.secret_key = cfg.yookassa_secret_key
 
     async def create_invoice(self, user_id: int, plan_code: str, amount_rub: int, description: str) -> str:
-        payment = YooPayment.create({
-            "amount": {"value": f"{amount_rub:.2f}", "currency": "RUB"},
-            "confirmation": {"type": "redirect", "return_url": "https://yoomoney.ru"},
-            "capture": True,
-            "description": description,
-            "metadata": {"user_id": user_id, "plan_code": plan_code}
-        }, uuid.uuid4().hex)
+        """Создает платёж и возвращает redirect URL"""
+        idempotence_key = str(uuid.uuid4())
+        try:
+            payment = YooPayment.create({
+                "amount": {
+                    "value": f"{amount_rub:.2f}",
+                    "currency": "RUB"
+                },
+                "confirmation": {
+                    "type": "redirect",
+                    "return_url": "https://yoomoney.ru"
+                },
+                "capture": True,
+                "description": description or f"План {plan_code}",
+                "metadata": {
+                    "user_id": str(user_id),
+                    "plan_code": plan_code
+                }
+            }, idempotence_key)
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"[YooKassa] Ошибка HTTP: {e.response.text}")
+            raise
         return payment.confirmation.confirmation_url
 
     async def check_status(self, payment_id: str) -> str:
