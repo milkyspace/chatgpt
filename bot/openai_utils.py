@@ -201,3 +201,20 @@ async def generate_images(
     except Exception as e:
         logger.error("Error generating images: %s", e, exc_info=True)
         raise
+
+async def generate_image_with_input(prompt: str, image_bytes: bytes) -> bytes:
+    response = await openai_client.images.edit(
+        model="gpt-image-1",
+        prompt=prompt,
+        image=[
+            {
+                "name": "input.png",
+                "bytes": image_bytes
+            }
+        ],
+        size="1024x1024"
+    )
+
+    # Достаём base64
+    b64 = response.data[0].b64_json
+    return base64.b64decode(b64)

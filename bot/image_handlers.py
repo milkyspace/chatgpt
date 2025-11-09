@@ -1,7 +1,7 @@
 import io
 import logging
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, List
 
 import aiohttp
 import telegram
@@ -12,7 +12,6 @@ from telegram.ext import CallbackContext
 import openai_utils
 from base_handler import BaseHandler
 
-# Настройка логирования
 logger = logging.getLogger(__name__)
 
 
@@ -23,8 +22,8 @@ class ImageHandlers(BaseHandler):
                                     message: Optional[str] = None) -> None:
         """Обрабатывает генерацию изображений."""
         user = update.message.from_user
-        await self.register_user_if_not_exists(update, context, user)
 
+        await self.register_user_if_not_exists(update, context, user)
         if await self.is_previous_message_not_answered_yet(update, context):
             return
 
@@ -37,6 +36,7 @@ class ImageHandlers(BaseHandler):
         await update.message.chat.send_action(action="upload_photo")
 
         prompt = message or update.message.text
+
         placeholder_message = await update.message.reply_text(
             "<i>Рисуем...</i>",
             parse_mode=ParseMode.HTML
@@ -44,85 +44,105 @@ class ImageHandlers(BaseHandler):
 
         try:
             image_urls = await self._generate_images(user_id, prompt)
-            await self._send_generated_images(update, context, prompt, image_urls, placeholder_message)
+
+            await self._send_generated_images(
+                update,
+                context,
+                prompt,
+                image_urls,
+                placeholder_message
+            )
 
         except Exception as e:
             await self._handle_image_generation_error(update, e)
 
     async def _generate_images(self, user_id: int, prompt: str) -> List[str]:
-        """Генерирует изображения через OpenAI."""
-        user_preferences = self.db.get_user_attribute(user_id, "image_preferences") or {}
+        """Генерация изображений через новый OpenAI API."""
+        prefs = self.db.get_user_attribute(user_id, "image_preferences") or {}
 
-        model = user_preferences.get("model", "dalle-2")
-        n_images = user_preferences.get("n_images", 3)
-        resolution = user_preferences.get("resolution", "1024x1024")
+        model = prefs.get("model", "dall-e-3")  # Можно переопределить
+        n_images = prefs.get("n_images", 2)
+        resolution = prefs.get("resolution", "1024x1024")
 
-        image_urls = await openai_utils.generate_images(
-            prompt=prompt,
-            model=model,
-            n_images=n_images,
-            size=resolution
-        )
+        try:
+            image_urls = await openai_utils.generate_images(
+                prompt=prompt,
+                model=model,
+                n_images=n_images,
+                size=resolution
+            )
+        except Exception as e:
+            # автоматический fallback
+            if "rejected" in str(e).lower() or "safety" in str(e).lower():
+                logger.warning("FALLBACK dalle-3 → gpt-image-1")
+                image_urls = await openai_utils.generate_images(
+                    prompt=prompt,
+                    model="gpt-image-1",
+                    n_images=n_images,
+                    size=resolution
+                )
+            else:
+                raise
 
         self._update_image_usage_stats(user_id, n_images)
         return image_urls
 
     def _update_image_usage_stats(self, user_id: int, n_images: int) -> None:
-        """Обновляет статистику использования изображений."""
-        current_count = self.db.get_user_attribute(user_id, "n_generated_images") or 0
-        self.db.set_user_attribute(user_id, "n_generated_images", current_count + n_images)
+        count = self.db.get_user_attribute(user_id, "n_generated_images") or 0
+        self.db.set_user_attribute(user_id, "n_generated_images", count + n_images)
 
-    async def _send_generated_images(self, update: Update, context: CallbackContext, prompt: str,
-                                     image_urls: List[str], placeholder_message: telegram.Message) -> None:
-        """Отправляет сгенерированные изображения."""
+    async def _send_generated_images(self, update: Update, context: CallbackContext,
+                                     prompt: str, image_urls: List[str],
+                                     placeholder_message: telegram.Message) -> None:
         chat_id = placeholder_message.chat_id
-        message_id = placeholder_message.message_id
+        m_id = placeholder_message.message_id
 
-        # Предварительное сообщение
-        pre_message = f"Нарисовали 🎨:\n\n  <i>{prompt or ''}</i>  \n\nПодождите немного, изображение почти готово!"
-        await context.bot.edit_message_text(
-            pre_message,
-            chat_id=chat_id,
-            message_id=message_id,
-            parse_mode=ParseMode.HTML
-        )
+        try:
+            await context.bot.edit_message_text(
+                f"🖼 Генерируем...\n\n<i>{prompt}</i>",
+                chat_id=chat_id,
+                message_id=m_id,
+                parse_mode=ParseMode.HTML
+            )
+        except telegram.error.BadRequest:
+            pass
 
-        # Отправка изображений
-        for image_url in image_urls:
-            await update.message.chat.send_action(action="upload_photo")
-            await self._upload_image_from_url(context.bot, chat_id, image_url)
-
-        # Финальное сообщение
-        post_message = f"Нарисовали 🎨:\n\n  <i>{prompt or ''}</i>  \n\nКак вам??"
-        await context.bot.edit_message_text(
-            post_message,
-            chat_id=chat_id,
-            message_id=message_id,
-            parse_mode=ParseMode.HTML
-        )
-
-    async def _upload_image_from_url(self, bot: telegram.Bot, chat_id: int, image_url: str) -> None:
-        """Загружает изображение по URL и отправляет его асинхронно."""
         async with aiohttp.ClientSession() as session:
-            async with session.get(image_url) as response:
-                if response.status == 200:
-                    image_data = await response.read()
-                    image_buffer = io.BytesIO(image_data)
-                    image_buffer.name = "image.jpg"
-                    await bot.send_photo(
-                        chat_id=chat_id,
-                        photo=InputFile(image_buffer, "image.jpg")
-                    )
-                else:
-                    logger.error(f"Failed to download image. Status: {response.status}")
+            for url in image_urls:
+                await update.message.chat.send_action(action="upload_photo")
+                await self._send_one_image(session, context.bot, chat_id, url)
+
+        await context.bot.edit_message_text(
+            f"Готово 🎨\n\n<i>{prompt}</i>",
+            chat_id=chat_id,
+            message_id=m_id,
+            parse_mode=ParseMode.HTML
+        )
+
+    async def _send_one_image(self, session: aiohttp.ClientSession, bot: telegram.Bot, chat_id: int, url: str):
+        """Скачивание и отправка изображения."""
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                logger.error(f"Failed download {url} — {resp.status}")
+                return
+
+            img = io.BytesIO(await resp.read())
+            img.name = "image.jpg"
+
+            await bot.send_photo(chat_id=chat_id, photo=InputFile(img))
 
     async def _handle_image_generation_error(self, update: Update, error: Exception) -> None:
-        """Обрабатывает ошибки генерации изображений."""
-        error_msg = str(error)
+        msg = str(error)
 
-        if error_msg.startswith("Your request was rejected as a result of our safety system"):
-            error_text = "🥲 Your request <b>doesn't comply</b> with OpenAI's usage policies.\nWhat did you write there, huh??"
+        if msg.startswith("Your request was rejected"):
+            text = (
+                "🚫 <b>Запрос отклонён политиками OpenAI.</b>\n"
+                "Попробуй сформулировать мягче 🫣"
+            )
         else:
-            error_text = f"⚠️ There was an issue with your request. Please try again.\n\n<b>Reason</b>: {error_msg}"
+            text = (
+                "⚠️ Ошибка при генерации изображения.\n"
+                f"<b>Причина:</b> {msg}"
+            )
 
-        await update.message.reply_text(error_text, parse_mode=ParseMode.HTML)
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)

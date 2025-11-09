@@ -533,7 +533,13 @@ class MessageHandlers(MessageProcessor):
 
         return _message
 
-    async def generate_image_handle(self, update: Update, context: CallbackContext,
-                                    message: Optional[str] = None) -> None:
-        """Прокси-метод для генерации изображений."""
-        await self.image_handlers.generate_image_handle(update, context, message=message)
+    async def generate_image_handle(self, update, context, message=None):
+        photo = update.message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
+        img_bytes = await file.download_as_bytearray()
+
+        prompt = message or "Сделай изображение лучше"  # или твой входной текст
+
+        result = await openai_utils.generate_image_with_input(prompt, img_bytes)
+
+        await update.message.reply_photo(result)
