@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from typing import Tuple, List
 
 import telegram
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 class SettingsHandlers(BaseHandler):
     """Класс для обработки настроек."""
 
-    def get_settings_menu(self, user_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    def get_settings_menu(self, user_id: int) -> Tuple[str, InlineKeyboardMarkup]:
         """Создает меню настроек."""
         text = "⚙️ Настройки:"
         keyboard = [
@@ -47,7 +48,7 @@ class SettingsHandlers(BaseHandler):
         text, reply_markup = self.get_settings_menu(user_id)
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
-    def _create_model_buttons(self, available_models: list, current_model: str, prefix: str = "model") -> tuple[
+    def _create_model_buttons(self, available_models: list, current_model: str, prefix: str = "model") -> Tuple[
         list, list]:
         """Создает кнопки для выбора модели."""
         claude_buttons = []
@@ -199,7 +200,7 @@ class SettingsHandlers(BaseHandler):
 
         await self.artist_model_settings_handler(query, user_id)
 
-    def _create_artist_buttons(self, user_id: int) -> list[list[InlineKeyboardButton]]:
+    def _create_artist_buttons(self, user_id: int) -> List[List[InlineKeyboardButton]]:
         """Создает кнопки для выбора модели художника."""
         current_preferences = self.db.get_user_attribute(user_id, "image_preferences")
         current_model = current_preferences.get("model", "dalle-2")
