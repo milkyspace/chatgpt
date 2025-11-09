@@ -1,40 +1,31 @@
+version: "3.9"
 services:
-  mongo:
-    container_name: mongo
-    image: mongo:latest
+  mariadb:
+    image: mariadb:latest
+    container_name: mariadb
     restart: always
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-password}
+      MARIADB_DATABASE: ${MARIADB_DATABASE:-ai_bot_db}
+      MARIADB_USER: ${MARIADB_USER:-ai_bot}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-password}
     ports:
-      - 127.0.0.1:${MONGODB_PORT:-27017}:${MONGODB_PORT:-27017}
+      - "127.0.0.1:${MARIADB_PORT:-3306}:3306"
     volumes:
-      - ${MONGODB_PATH:-./mongodb}:/data/db
+      - ./mariadb_data:/var/lib/mysql
 
   chatgpt_telegram_bot:
     container_name: chatgpt_telegram_bot
-    command: python3 bot/bot.py
-    restart: always
     build:
-      context: "."
+      context: .
       dockerfile: Dockerfile
+    command: python3 b/bot.py
+    restart: always
     depends_on:
-      - mongo
+      - mariadb
     environment:
-      - YOOKASSA_SHOP_ID=${YOOKASSA_SHOP_ID}
-      - YOOKASSA_SECRET_KEY=${YOOKASSA_SECRET_KEY}
+      - DATABASE_URL=mysql+aiomysql://${MARIADB_USER:-ai_bot}:${MARIADB_PASSWORD:-password}@mariadb:3306/${MARIADB_DATABASE:-ai_bot_db}
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-
-  mongo_express:
-    container_name: mongo-express
-    image: mongo-express:latest
-    restart: always
-    ports:
-      - 0.0.0.0:${MONGO_EXPRESS_PORT:-8081}:${MONGO_EXPRESS_PORT:-8081}
-    environment:
-      - ME_CONFIG_MONGODB_SERVER=mongo
-      - ME_CONFIG_MONGODB_PORT=${MONGODB_PORT:-27017}
-      - ME_CONFIG_MONGODB_ENABLE_ADMIN=true
-      - ME_CONFIG_MONGODB_AUTH_DATABASE=chatgpt_telegram_bot
-      - ME_CONFIG_BASICAUTH_USERNAME=${MONGO_EXPRESS_USERNAME:-username}
-      - ME_CONFIG_BASICAUTH_PASSWORD=${MONGO_EXPRESS_PASSWORD:-password}
-    depends_on:
-      - mongo
+      - YOOKASSA_SHOP_ID=${YOOKASSA_SHOP_ID}
+      - YOOKASSA_SECRET_KEY=${YOOKASSA_SECRET_KEY}
