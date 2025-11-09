@@ -10,7 +10,7 @@ from telegram.ext import (CallbackContext)
 from telegram.constants import ParseMode
 
 import database
-import bot.base_handler as BaseHandler
+import handlers.base_handler as BaseHandler
 
 # Глобальные переменные
 db = database.Database()

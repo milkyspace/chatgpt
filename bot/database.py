@@ -3,8 +3,8 @@ import pymongo
 import uuid
 from datetime import datetime, timedelta
 import config
-from subscription import SubscriptionType
-from subscription_config import SubscriptionConfig
+from subscription.subscription import SubscriptionType
+from subscription.subscription_config import SubscriptionConfig
 
 
 class Database:

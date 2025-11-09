@@ -18,10 +18,10 @@ from yookassa import Payment, Configuration
 
 import config
 import database
-from subscription import SubscriptionType
-from subscription_config import SubscriptionConfig
-from handler_factory import HandlerFactory
-from router_config import RouterConfig
+from subscription.subscription import SubscriptionType
+from subscription.subscription_config import SubscriptionConfig
+from handlers.handler_factory import HandlerFactory
+from router.router_config import RouterConfig
 
 # Настройка логирования
 logger = logging.getLogger(__name__)

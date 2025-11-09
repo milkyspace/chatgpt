@@ -3,7 +3,7 @@ import asyncio
 from typing import Dict
 from telegram import (Update)
 from telegram.ext import (CallbackContext)
-from bot.base_handler import BaseHandler
+from bot.handlers.base_handler import BaseHandler
 import bot.database as database
 
 # Глобальные переменные

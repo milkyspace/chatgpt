@@ -5,7 +5,16 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="c49b2697-deab-421e-88ce-4ba8723f2a80" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/bot/router/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/bot/subscription/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/bot/bot.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/bot.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/database.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/database.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/message_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/message_processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/message_router.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/router/message_router.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/router_config.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/router/router_config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/subscription.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/subscription/subscription.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bot/subscription_config.py" beforeDir="false" afterPath="$PROJECT_DIR$/bot/subscription/subscription_config.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -62,6 +71,9 @@
 }]]></component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/bot/router" />
+      <recent name="$PROJECT_DIR$/bot/subscription" />
+      <recent name="$PROJECT_DIR$/bot/handlers" />
       <recent name="$PROJECT_DIR$/bot" />
     </key>
   </component>
