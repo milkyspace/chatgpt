@@ -192,11 +192,11 @@ class ImageHandlers(BaseHandler):
             await file.download_to_memory(img_buffer)
             img_buffer.seek(0)
 
-            # Конвертируем в PNG с помощью PIL
+            # Конвертируем в правильный формат для DALL-E 2
             with Image.open(img_buffer) as img:
-                # Конвертируем в RGB если нужно (для JPEG)
-                if img.mode in ('RGBA', 'P'):
-                    img = img.convert('RGB')
+                # Конвертируем в RGBA (добавляем альфа-канал)
+                if img.mode != 'RGBA':
+                    img = img.convert('RGBA')
 
                 # Сохраняем в PNG формате
                 png_buffer = io.BytesIO()
@@ -205,9 +205,8 @@ class ImageHandlers(BaseHandler):
 
                 # Проверяем размер файла
                 if png_buffer.getbuffer().nbytes > 4 * 1024 * 1024:  # 4MB
-                    # Уменьшаем качество если файл слишком большой
-                    png_buffer = io.BytesIO()
                     # Уменьшаем размер изображения если нужно
+                    png_buffer = io.BytesIO()
                     if img.size[0] > 1024 or img.size[1] > 1024:
                         img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
                     img.save(png_buffer, format='PNG', optimize=True)
