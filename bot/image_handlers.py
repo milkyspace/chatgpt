@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 from typing import Optional, List
 
+import asyncio
 import aiohttp
 import telegram
 from telegram import Update, InputFile
@@ -61,33 +62,32 @@ class ImageHandlers(BaseHandler):
         prefs = self.db.get_user_attribute(user_id, "image_preferences") or {}
 
         model = prefs.get("model", "dall-e-3")
-        n_images = prefs.get("n_images", 1)  # По умолчанию 1 изображение
         resolution = prefs.get("resolution", "1024x1024")
 
         try:
-            image_urls = await openai_utils.generate_images(
+            # Обертываем синхронный вызов в asyncio.to_thread
+            image_urls = await asyncio.to_thread(
+                openai_utils.generate_images,
                 prompt=prompt,
                 model=model,
-                n_images=n_images,
                 size=resolution
             )
             return image_urls
 
         except Exception as e:
-            # Автоматический fallback для DALL-E 3 → DALL-E 2
-            if "rejected" in str(e).lower() or "safety" in str(e).lower() or "billing" in str(e).lower():
-                logger.warning("FALLBACK dall-e-3 → dall-e-2")
+            # Fallback для DALL-E 3 → DALL-E 2
+            if any(keyword in str(e).lower() for keyword in ["rejected", "safety", "billing", "quota"]):
+                logger.warning("FALLBACK dalle-3 → dalle-2")
                 try:
-                    image_urls = await openai_utils.generate_images(
+                    image_urls = await asyncio.to_thread(
+                        openai_utils.generate_images,
                         prompt=prompt,
                         model="dall-e-2",
-                        n_images=n_images,
-                        size="1024x1024"  # DALL-E 2 поддерживает этот размер
+                        size="1024x1024"
                     )
                     return image_urls
-                except Exception as fallback_error:
-                    logger.error(f"Fallback also failed: {fallback_error}")
-                    raise e  # Возвращаем оригинальную ошибку
+                except Exception:
+                    raise e
             else:
                 raise
 
@@ -191,7 +191,11 @@ class ImageHandlers(BaseHandler):
             prompt = message or update.message.caption or "Улучши это изображение"
 
             # Генерируем новое изображение на основе загруженного
-            result_url = await openai_utils.generate_image_with_input(prompt, img_bytes)
+            result_url = await asyncio.to_thread(
+                openai_utils.generate_image_with_input,
+                prompt,
+                img_bytes
+            )
 
             # Отправляем результат
             await self._send_edited_image(context, placeholder_message, result_url, prompt)

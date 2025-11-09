@@ -407,7 +407,9 @@ class MessageHandlers(MessageProcessor):
         buf.name = "voice.oga"
         buf.seek(0)
 
-        transcribed_text = await openai_utils.transcribe_audio(buf)
+        # Обертываем синхронный вызов в asyncio.to_thread
+        transcribed_text = await asyncio.to_thread(openai_utils.transcribe_audio, buf)
+
         text = f"🎤: <i>{transcribed_text}</i>"
 
         user_id = update.message.from_user.id
