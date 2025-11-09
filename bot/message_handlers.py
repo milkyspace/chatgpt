@@ -442,25 +442,17 @@ class MessageHandlers(MessageProcessor):
 
             chatgpt_instance = openai_utils.ChatGPT(model=current_model)
 
-            if config.enable_message_streaming:
-                gen = chatgpt_instance.send_vision_message_stream(
-                    message_text,
-                    dialog_messages=dialog_messages,
-                    image_buffer=buf,
-                    chat_mode=chat_mode,
-                )
-            else:
-                answer, (n_input_tokens, n_output_tokens), _ = await chatgpt_instance.send_vision_message(
-                    message_text,
-                    dialog_messages=dialog_messages,
-                    image_buffer=buf,
-                    chat_mode=chat_mode,
-                )
+            answer, (n_input_tokens, n_output_tokens), _ = await chatgpt_instance.send_vision_message(
+                message_text,
+                dialog_messages=dialog_messages,
+                image_buffer=buf,
+                chat_mode=chat_mode,
+            )
 
-                async def fake_gen():
-                    yield "finished", answer, (n_input_tokens, n_output_tokens), 0
+            async def fake_gen():
+                yield "finished", answer, (n_input_tokens, n_output_tokens), 0
 
-                gen = fake_gen()
+            gen = fake_gen()
 
             prev_answer = ""
             async for gen_item in gen:
