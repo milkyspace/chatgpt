@@ -1,4 +1,7 @@
 from __future__ import annotations
+
+from typing import List
+
 from pydantic import BaseModel
 import os
 from dotenv import load_dotenv
@@ -16,7 +19,7 @@ class PlanConfig(BaseModel):
 
 class AppConfig(BaseModel):
     # Telegram
-    admins = [os.getenv("ADMIN_IDS", "")]
+    admins: List[int] = [os.getenv("ADMIN_IDS", "")]
     bot_token: str = os.getenv("BOT_TOKEN", "")
     admin_ids: set[int] = set(map(int, os.getenv("ADMIN_IDS", "0").split(","))) if os.getenv("ADMIN_IDS") else set()
 
