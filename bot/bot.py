@@ -12,8 +12,7 @@ import base64
 import io
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
-from abc import ABC
-from io import BytesIO
+from base_handler import BaseHandler
 
 import requests
 import emoji
@@ -72,124 +71,6 @@ HELP_GROUP_CHAT_MESSAGE = """Вы можете добавить бота в лю
 Чтобы получить ответ от бота в чате – @ <b>упомяните</b> его или <b>ответьте</b> на его сообщение.
 Например: "{bot_username} напиши стихотворение о Telegram"
 """
-
-
-class CustomEncoder(json.JSONEncoder):
-    """Кастомный JSON энкодер для обработки datetime объектов."""
-
-    def default(self, obj: Any) -> Any:
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-        return super().default(obj)
-
-
-class BaseHandler(ABC):
-    """Базовый класс для всех обработчиков."""
-
-    def __init__(self, database: database.Database):
-        self.db = database
-
-    async def register_user_if_not_exists(self, update: Update, context: CallbackContext, user: User) -> bool:
-        """Регистрирует пользователя если он не существует."""
-        user_registered_now = False
-
-        if not self.db.check_if_user_exists(user.id):
-            self.db.add_new_user(
-                user.id,
-                update.message.chat_id,
-                username=user.username,
-                first_name=user.first_name,
-                last_name=user.last_name
-            )
-            self.db.add_subscription(user.id, SubscriptionType.FREE, 7)
-            user_registered_now = True
-            self.db.start_new_dialog(user.id)
-
-        await self._initialize_user_attributes(user.id)
-
-        if user_registered_now:
-            await self._send_registration_notification(context, user)
-
-        return user_registered_now
-
-    async def _initialize_user_attributes(self, user_id: int) -> None:
-        """Инициализирует необходимые атрибуты пользователя."""
-        if self.db.get_user_attribute(user_id, "current_dialog_id") is None:
-            self.db.start_new_dialog(user_id)
-
-        if user_id not in user_semaphores:
-            user_semaphores[user_id] = asyncio.Semaphore(1)
-
-        attributes_to_init = [
-            ("current_model", config.models["available_text_models"][0]),
-            ("n_used_tokens", {}),
-            ("n_transcribed_seconds", 0.0),
-            ("n_generated_images", 0)
-        ]
-
-        for attr, default_value in attributes_to_init:
-            if self.db.get_user_attribute(user_id, attr) is None:
-                self.db.set_user_attribute(user_id, attr, default_value)
-
-    async def _send_registration_notification(self, context: CallbackContext, user: User) -> None:
-        """Отправляет уведомление о новой регистрации администраторам."""
-        username = user.username or "No username"
-        first_name = user.first_name or "No first name"
-        last_name = user.last_name or "No last name"
-
-        notification_text = (
-            f"A new user has just registered!\n\n"
-            f"Username: {username}\n"
-            f"First Name: {first_name}\n"
-            f"Last Name: {last_name}"
-        )
-
-        for admin_id in config.roles.get('admin', []):
-            try:
-                await context.bot.send_message(chat_id=admin_id, text=notification_text)
-            except Exception as e:
-                logger.warning(f"Failed to send registration to admin {admin_id}: {e}")
-
-    async def is_previous_message_not_answered_yet(self, update: Update, context: CallbackContext) -> bool:
-        """Проверяет, обрабатывается ли предыдущее сообщение."""
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
-        user_id = update.message.from_user.id
-
-        if user_semaphores[user_id].locked():
-            text = "⏳ Пожалуйста, <b>подождите</b> ответ на предыдущее сообщение\nИли отмените его командой /cancel"
-            await update.message.reply_text(text, reply_to_message_id=update.message.id, parse_mode=ParseMode.HTML)
-            return True
-        return False
-
-    async def subscription_preprocessor(self, update: Update, context: CallbackContext) -> bool:
-        """Проверяет возможность выполнения запроса по подписке."""
-        user_id = update.effective_user.id
-        subscription_info = self.db.get_user_subscription_info(user_id)
-
-        if not subscription_info["is_active"]:
-            await update.message.reply_text(
-                "❌ Для использования бота требуется активная подписка. "
-                "Пожалуйста, приобретите подписку через /subscription",
-                parse_mode=ParseMode.HTML
-            )
-            return False
-
-        return await self._check_subscription_limits(subscription_info, update)
-
-    async def _check_subscription_limits(self, subscription_info: Dict[str, Any], update: Update) -> bool:
-        """Проверяет лимиты подписки используя централизованную конфигурацию."""
-        subscription_type = SubscriptionType(subscription_info["type"])
-
-        if not SubscriptionConfig.can_make_request(subscription_type, subscription_info["requests_used"]):
-            description = SubscriptionConfig.get_description(subscription_type)
-            await update.message.reply_text(
-                f"❌ Лимит запросов подписки {description['name']} исчерпан. "
-                "Пожалуйста, обновите подписку через /subscription",
-                parse_mode=ParseMode.HTML
-            )
-            return False
-
-        return True
 
 
 class MessageProcessor(BaseHandler):
@@ -291,243 +172,7 @@ class MessageProcessor(BaseHandler):
                 del user_tasks[user_id]
 
 
-class PhotoEditorMixin(BaseHandler):
-    """Миксин для обработки фоторедактора."""
-
-    async def photo_editor_handle(self, update: Update, context: CallbackContext,
-                                  message: Optional[str] = None) -> None:
-        """Обрабатывает запросы в режиме фоторедактора."""
-        logger.info(
-            f"Photo editor handle: photo={bool(update.message.photo)}, caption='{update.message.caption}', text='{update.message.text}'")
-
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
-
-        if await self.is_previous_message_not_answered_yet(update, context):
-            return
-
-        user_id = update.message.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
-        if not await self.subscription_preprocessor(update, context):
-            return
-
-        edit_description = self._get_edit_description(update, message)
-
-        if update.message.photo:
-            await self._handle_photo_for_editing(update, context, edit_description)
-        elif context.user_data.get('waiting_for_edit_description') and edit_description:
-            await self._perform_photo_editing(update, context, edit_description)
-        else:
-            await self._request_photo_for_editing(update, context, edit_description)
-
-    def _get_edit_description(self, update: Update, message: Optional[str]) -> Optional[str]:
-        """Получает описание редактирования из различных источников."""
-        if update.message.caption:
-            return update.message.caption
-        elif message:
-            return message
-        elif update.message.text and not update.message.photo:
-            return update.message.text
-        return None
-
-    async def _handle_photo_for_editing(self, update: Update, context: CallbackContext,
-                                        edit_description: Optional[str] = None) -> None:
-        """Обрабатывает фото для редактирования."""
-        user_id = update.message.from_user.id
-
-        # ✅ Получаем файл
-        photo = update.message.photo[-1]
-        photo_file = await context.bot.get_file(photo.file_id)
-
-        # ✅ Скачиваем в память
-        buf = io.BytesIO()
-        await photo_file.download_to_memory(buf)
-        buf.seek(0)
-
-        # ✅ Сохраняем сразу байты без конвертации
-        context.user_data['photo_to_edit'] = buf.getvalue()
-
-        # ✅ Если есть описание — редактируем фото
-        if edit_description:
-            await self._perform_photo_editing(update, context, edit_description)
-            return
-
-        # ✅ Иначе спрашиваем описание
-        context.user_data['waiting_for_edit_description'] = True
-
-        await update.message.reply_text(
-            "📸 <b>Фото получено!</b>\n\n"
-            "Теперь опишите что нужно изменить на фото:\n"
-            "• Что добавить\n• Что убрать\n• Какие изменения сделать\n\n"
-            "<i>Пример: \"Добавь кота на диван\" или \"Поменяй цвет стены на синий\"</i>",
-            parse_mode=ParseMode.HTML
-        )
-
-    async def _request_photo_for_editing(self, update: Update, context: CallbackContext,
-                                         message: Optional[str] = None) -> None:
-        """Запрашивает фото для редактирования."""
-        if message and context.user_data.get('waiting_for_edit_description'):
-            context.user_data['waiting_for_edit_description'] = False
-            await self._perform_photo_editing(update, context, message)
-        else:
-            await update.message.reply_text(
-                "🎨 <b>Режим фоторедактора</b>\n\n"
-                "Для редактирования фото:\n"
-                "1. 📸 <b>Отправьте фото</b> которое нужно изменить\n"
-                "2. ✍️ <b>Опишите</b> что нужно добавить/изменить\n\n"
-                "Я могу:\n"
-                "• Добавлять объекты и людей\n"
-                "• Убирать ненужные элементы\n"
-                "• Менять цвета и фон\n"
-                "• Улучшать качество\n\n"
-                "<i>Просто отправьте фото чтобы начать!</i>",
-                parse_mode=ParseMode.HTML
-            )
-
-    async def _perform_photo_editing(self, update: Update, context: CallbackContext,
-                                     edit_description: str) -> None:
-        """Выполняет редактирование фото через DALL-E."""
-        user_id = update.message.from_user.id
-
-        if 'photo_to_edit' not in context.user_data:
-            await update.message.reply_text(
-                "❌ Сначала отправьте фото для редактирования!",
-                parse_mode=ParseMode.HTML
-            )
-            return
-
-        if not edit_description or not edit_description.strip():
-            await update.message.reply_text(
-                "❌ Пожалуйста, опишите что нужно изменить на фото!",
-                parse_mode=ParseMode.HTML
-            )
-            return
-
-        placeholder_message = await update.message.reply_text(
-            "🎨 <i>Редактирую фото... Это может занять до 2х минут</i>",
-            parse_mode=ParseMode.HTML
-        )
-
-        try:
-            image_bytes = context.user_data['photo_to_edit']
-            image_buf = BytesIO(image_bytes)
-
-            edited_image_url = await openai_utils.generate_photo(
-                image=image_buf,
-                prompt=edit_description
-            )
-
-            if edited_image_url:
-                logger.info("Photo editing successful")
-                await self._send_edited_photo(update, context, edited_image_url,
-                                              edit_description, placeholder_message)
-                self._update_photo_editor_usage(user_id)
-                self._cleanup_photo_context(context)
-            else:
-                logger.error("Photo editing returned no URL")
-                await context.bot.edit_message_text(
-                    "❌ Не удалось отредактировать фото. Попробуйте другое описание.",
-                    chat_id=placeholder_message.chat_id,
-                    message_id=placeholder_message.message_id,
-                    parse_mode=ParseMode.HTML
-                )
-
-        except Exception as e:
-            logger.error(f"Error in photo editing: {e}")
-            error_message = self._get_user_friendly_error(e)
-
-            await context.bot.edit_message_text(
-                error_message,
-                chat_id=placeholder_message.chat_id,
-                message_id=placeholder_message.message_id,
-                parse_mode=ParseMode.HTML
-            )
-
-    def _get_user_friendly_error(self, error: Exception) -> str:
-        """Возвращает понятное пользователю сообщение об ошибке."""
-        error_str = str(error).lower()
-
-        error_messages = {
-            "unsupported mimetype": "❌ Формат изображения не поддерживается. Попробуйте другое фото (JPEG, PNG).",
-            "invalid image": "❌ Не удалось обработать изображение. Попробуйте другое фото.",
-            "safety system": "❌ Запрос не соответствует политикам безопасности OpenAI. Попробуйте другое описание.",
-            "billing": "❌ Проблемы с биллингом OpenAI. Обратитесь к администратору.",
-            "size": "❌ Изображение слишком большое. Попробуйте фото меньшего размера.",
-            "mask": "❌ Проблема с обработкой изображения. Попробуйте другое фото.",
-            "edit": "❌ Не удалось отредактировать фото. Попробуйте другое описание или изображение."
-        }
-
-        for key, message in error_messages.items():
-            if key in error_str:
-                return message
-
-        # Для ошибок OpenAI API
-        if hasattr(error, 'code'):
-            if error.code == 'billing_hard_limit_reached':
-                return "❌ Лимит расходов OpenAI исчерпан. Обратитесь к администратору."
-
-        return "❌ Произошла ошибка при редактировании фото. Пожалуйста, попробуйте еще раз."
-
-    def _cleanup_photo_context(self, context: CallbackContext) -> None:
-        """Очищает временные данные фото из контекста."""
-        keys_to_remove = ['photo_to_edit', 'waiting_for_edit_description']
-        for key in keys_to_remove:
-            if key in context.user_data:
-                del context.user_data[key]
-
-    async def _send_edited_photo(self, update: Update, context: CallbackContext,
-                                 image_url: str, edit_description: str,
-                                 placeholder_message: telegram.Message) -> None:
-        """Отправляет отредактированное фото."""
-        try:
-            response = requests.get(image_url, stream=True)
-            if response.status_code == 200:
-                image_buffer = io.BytesIO(response.content)
-                image_buffer.name = "edited_image.png"
-
-                await context.bot.edit_message_text(
-                    f"✅ <b>Фото отредактировано!</b>\n\n"
-                    f"<i>Запрос:</i> {edit_description}\n\n"
-                    f"Как вам результат? 🎨",
-                    chat_id=placeholder_message.chat_id,
-                    message_id=placeholder_message.message_id,
-                    parse_mode=ParseMode.HTML
-                )
-
-                await update.message.chat.send_photo(
-                    photo=InputFile(image_buffer, "edited_image.png"),
-                    caption=f"🎨 Отредактировано: {edit_description}"
-                )
-            else:
-                await context.bot.edit_message_text(
-                    "❌ Не удалось загрузить отредактированное изображение.",
-                    chat_id=placeholder_message.chat_id,
-                    message_id=placeholder_message.message_id,
-                    parse_mode=ParseMode.HTML
-                )
-
-        except Exception as e:
-            logger.error(f"Error sending edited photo: {e}")
-            await context.bot.edit_message_text(
-                "❌ Ошибка при отправке отредактированного фото.",
-                chat_id=placeholder_message.chat_id,
-                message_id=placeholder_message.message_id,
-                parse_mode=ParseMode.HTML
-            )
-
-    def _update_photo_editor_usage(self, user_id: int) -> None:
-        """Обновляет статистику использования фоторедактора."""
-        current_usage = self.db.get_user_attribute(user_id, "n_photo_edits") or 0
-        self.db.set_user_attribute(user_id, "n_photo_edits", current_usage + 1)
-
-        self.db.deduct_cost_for_action(
-            user_id=user_id,
-            action_type='photo_edit',
-            action_params={'n_edits': 1}
-        )
-
-
-class MessageHandlers(MessageProcessor, PhotoEditorMixin):
+class MessageHandlers(MessageProcessor):
     """Класс для обработки сообщений."""
 
     def __init__(self, database: database.Database, subscription_handlers: Any,
@@ -538,12 +183,6 @@ class MessageHandlers(MessageProcessor, PhotoEditorMixin):
         self.chat_mode_handlers = chat_mode_handlers
         self.admin_handlers = admin_handlers
         self.image_handlers = image_handlers
-
-    async def photo_editor_handle(self, update: Update, context: CallbackContext,
-                                  message: Optional[str] = None) -> None:
-        """Прокси-метод для обработки фоторедактора."""
-        # Вызываем метод миксина напрямую
-        await PhotoEditorMixin.photo_editor_handle(self, update, context, message)
 
     async def generate_image_handle(self, update: Update, context: CallbackContext,
                                     message: Optional[str] = None) -> None:
@@ -972,7 +611,7 @@ class MessageHandlers(MessageProcessor, PhotoEditorMixin):
             await update.message.reply_text(error_text)
 
     async def voice_message_handle(self, update: Update, context: CallbackContext, message: Optional[str] = None) -> \
-    Optional[str]:
+            Optional[str]:
         """Обрабатывает голосовые сообщения."""
         if not await self.is_bot_mentioned(update, context):
             return
@@ -1135,11 +774,6 @@ class MessageHandlers(MessageProcessor, PhotoEditorMixin):
             _message = _message.replace("@" + context.bot.username, "").strip()
 
         return _message
-
-    async def photo_editor_handle(self, update: Update, context: CallbackContext,
-                                  message: Optional[str] = None) -> None:
-        """Прокси-метод для обработки фоторедактора."""
-        await PhotoEditorMixin.photo_editor_handle(self, update, context, message)
 
     async def generate_image_handle(self, update: Update, context: CallbackContext,
                                     message: Optional[str] = None) -> None:
@@ -1652,7 +1286,6 @@ class SettingsHandlers(BaseHandler):
         if str(user_id) not in config.roles.get('admin', []):
             await update.message.reply_text("❌ У вас нет доступа к админ-панели.")
             return
-
 
         self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
 

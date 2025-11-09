@@ -1,19 +1,16 @@
-python-telegram-bot[rate-limiter]==20.1
-openai>=1.0.0
-tiktoken>=0.3.0 #tokenizer
-PyYAML==6.0 #configs
-pymongo==4.3.3 #database
-python-dotenv==0.21.0 #.env files
-stripe>=2.60.0 #payment method
-Flask==2.0.1 #payment recieve notif
-Werkzeug==2.0.1 #payment recieve notif and debug
-redis>=4.0.2 #payment recieve notif
-aioredis>=2.0.0 #payment recieve notif
-pytz==2023.3 #timezone management
-anthropic #claude library
-yookassa==2.4.0
-emoji==2.10.0
-python-telegram-bot[job-queue]
+python-telegram-bot[job-queue,rate-limiter]>=20.7,<21.0
+openai>=1.3.0,<2.0.0
+anthropic>=0.7.0
+tiktoken>=0.5.0
+PyYAML>=6.0
+pymongo>=4.5.0,<5.0.0
+python-dotenv>=1.0.0
+stripe>=5.5.0
+Flask>=2.3.0,<3.0.0
+redis>=5.0.0
+aioredis>=2.0.0
+yookassa>=2.4.0
+emoji>=2.8.0
 Pillow>=10.0.0
-aiohttp
-#tokenizers #other tokenizer if you want to also use the one in the utils file
+aiohttp>=3.8.0
+requests>=2.31.0
