@@ -18,9 +18,9 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
-from ..database import Database
-from ..subscription import SubscriptionType
-from ..subscription_config import SubscriptionConfig
+from bot.database import Database
+from bot.subscription import SubscriptionType
+from bot.subscription_config import SubscriptionConfig
 
 logger = logging.getLogger(__name__)
 
