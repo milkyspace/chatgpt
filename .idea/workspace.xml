@@ -5,58 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="c49b2697-deab-421e-88ce-4ba8723f2a80" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/b/config.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/db.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/keyboards.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/models.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/payments/base.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/payments/mock.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/payments/yoomoney.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/providers/base.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/providers/openai_provider.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/queue_bg.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/router_admin.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/router_public.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/services/chat.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/services/images.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/services/payments_monitor.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/services/referrals.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/services/safety.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/services/subscriptions.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/services/usage.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/b/utils.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/Dockerfile" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/b/bot.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/admin_handlers.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/base_handler.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/bot.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/chat_mode_handlers.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/code_collector.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/config.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/database.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/image_handlers.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/keyboards.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/message_handlers.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/message_processor.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/openai_utils.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/payment.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/settings_handlers.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/subscription.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/subscription_config.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/subscription_handlers.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/bot/utils.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/chat_modes.yml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/config.example.env" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/config.example.yml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/models.yml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/docker-compose.yml" beforeDir="false" afterPath="$PROJECT_DIR$/docker-compose.yml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/project_code.txt" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/static/header.png" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/static/help_group_chat.mp4" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/static/payment_banner.png" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/static/payment_banner_old.png" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -92,25 +41,25 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;main6&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/Users/vladimirkolesnev/Sites/chatgpt&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "git-widget-placeholder": "main7",
+    "last_opened_file_path": "/Users/vladimirkolesnev/Sites/chatgpt",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable",
+    "vue.rearranger.settings.migration": "true"
   },
-  &quot;keyToStringList&quot;: {
-    &quot;com.intellij.ide.scratch.ScratchImplUtil$2/New Scratch File&quot;: [
-      &quot;PLAIN_TEXT&quot;
+  "keyToStringList": {
+    "com.intellij.ide.scratch.ScratchImplUtil$2/New Scratch File": [
+      "PLAIN_TEXT"
     ]
   }
-}</component>
+}]]></component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
