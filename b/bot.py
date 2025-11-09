@@ -18,7 +18,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 async def main():
-    logger.critical(cfg.bot_token)
+    if not cfg.bot_token or ":" not in cfg.bot_token:
+        import sys, logging
+        logging.critical("❌ BOT_TOKEN не найден или некорректен! Проверь .env или docker-compose.yml")
+        sys.exit(1)
     bot = Bot(cfg.bot_token, parse_mode=ParseMode.HTML)
     dp = Dispatcher()
     dp.include_router(public_router)
