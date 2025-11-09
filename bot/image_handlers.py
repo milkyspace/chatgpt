@@ -57,11 +57,11 @@ class ImageHandlers(BaseHandler):
             await self._handle_image_generation_error(update, e)
 
     async def _generate_images(self, user_id: int, prompt: str) -> List[str]:
-        """Генерация изображений через новый OpenAI API."""
+        """Генерация изображений через OpenAI API."""
         prefs = self.db.get_user_attribute(user_id, "image_preferences") or {}
 
-        model = prefs.get("model", "dall-e-3")  # Можно переопределить
-        n_images = prefs.get("n_images", 2)
+        model = prefs.get("model", "dall-e-3")
+        n_images = prefs.get("n_images", 1)  # По умолчанию 1 изображение
         resolution = prefs.get("resolution", "1024x1024")
 
         try:
@@ -71,21 +71,25 @@ class ImageHandlers(BaseHandler):
                 n_images=n_images,
                 size=resolution
             )
+            return image_urls
+
         except Exception as e:
-            # автоматический fallback
-            if "rejected" in str(e).lower() or "safety" in str(e).lower():
-                logger.warning("FALLBACK dalle-3 → gpt-image-1")
-                image_urls = await openai_utils.generate_images(
-                    prompt=prompt,
-                    model="gpt-image-1",
-                    n_images=n_images,
-                    size=resolution
-                )
+            # Автоматический fallback для DALL-E 3 → DALL-E 2
+            if "rejected" in str(e).lower() or "safety" in str(e).lower() or "billing" in str(e).lower():
+                logger.warning("FALLBACK dalle-3 → dalle-2")
+                try:
+                    image_urls = await openai_utils.generate_images(
+                        prompt=prompt,
+                        model="dall-e-2",
+                        n_images=n_images,
+                        size="1024x1024"  # DALL-E 2 поддерживает этот размер
+                    )
+                    return image_urls
+                except Exception as fallback_error:
+                    logger.error(f"Fallback also failed: {fallback_error}")
+                    raise e  # Возвращаем оригинальную ошибку
             else:
                 raise
-
-        self._update_image_usage_stats(user_id, n_images)
-        return image_urls
 
     def _update_image_usage_stats(self, user_id: int, n_images: int) -> None:
         count = self.db.get_user_attribute(user_id, "n_generated_images") or 0

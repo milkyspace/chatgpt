@@ -3,6 +3,7 @@ import logging
 from io import BytesIO
 from typing import Optional, List, AsyncGenerator, Tuple, Union
 
+import openai
 from openai import AsyncOpenAI
 
 import config
@@ -177,29 +178,50 @@ async def transcribe_audio(audio_file) -> str:
         return ""
 
 
-async def generate_images(
-        prompt: str,
-        model: str = "gpt-image-1",
-        size: str = "1024x1024",
-        n: int = 1
-) -> List[str]:
-    """Генерация изображений с улучшенной обработкой параметров"""
+async def generate_images(prompt: str, model: str = "dall-e-3", n_images: int = 1, size: str = "1024x1024") -> List[
+    str]:
+    """Генерирует изображения по текстовому описанию."""
     try:
-        # Валидация параметров
-        if n <= 0 or n > 4:  # OpenAI обычно ограничивает количество
-            raise ValueError("Number of images must be between 1 and 4")
+        # DALL-E 3 поддерживает только 1 изображение за запрос
+        if model == "dall-e-3":
+            n_images = 1
+            # DALL-E 3 имеет фиксированный размер 1024x1024, 1792x1024, или 1024x1792
+            if size not in ["1024x1024", "1792x1024", "1024x1792"]:
+                size = "1024x1024"
 
-        response = await openai_client.images.generate(
-            model=model,
-            prompt=prompt,
-            size=size,
-            n=n,
-            quality="high"
-        )
-        return [item.url for item in response.data]
+        # DALL-E 2 поддерживает разные размеры и количество
+        elif model == "dall-e-2":
+            if size not in ["256x256", "512x512", "1024x1024"]:
+                size = "1024x1024"
+            n_images = min(n_images, 10)  # Максимум 10 изображений для DALL-E 2
+
+        image_urls = []
+
+        # Для DALL-E 3 делаем один запрос
+        if model == "dall-e-3":
+            response = await openai.images.generate(
+                model=model,
+                prompt=prompt,
+                size=size,
+                quality="standard",
+                n=1,
+            )
+            image_urls.append(response.data[0].url)
+
+        # Для DALL-E 2 можем сгенерировать несколько изображений
+        elif model == "dall-e-2":
+            response = await openai.images.generate(
+                model=model,
+                prompt=prompt,
+                size=size,
+                n=n_images,
+            )
+            image_urls = [img.url for img in response.data]
+
+        return image_urls
 
     except Exception as e:
-        logger.error("Error generating images: %s", e, exc_info=True)
+        logger.error(f"Error generating images: {e}")
         raise
 
 async def generate_image_with_input(prompt: str, image_bytes: bytes) -> bytes:
