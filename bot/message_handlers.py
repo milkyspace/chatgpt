@@ -206,23 +206,10 @@ class MessageHandlers(MessageProcessor):
                                    message: str, use_new_dialog_timeout: bool) -> None:
         """Обрабатывает текстовое сообщение."""
         user_id = update.message.from_user.id
-        current_model = self.db.get_user_attribute(user_id, "current_model")
 
-        # Проверяем необходимость обработки изображений
-        if (current_model == "gpt-4-vision-preview" or
-                (update.message.photo and len(update.message.photo) > 0)):
-
-            if current_model != "gpt-4-vision-preview":
-                current_model = "gpt-4-vision-preview"
-                self.db.set_user_attribute(user_id, "current_model", "gpt-4-vision-preview")
-
-            task = asyncio.create_task(
-                self._vision_message_handle_fn(update, context, use_new_dialog_timeout)
-            )
-        else:
-            task = asyncio.create_task(
-                self._text_message_handle_fn(update, context, message, use_new_dialog_timeout)
-            )
+        task = asyncio.create_task(
+            self._text_message_handle_fn(update, context, message, use_new_dialog_timeout)
+        )
 
         await self.execute_user_task(user_id, task, update)
 
@@ -381,128 +368,6 @@ class MessageHandlers(MessageProcessor):
             message, dialog_messages=dialog_messages, chat_mode=chat_mode
         )
         return answer, n_input_tokens, n_output_tokens
-
-    async def _vision_message_handle_fn(self, update: Update, context: CallbackContext,
-                                        use_new_dialog_timeout: bool = True) -> None:
-        """Обрабатывает сообщения с изображениями для GPT-4 Vision."""
-        logger.info('_vision_message_handle_fn')
-        user_id = update.message.from_user.id
-        current_model = self.db.get_user_attribute(user_id, "current_model")
-
-        if current_model != "gpt-4-vision-preview":
-            await update.message.reply_text(
-                "🥲 Images processing is only available for the <b>GPT-4 Vision</b> model. Please change your settings in /settings",
-                parse_mode=ParseMode.HTML,
-            )
-            return
-
-        chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
-
-        await self.prepare_dialog(user_id, use_new_dialog_timeout, chat_mode, update)
-
-        transcribed_text = ''
-        buf = None
-
-        # Обработка голосового сообщения
-        if update.message.voice:
-            voice = update.message.voice
-            voice_file = await context.bot.get_file(voice.file_id)
-
-            buf = io.BytesIO()
-            await voice_file.download_to_memory(buf)
-            buf.name = "voice.oga"
-            buf.seek(0)
-
-            transcribed_text = await openai_utils.transcribe_audio(buf)
-            transcribed_text = transcribed_text.strip()
-
-        # Обработка изображения
-        if update.message.photo:
-            photo = update.message.photo[-1]
-            photo_file = await context.bot.get_file(photo.file_id)
-
-            buf = io.BytesIO()
-            await photo_file.download_to_memory(buf)
-            buf.name = "image.jpg"
-            buf.seek(0)
-
-        n_input_tokens, n_output_tokens = 0, 0
-
-        try:
-            placeholder_message = await update.message.reply_text("<i>Думаю...</i>", parse_mode=ParseMode.HTML)
-            message_text = update.message.caption or update.message.text or transcribed_text or ''
-
-            await update.message.chat.send_action(action="typing")
-
-            dialog_messages = self.db.get_dialog_messages(user_id, dialog_id=None)
-            parse_mode = {
-                "html": ParseMode.HTML,
-                "markdown": ParseMode.MARKDOWN
-            }[config.chat_modes[chat_mode]["parse_mode"]]
-
-            chatgpt_instance = openai_utils.ChatGPT(model=current_model)
-
-            answer, (n_input_tokens, n_output_tokens), _ = await chatgpt_instance.send_vision_message(
-                message_text,
-                dialog_messages=dialog_messages,
-                image_buffer=buf,
-                chat_mode=chat_mode,
-            )
-
-            async def fake_gen():
-                yield "finished", answer, (n_input_tokens, n_output_tokens), 0
-
-            gen = fake_gen()
-
-            prev_answer = ""
-            async for gen_item in gen:
-                status, answer, (n_input_tokens, n_output_tokens), _ = gen_item
-                answer = answer[:4096]
-
-                if abs(len(answer) - len(prev_answer)) < 100 and status != "finished":
-                    continue
-
-                try:
-                    await context.bot.edit_message_text(
-                        answer,
-                        chat_id=placeholder_message.chat_id,
-                        message_id=placeholder_message.message_id,
-                        parse_mode=parse_mode,
-                    )
-                except telegram.error.BadRequest as e:
-                    if not str(e).startswith("Message is not modified"):
-                        await context.bot.edit_message_text(
-                            answer,
-                            chat_id=placeholder_message.chat_id,
-                            message_id=placeholder_message.message_id,
-                        )
-
-                await asyncio.sleep(0.01)
-                prev_answer = answer
-
-            # Сохраняем диалог
-            if buf is not None:
-                base_image = base64.b64encode(buf.getvalue()).decode("utf-8")
-                new_dialog_message = {
-                    "user": [
-                        {"type": "text", "text": message_text},
-                        {"type": "image", "image": base_image}
-                    ],
-                    "bot": answer,
-                    "date": datetime.now()
-                }
-            else:
-                new_dialog_message = {"user": message_text, "bot": answer, "date": datetime.now()}
-
-            self.update_dialog_and_tokens(user_id, new_dialog_message, n_input_tokens, n_output_tokens)
-
-        except asyncio.CancelledError:
-            self.db.update_n_used_tokens(user_id, current_model, n_input_tokens, n_output_tokens)
-            raise
-        except Exception as e:
-            logger.error(f"Error in vision message handling: {e}", exc_info=True)
-            error_text = f"⚠️ Ошибка при обработке изображения. Пожалуйста, попробуйте еще раз."
-            await update.message.reply_text(error_text, parse_mode=ParseMode.HTML)
 
     async def voice_message_handle(self, update: Update, context: CallbackContext, message: Optional[str] = None) -> \
             Optional[str]:
@@ -672,50 +537,3 @@ class MessageHandlers(MessageProcessor):
                                     message: Optional[str] = None) -> None:
         """Прокси-метод для генерации изображений."""
         await self.image_handlers.generate_image_handle(update, context, message=message)
-
-    async def photo_message_handle(self, update: Update, context: CallbackContext) -> None:
-        """Обрабатывает сообщения с фото."""
-        logger.info("Photo message received")
-
-        if not await self.is_bot_mentioned(update, context):
-            return
-
-        await self.register_user_if_not_exists(update, context, update.message.from_user)
-
-        if await self.is_previous_message_not_answered_yet(update, context):
-            return
-
-        user_id = update.message.from_user.id
-        self.db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
-        if not await self.subscription_preprocessor(update, context):
-            return
-
-        chat_mode = self.db.get_user_attribute(user_id, "current_chat_mode")
-        logger.info(f"Photo received in chat mode: {chat_mode}")
-
-        if chat_mode == "artist":
-            caption = update.message.caption or "Создай изображение похожее на это фото"
-            await self.generate_image_handle(update, context, message=caption)
-        else:
-            await self._handle_photo_in_regular_mode(update, context)
-
-    async def _handle_photo_in_regular_mode(self, update: Update, context: CallbackContext) -> None:
-        """Обрабатывает фото в обычных режимах чата."""
-        user_id = update.message.from_user.id
-        current_model = self.db.get_user_attribute(user_id, "current_model")
-
-        # Если модель поддерживает vision, используем её
-        if current_model == "gpt-4-vision-preview":
-            await self._vision_message_handle_fn(update, context, use_new_dialog_timeout=True)
-        else:
-            # Иначе просто уведомляем пользователя
-            caption = update.message.caption
-            if caption:
-                await self.message_handle(update, context, message=caption)
-            else:
-                await update.message.reply_text(
-                    "📸 Фото получено! Если хотите его описать или задать вопрос по фото, "
-                    "напишите текст в подписи к фото или следующим сообщением.",
-                    parse_mode=ParseMode.HTML
-                )

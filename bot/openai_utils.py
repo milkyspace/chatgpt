@@ -91,21 +91,6 @@ class ChatGPT:
         answer = response.choices[0].message.content
         return answer, (response.usage.prompt_tokens, response.usage.completion_tokens), 0
 
-
-    # ✅ CHAT + VISION + IMAGE GENERATION (как chatgpt.com)
-    async def send_vision_message(self, message, dialog_messages=[], chat_mode="assistant",
-                                  image_buffer: BytesIO = None):
-        messages = self._generate_prompt_messages(message, dialog_messages, chat_mode, image_buffer=image_buffer)
-
-        response = await openai_client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            **OPENAI_COMPLETION_OPTIONS
-        )
-
-        answer = response.choices[0].message.content
-        return answer, (response.usage.prompt_tokens, response.usage.completion_tokens), 0
-
     # --------------------- Сборка сообщений ---------------------
     def _generate_prompt_messages(self, message, dialog_messages, chat_mode, image_buffer: BytesIO = None):
         prompt = config.chat_modes[chat_mode]["prompt_start"]
@@ -160,74 +145,3 @@ async def generate_images(prompt: str, model: str = "gpt-image-1", size: str = "
     except Exception as e:
         logger.error(f"Error generating images: {e}")
         raise e
-
-
-# ✅ Полноценная генерация с использованием фото (как chatgpt.com)
-async def generate_photo(image, prompt: str) -> Optional[str]:
-    """
-    Полноценная фотогенерация: учитывает исходное фото и prompt.
-    Принимает:
-    - BytesIO
-    - bytes
-    - coroutine -> BytesIO
-    """
-
-    import inspect
-    try:
-        # ✅ Если функция получила coroutine — await
-        if inspect.iscoroutine(image):
-            image = await image
-
-        # ✅ Если bytes → превращаем в BytesIO
-        if isinstance(image, bytes):
-            image = BytesIO(image)
-
-        # ✅ Проверка на корректный тип
-        if not isinstance(image, BytesIO):
-            raise TypeError(
-                f"generate_photo(): image must be BytesIO or bytes or coroutine, got {type(image)}"
-            )
-
-        # ✅ Reset pointer for read()
-        image.seek(0)
-
-        base64_img = base64.b64encode(image.read()).decode()
-
-        response = await openai_client.images.generate(
-            model="gpt-image-1",
-            prompt=prompt,
-            size="1024x1024",
-            referenced_images=[base64_img],  # ← изображение подаётся сюда!
-        )
-
-        return response.data[0].url
-
-    except Exception as e:
-        logger.error(f"Error generating photo with face: {e}")
-        return None
-
-
-# ---------------------------- ✅ Util: PNG conversion ----------------------------
-async def convert_image_to_png(image_buffer):
-    import inspect
-
-    if inspect.iscoroutine(image_buffer):
-        image_buffer = await image_buffer
-
-    if isinstance(image_buffer, bytes):
-        image_buffer = BytesIO(image_buffer)
-
-    if not isinstance(image_buffer, BytesIO):
-        raise TypeError(
-            f"convert_image_to_png(): image_buffer must be BytesIO or bytes or coroutine, got {type(image_buffer)}"
-        )
-
-
-# ---------------------------- ✅ Moderation ----------------------------
-async def is_content_acceptable(prompt):
-    try:
-        response = await openai_client.moderations.create(input=prompt)
-        return not all(response.results[0].categories.values())
-    except Exception as e:
-        logger.error(f"Error in content moderation: {e}")
-        return True

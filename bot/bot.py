@@ -182,10 +182,6 @@ def run_bot() -> None:
                                            message_handlers.message_handle))
     application.add_handler(MessageHandler(filters.VOICE & user_filter,
                                            message_handlers.voice_message_handle))
-    application.add_handler(MessageHandler(filters.PHOTO & user_filter,
-                                           message_handlers.photo_message_handle))
-    application.add_handler(MessageHandler(filters.Document.IMAGE & user_filter,
-                                           message_handlers.photo_message_handle))
 
     # Добавляем обработчики подписок
     application.add_handler(
