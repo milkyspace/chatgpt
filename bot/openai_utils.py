@@ -1,5 +1,6 @@
 import base64
 import logging
+import io
 from io import BytesIO
 from typing import Optional, List, AsyncGenerator, Tuple, Union
 
