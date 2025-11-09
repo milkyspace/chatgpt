@@ -66,9 +66,8 @@ class ImageHandlers(BaseHandler):
         resolution = prefs.get("resolution", "1024x1024")
 
         try:
-            # Обертываем синхронный вызов в asyncio.to_thread
-            image_urls = await asyncio.to_thread(
-                openai_utils.generate_images,
+            # Убедитесь, что здесь есть await
+            image_urls = await openai_utils.generate_images(
                 prompt=prompt,
                 model=model,
                 size=resolution
@@ -80,8 +79,8 @@ class ImageHandlers(BaseHandler):
             if any(keyword in str(e).lower() for keyword in ["rejected", "safety", "billing", "quota"]):
                 logger.warning("FALLBACK dalle-3 → dalle-2")
                 try:
-                    image_urls = await asyncio.to_thread(
-                        openai_utils.generate_images,
+                    # И здесь тоже должен быть await
+                    image_urls = await openai_utils.generate_images(
                         prompt=prompt,
                         model="dall-e-2",
                         size="1024x1024"
