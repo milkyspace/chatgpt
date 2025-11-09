@@ -16,6 +16,7 @@ class PlanConfig(BaseModel):
 
 class AppConfig(BaseModel):
     # Telegram
+    print(os.getenv("BOT_TOKEN", ""))
     bot_token: str = os.getenv("BOT_TOKEN", "")
     admin_ids: set[int] = set(map(int, os.getenv("ADMIN_IDS", "0").split(","))) if os.getenv("ADMIN_IDS") else set()
 
@@ -31,10 +32,6 @@ class AppConfig(BaseModel):
     yookassa_shop_id: str | None = os.getenv("YOOKASSA_SHOP_ID")
     yookassa_secret_key: str | None = os.getenv("YOOKASSA_SECRET_KEY")
     payment_provider: str = os.getenv("PAYMENT_PROVIDER", "yoomoney")  # yoomoney|mock
-
-    # Вебхук для оплаты (FastAPI)
-    public_base_url: str = os.getenv("PUBLIC_BASE_URL", "https://example.com")
-    payments_webhook_path: str = "/payments/webhook"
 
     # Тестовый период
     trial_days: int = 3
