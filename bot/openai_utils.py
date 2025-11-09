@@ -228,8 +228,7 @@ async def generate_image_with_input(prompt: str, image_bytes: bytes) -> str:
     """Генерирует изображение на основе входного изображения."""
     try:
         # Создаем файловый объект из bytes
-        from io import BytesIO
-        image_file = BytesIO(image_bytes)
+        image_file = io.BytesIO(image_bytes)
         image_file.name = "input_image.png"
 
         response = await openai_client.images.edit(

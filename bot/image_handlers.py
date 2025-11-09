@@ -1,9 +1,10 @@
-import io
 import logging
 from datetime import datetime
 from typing import Optional, List
 
-import asyncio
+import io
+from PIL import Image
+
 import aiohttp
 import telegram
 from telegram import Update, InputFile
@@ -182,19 +183,41 @@ class ImageHandlers(BaseHandler):
         )
 
         try:
-            # Получаем изображение
+            # Получаем изображение (самое качественное - последнее в списке)
             photo = update.message.photo[-1]
             file = await context.bot.get_file(photo.file_id)
-            img_bytes = await file.download_as_bytearray()
 
-            # Конвертируем bytearray в bytes для OpenAI API
-            img_bytes = bytes(img_bytes)
+            # Скачиваем изображение в память
+            img_buffer = io.BytesIO()
+            await file.download_to_memory(img_buffer)
+            img_buffer.seek(0)
+
+            # Конвертируем в PNG с помощью PIL
+            with Image.open(img_buffer) as img:
+                # Конвертируем в RGB если нужно (для JPEG)
+                if img.mode in ('RGBA', 'P'):
+                    img = img.convert('RGB')
+
+                # Сохраняем в PNG формате
+                png_buffer = io.BytesIO()
+                img.save(png_buffer, format='PNG', optimize=True)
+                png_buffer.seek(0)
+
+                # Проверяем размер файла
+                if png_buffer.getbuffer().nbytes > 4 * 1024 * 1024:  # 4MB
+                    # Уменьшаем качество если файл слишком большой
+                    png_buffer = io.BytesIO()
+                    # Уменьшаем размер изображения если нужно
+                    if img.size[0] > 1024 or img.size[1] > 1024:
+                        img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+                    img.save(png_buffer, format='PNG', optimize=True)
+                    png_buffer.seek(0)
 
             # Получаем промпт (текст сообщения или переданный параметр)
             prompt = message or update.message.caption or "Улучши это изображение"
 
             # Генерируем новое изображение на основе загруженного
-            result_url = await openai_utils.generate_image_with_input(prompt, img_bytes)
+            result_url = await openai_utils.generate_image_with_input(prompt, png_buffer.getvalue())
 
             # Отправляем результат
             await self._send_edited_image(context, placeholder_message, result_url, prompt)
