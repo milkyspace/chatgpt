@@ -191,11 +191,7 @@ class ImageHandlers(BaseHandler):
             prompt = message or update.message.caption or "Улучши это изображение"
 
             # Генерируем новое изображение на основе загруженного
-            result_url = await asyncio.to_thread(
-                openai_utils.generate_image_with_input,
-                prompt,
-                img_bytes
-            )
+            result_url = await openai_utils.generate_image_with_input(prompt, img_bytes)
 
             # Отправляем результат
             await self._send_edited_image(context, placeholder_message, result_url, prompt)
