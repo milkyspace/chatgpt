@@ -260,6 +260,7 @@ class MessageHandlers(MessageProcessor):
                     self.update_dialog_and_tokens(user_id, new_dialog_message, n_input_tokens, n_output_tokens)
 
         except Exception as e:
+            print(e)
             await self.handle_message_error(update, e)
 
     async def _handle_streaming_response(self, update: Update, context: CallbackContext, message: str,
