@@ -178,7 +178,8 @@ async def transcribe_audio(audio_file) -> str:
         return ""
 
 
-async def generate_images(prompt: str, model: str = "dall-e-3", n_images: int = 1, size: str = "1024x1024") -> List[str]:
+async def generate_images(prompt: str, model: str = "dall-e-3", n_images: int = 1, size: str = "1024x1024") -> List[
+    str]:
     """Генерирует изображения по текстовому описанию."""
     try:
         # DALL-E 3 поддерживает только 1 изображение за запрос
@@ -226,17 +227,21 @@ async def generate_images(prompt: str, model: str = "dall-e-3", n_images: int = 
 async def generate_image_with_input(prompt: str, image_bytes: bytes) -> str:
     """Генерирует изображение на основе входного изображения."""
     try:
+        # Создаем файловый объект из bytes
+        from io import BytesIO
+        image_file = BytesIO(image_bytes)
+        image_file.name = "input_image.png"
+
         response = await openai_client.images.edit(
-            model="dall-e-2",  # Проверьте правильное название модели
+            model="dall-e-2",
             prompt=prompt,
-            image=image_bytes,
+            image=image_file,
             size="1024x1024"
         )
-        return response.data[0].url  # Возвращаем URL, а не bytes
+        return response.data[0].url
     except Exception as e:
         logger.error(f"Error generating image with input: {e}")
         raise
-
 
 
 async def generate_image(prompt: str) -> str:

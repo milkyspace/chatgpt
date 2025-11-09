@@ -187,6 +187,9 @@ class ImageHandlers(BaseHandler):
             file = await context.bot.get_file(photo.file_id)
             img_bytes = await file.download_as_bytearray()
 
+            # Конвертируем bytearray в bytes для OpenAI API
+            img_bytes = bytes(img_bytes)
+
             # Получаем промпт (текст сообщения или переданный параметр)
             prompt = message or update.message.caption or "Улучши это изображение"
 
@@ -201,6 +204,31 @@ class ImageHandlers(BaseHandler):
 
         except Exception as e:
             await self._handle_image_generation_error(update, e)
+
+    async def _handle_image_generation_error(self, update: Update, error: Exception) -> None:
+        """Обрабатывает ошибки генерации изображения с безопасным HTML."""
+        error_msg = str(error)
+
+        # Безопасное форматирование сообщения об ошибке
+        if "rejected" in error_msg.lower() or "safety" in error_msg.lower():
+            text = (
+                "🚫 <b>Запрос отклонён политиками OpenAI.</b>\n"
+                "Попробуй сформулировать мягче 🫣"
+            )
+        elif "billing" in error_msg.lower() or "quota" in error_msg.lower():
+            text = (
+                "💳 <b>Проблема с биллингом OpenAI.</b>\n"
+                "Пожалуйста, попробуйте позже или свяжитесь с поддержкой."
+            )
+        else:
+            # Экранируем специальные символы для безопасного отображения
+            safe_error_msg = error_msg.replace('<', '&lt;').replace('>', '&gt;')
+            text = (
+                "⚠️ <b>Ошибка при генерации изображения.</b>\n"
+                f"<b>Причина:</b> {safe_error_msg}"
+            )
+
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
     async def _send_edited_image(self, context: CallbackContext, placeholder_message: telegram.Message,
                                  image_url: str, prompt: str) -> None:
