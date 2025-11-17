@@ -88,7 +88,7 @@ async def _render_status_line(session, user_id: int) -> str:
                  f"Изобр.: {('∞' if max_img is None else f'{ui}/{max_img}')}"
 
     text = f"<b>Подписка:</b> {status}\n" \
-                f"<b>Тариф:</b> {plan_name}\n"
+           f"<b>Тариф:</b> {plan_name}\n"
     if expires_str:
         text += f"<b>Действует до:</b> {expires_str}\n"
         text += f"<b>Лимиты:</b> {limits}"
@@ -161,6 +161,41 @@ async def cmd_new_chat(m: TgMessage):
         await session.commit()
 
     await m.answer("✅ Создан новый чат. Теперь можно отправлять сообщения.")
+
+
+@router.callback_query(F.data == "panel:referral")
+async def panel_referral(cq: CallbackQuery):
+    """Показывает информацию о реферальной программе"""
+    async with AsyncSessionMaker() as session:
+        user_row = await session.scalar(
+            select(User).where(User.id == cq.from_user.id)
+        )
+
+    if not user_row:
+        await cq.answer("Ошибка: пользователь не найден")
+        return
+
+    me = await cq.bot.get_me()
+    referral_url = f"https://t.me/{me.username}?start={user_row.referral_code}"
+
+    text = (
+        "👫 <b>Приглашайте друзей и получайте бонусы!</b>\n\n"
+        f"Ваша реферальная ссылка:\n<code>{referral_url}</code>\n\n"
+        "За каждого друга, который оплатит подписку:\n"
+        "• <b>Вам</b> – +5 дней к подписке\n"
+        "• <b>Другу</b> – 7 дней бесплатного доступа\n\n"
+        "Просто поделитесь ссылкой с друзьями!"
+    )
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📤 Поделиться ссылкой",
+                              switch_inline_query=f"Присоединяйся! {referral_url}")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")]
+    ])
+
+    await cq.message.edit_text(text, reply_markup=keyboard)
+    await cq.answer()
 
 
 @router.message(Command("admin"))

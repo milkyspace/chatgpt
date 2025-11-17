@@ -7,6 +7,7 @@ from models import Payment, User
 from payments.yoomoney import YooMoneyProvider
 from services.subscriptions import activate_paid_plan
 from services.referrals import apply_referral_bonus
+from services.notifications import NotificationService
 from router_admin import is_admin
 
 logger = logging.getLogger(__name__)
@@ -15,9 +16,11 @@ logger = logging.getLogger(__name__)
 class PaymentMonitor:
     """Фоновый мониторинг платежей."""
 
-    def __init__(self, interval_min: float = 1):
+    def __init__(self, interval_min: float = 1, bot=None):
         self.interval_min = interval_min
         self.running = False
+        self.bot = bot
+        self.notification_service = NotificationService(bot) if bot else None
 
     async def run_forever(self):
         """Запускает бесконечный цикл проверки."""
@@ -42,37 +45,76 @@ class PaymentMonitor:
             )).scalars().all()
 
             if not payments:
-                logger.info("[PaymentMonitor] Нет ожидающих платежей.")
                 return
 
-            for p in payments:
-                try:
-                    status = await provider.check_status(p.provider_payment_id)
-                    logger.info(f"Платеж {p.provider_payment_id}: пользователь {p.user_id} : статус {status}")  # Исправлено
-                    if is_admin(p.user_id):
-                        logger.info(f"Админский платеж {p.provider_payment_id}: пользователь {p.user_id}")  # Исправлено
-                        status = "succeeded"
-                except Exception as e:
-                    logger.warning(f"[PaymentMonitor] Ошибка запроса статуса для платежа {p.id}: {e}")  # Исправлено
-                    continue
+            for payment in payments:
+                await self._process_payment(session, provider, payment)
 
-                if status == "succeeded":
-                    logger.info(f"[PaymentMonitor] Платеж {p.id} ({p.plan_code}) подтвержден.")
-                    await activate_paid_plan(session, p.user_id, p.plan_code)
+    async def _process_payment(self, session, provider: YooMoneyProvider, payment: Payment):
+        """Обрабатывает один платеж"""
+        try:
+            # Для админов автоматически подтверждаем платежи
+            if is_admin(payment.user_id):
+                logger.info(f"Админский платеж {payment.provider_payment_id}: пользователь {payment.user_id}")
+                status = "succeeded"
+            else:
+                status = await provider.check_status(payment.provider_payment_id)
 
-                    # Бонус за рефералку
-                    user = await session.get(User, p.user_id)
-                    if user and user.referred_by:
-                        await apply_referral_bonus(session, user.referred_by)
+            logger.info(f"Платеж {payment.provider_payment_id}: пользователь {payment.user_id} : статус {status}")
 
-                    await session.execute(update(Payment)
-                                          .where(Payment.id == p.id)
-                                          .values(status="succeeded"))
-                    await session.commit()
+            if status == "succeeded":
+                await self._handle_successful_payment(session, payment)
+            elif status in ("canceled", "expired"):
+                await self._handle_failed_payment(session, payment, status)
 
-                elif status in ("canceled", "expired"):
-                    logger.info(f"[PaymentMonitor] Платеж {p.id} отменен ({status}).")
-                    await session.execute(update(Payment)
-                                          .where(Payment.id == p.id)
-                                          .values(status=status))
-                    await session.commit()
+        except Exception as e:
+            logger.warning(f"Ошибка запроса статуса для платежа {payment.id}: {e}")
+
+    async def _handle_successful_payment(self, session, payment: Payment):
+        """Обрабатывает успешный платеж"""
+        logger.info(f"Платеж {payment.id} ({payment.plan_code}) подтвержден.")
+
+        # Активируем подписку
+        subscription = await activate_paid_plan(session, payment.user_id, payment.plan_code)
+
+        # Начисляем бонус рефереру
+        user = await session.get(User, payment.user_id)
+        if user and user.referred_by:
+            await apply_referral_bonus(session, user.referred_by)
+
+        # Обновляем статус платежа
+        await session.execute(
+            update(Payment)
+            .where(Payment.id == payment.id)
+            .values(status="succeeded")
+        )
+        await session.commit()
+
+        # Отправляем уведомление пользователю
+        if self.notification_service and subscription:
+            plan = cfg.plans.get(payment.plan_code)
+            plan_title = plan.title if plan else payment.plan_code
+            await self.notification_service.send_subscription_activated(
+                user_id=payment.user_id,
+                plan_title=plan_title,
+                expires_at=subscription.expires_at
+            )
+
+    async def _handle_failed_payment(self, session, payment: Payment, status: str):
+        """Обрабатывает неудачный платеж"""
+        logger.info(f"Платеж {payment.id} отменен ({status}).")
+
+        await session.execute(
+            update(Payment)
+            .where(Payment.id == payment.id)
+            .values(status=status)
+        )
+        await session.commit()
+
+        # Отправляем уведомление об ошибке
+        if self.notification_service:
+            reason = "отменен" if status == "canceled" else "истек срок действия"
+            await self.notification_service.send_payment_failed(
+                user_id=payment.user_id,
+                reason=reason
+            )

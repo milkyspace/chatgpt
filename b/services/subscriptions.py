@@ -71,10 +71,21 @@ async def get_limits(session: AsyncSession, user_id: int) -> tuple[int | None, i
     return (plan.max_requests, plan.max_image_generations, plan.max_text_len)
 
 
-async def activate_paid_plan(session: AsyncSession, user_id: int, plan_code: str) -> None:
-    """Активация платного плана (вызывается после оплаты). Продлевает время и сбрасывает usage."""
+async def activate_paid_plan(session: AsyncSession, user_id: int, plan_code: str) -> UserSubscription:
+    """
+    Активация платного плана (вызывается после оплаты).
+    Продлевает время и сбрасывает usage.
+
+    Args:
+        session: Асинхронная сессия БД
+        user_id: ID пользователя
+        plan_code: Код плана
+
+    Returns:
+        UserSubscription: Обновленная подписка
+    """
     sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
-    now = datetime.now(timezone.utc)  # Исправлено: всегда используем UTC
+    now = datetime.now(timezone.utc)
 
     if not sub:
         sub = UserSubscription(user_id=user_id)
@@ -107,3 +118,4 @@ async def activate_paid_plan(session: AsyncSession, user_id: int, plan_code: str
         usage.used_images = 0
 
     await session.commit()
+    return sub  # Возвращаем подписку для использования в уведомлениях
