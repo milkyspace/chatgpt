@@ -3,6 +3,7 @@ bot.py:
 from __future__ import annotations
 import asyncio
 from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
@@ -36,13 +37,16 @@ async def main():
     logging.basicConfig(level=logging.INFO)
     logging.info(f"✅ BOT_TOKEN: {cfg.bot_token[:10]}…")
 
+    # Добавляем хранилище для FSM
+    storage = MemoryStorage()
+
     bot = Bot(
         token=cfg.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
     await _set_commands(bot)
 
-    dp = Dispatcher()
+    dp = Dispatcher(storage=storage)  # Передаем хранилище в диспетчер
     dp.include_router(public_router)
     dp.include_router(admin_router)
 
@@ -592,7 +596,9 @@ router_admin.py:
 from __future__ import annotations
 
 from aiogram import Router, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message as TgMessage, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import func
 from sqlalchemy import select, update
@@ -617,6 +623,11 @@ router = Router()
 # Применяем фильтр ко всем хендлерам этого роутера
 router.message.filter(admin_filter)
 router.callback_query.filter(admin_filter)
+
+
+# FSM состояния для рассылки
+class BroadcastStates(StatesGroup):
+    waiting_for_broadcast_text = State()
 
 
 @router.message(Command("admin"))
@@ -802,11 +813,13 @@ async def admin_check_payments(cq: CallbackQuery):
 
 
 @router.callback_query(F.data == "admin:broadcast")
-async def admin_broadcast(cq: CallbackQuery):
+async def admin_broadcast(cq: CallbackQuery, state: FSMContext):
     """Начало процесса рассылки"""
+    await state.set_state(BroadcastStates.waiting_for_broadcast_text)
+
     await cq.message.edit_text(
         "📣 <b>Рассылка сообщений</b>\n\n"
-        "Отправьте текст для рассылки ответом на это сообщение.\n"
+        "Отправьте текст для рассылки.\n"
         "Сообщение будет отправлено всем пользователям бота.\n\n"
         "<i>Используйте HTML-разметку для форматирования.</i>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -816,14 +829,17 @@ async def admin_broadcast(cq: CallbackQuery):
     await cq.answer()
 
 
-@router.message(F.reply_to_message & F.reply_to_message.text.contains("Рассылка"))
-async def process_broadcast(m: TgMessage):
-    """Обрабатывает рассылку"""
-    broadcast_text = m.text
+@router.message(BroadcastStates.waiting_for_broadcast_text, F.text)
+async def process_broadcast_text(m: TgMessage, state: FSMContext):
+    """Обрабатывает текст для рассылки (только в состоянии ожидания)"""
+    broadcast_text = m.text.strip()
 
-    if not broadcast_text or len(broadcast_text.strip()) < 5:
-        await m.answer("❌ Текст рассылки слишком короткий")
+    if not broadcast_text or len(broadcast_text) < 5:
+        await m.answer("❌ Текст рассылки слишком короткий (минимум 5 символов)")
         return
+
+    # Сбрасываем состояние
+    await state.clear()
 
     # Получаем всех пользователей
     async with AsyncSessionMaker() as session:
@@ -844,7 +860,7 @@ async def process_broadcast(m: TgMessage):
             )
             success_count += 1
             # Небольшая задержка чтобы не превысить лимиты Telegram
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.05)
         except Exception as e:
             logger.error(f"Ошибка отправки пользователю {user.id}: {e}")
             fail_count += 1
@@ -906,6 +922,7 @@ async def check_payments_command(m: TgMessage):
         f"• Всего в очереди: {len(pending_payments)}"
     )
 
+
 @router.callback_query(F.data == "panel:admin")
 async def panel_admin(cq: CallbackQuery):
     """Переход в админ-панель"""
@@ -921,7 +938,19 @@ async def panel_admin(cq: CallbackQuery):
         "• 💳 Платежи\n"
         "• 📣 Рассылка сообщений\n"
         "• 🔄 Проверка платежей",
-        reply_markup=admin_menu()  # Теперь используется!
+        reply_markup=admin_menu()
+    )
+    await cq.answer()
+
+
+@router.callback_query(F.data == "cancel_broadcast")
+async def cancel_broadcast(cq: CallbackQuery, state: FSMContext):
+    """Отмена рассылки"""
+    await state.clear()
+
+    await cq.message.edit_text(
+        "❌ Рассылка отменена",
+        reply_markup=admin_back_keyboard()
     )
     await cq.answer()
 

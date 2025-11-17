@@ -44,7 +44,11 @@ async def main():
     )
     await _set_commands(bot)
 
-    dp = Dispatcher(storage=storage)  # Передаем хранилище в диспетчер
+    dp = Dispatcher(storage=storage)
+
+    # Сохраняем хранилище в боте для доступа из хендлеров
+    bot["fsm_storage"] = storage
+
     dp.include_router(public_router)
     dp.include_router(admin_router)
 

@@ -234,49 +234,91 @@ async def admin_broadcast(cq: CallbackQuery, state: FSMContext):
     await cq.answer()
 
 
-@router.message(BroadcastStates.waiting_for_broadcast_text, F.text)
+@router.message(BroadcastStates.waiting_for_broadcast_text)
 async def process_broadcast_text(m: TgMessage, state: FSMContext):
-    """Обрабатывает текст для рассылки (только в состоянии ожидания)"""
-    broadcast_text = m.text.strip()
+    """
+    Обрабатывает текст для рассылки в состоянии ожидания.
 
-    if not broadcast_text or len(broadcast_text) < 5:
-        await m.answer("❌ Текст рассылки слишком короткий (минимум 5 символов)")
-        return
+    Args:
+        m: Сообщение от пользователя
+        state: Состояние FSM
+    """
+    try:
+        # Проверяем наличие текста
+        if not m.text or not m.text.strip():
+            await m.answer("❌ Пожалуйста, отправьте текст для рассылки")
+            return
 
-    # Сбрасываем состояние
-    await state.clear()
+        broadcast_text = m.text.strip()
 
-    # Получаем всех пользователей
-    async with AsyncSessionMaker() as session:
-        users = await session.scalars(select(User))
-        user_list = users.all()
+        if len(broadcast_text) < 5:
+            await m.answer("❌ Текст рассылки слишком короткий (минимум 5 символов)")
+            return
 
-    processing_msg = await m.answer(f"🔄 Начинаю рассылку для {len(user_list)} пользователей...")
+        # Сбрасываем состояние
+        await state.clear()
 
-    success_count = 0
-    fail_count = 0
+        # Получаем всех пользователей
+        async with AsyncSessionMaker() as session:
+            users_result = await session.execute(select(User))
+            user_list = users_result.scalars().all()
 
-    for user in user_list:
-        try:
-            await m.bot.send_message(
-                chat_id=user.id,
-                text=broadcast_text,
-                parse_mode="HTML"
-            )
-            success_count += 1
-            # Небольшая задержка чтобы не превысить лимиты Telegram
-            await asyncio.sleep(0.05)
-        except Exception as e:
-            logger.error(f"Ошибка отправки пользователю {user.id}: {e}")
-            fail_count += 1
+        if not user_list:
+            await m.answer("❌ В базе данных нет пользователей для рассылки")
+            return
 
-    await processing_msg.edit_text(
-        f"✅ Рассылка завершена:\n"
-        f"• Успешно: {success_count}\n"
-        f"• Не удалось: {fail_count}\n"
-        f"• Всего: {len(user_list)}",
-        reply_markup=admin_back_keyboard()
-    )
+        processing_msg = await m.answer(f"🔄 Начинаю рассылку для {len(user_list)} пользователей...")
+
+        success_count = 0
+        fail_count = 0
+        blocked_count = 0
+
+        # Отправляем сообщения с обработкой ошибок
+        for i, user in enumerate(user_list):
+            try:
+                await m.bot.send_message(
+                    chat_id=user.id,
+                    text=broadcast_text,
+                    parse_mode="HTML"
+                )
+                success_count += 1
+
+                # Задержка чтобы не превысить лимиты Telegram (30 сообщений в секунду)
+                if (i + 1) % 25 == 0:
+                    await asyncio.sleep(1)
+                else:
+                    await asyncio.sleep(0.05)
+
+            except Exception as e:
+                error_msg = str(e).lower()
+                if "bot was blocked" in error_msg or "user is deactivated" in error_msg:
+                    blocked_count += 1
+                else:
+                    logger.error(f"Ошибка отправки пользователю {user.id}: {e}")
+                    fail_count += 1
+
+        # Формируем отчет
+        report_text = (
+            f"✅ <b>Рассылка завершена</b>\n\n"
+            f"• 📊 Всего пользователей: <b>{len(user_list)}</b>\n"
+            f"• ✅ Успешно отправлено: <b>{success_count}</b>\n"
+            f"• ❌ Не удалось отправить: <b>{fail_count}</b>\n"
+            f"• 🚫 Заблокировали бота: <b>{blocked_count}</b>"
+        )
+
+        await processing_msg.edit_text(
+            report_text,
+            reply_markup=admin_back_keyboard(),
+            parse_mode="HTML"
+        )
+
+    except Exception as e:
+        logger.error(f"Критическая ошибка в процессе рассылки: {e}")
+        await state.clear()
+        await m.answer(
+            "❌ Произошла критическая ошибка при рассылке",
+            reply_markup=admin_back_keyboard()
+        )
 
 
 @router.message(Command("check_payments"))

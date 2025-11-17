@@ -400,18 +400,47 @@ async def on_photo(m: TgMessage):
     await img_pool.submit(job)
 
 
-@router.message(F.text & ~F.via_bot)
+@router.message(F.text & ~F.via_bot & ~F.state)  # Добавляем фильтр ~F.state
 async def on_text(m: TgMessage):
     """Обрабатывает обычные текстовые сообщения в текущем режиме."""
+    # Проверяем, не находится ли пользователь в состоянии FSM
+    from aiogram.fsm.context import FSMContext
+    from aiogram.fsm.storage.base import StorageKey
+
+    # Создаем ключ хранилища для текущего пользователя и чата
+    storage_key = StorageKey(
+        bot_id=m.bot.id,
+        chat_id=m.chat.id,
+        user_id=m.from_user.id
+    )
+
+    # Проверяем, есть ли состояние у пользователя
+    state = FSMContext(
+        storage=m.bot.get("fsm_storage"),  # Получаем хранилище из бота
+        key=storage_key
+    )
+
+    current_state = await state.get_state()
+    if current_state:
+        # Если пользователь в состоянии FSM, игнорируем сообщение
+        return
+
     text = m.text.strip()
     user_id = m.from_user.id
 
-    # режим (например assistant / image) — получаем из базы, но пока пусть дефолт
-    mode = "assistant"
+    # Режим получаем из активной сессии чата
+    async with AsyncSessionMaker() as session:
+        chat_session = await session.scalar(
+            select(ChatSession).where(
+                ChatSession.user_id == user_id,
+                ChatSession.is_active == True
+            )
+        )
+        mode = chat_session.mode if chat_session else "assistant"
 
     if mode == "assistant":
         chat_service = ChatService()
-        await chat_service.handle_user_message(text, m.bot, m.chat.id)
+        await chat_service.handle_user_message(text, m.bot, m.chat.id, user_id)
     else:
         await m.answer("⚙️ Другие режимы пока в разработке.")
 
