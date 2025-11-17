@@ -168,14 +168,7 @@ async def switch_mode(cq: CallbackQuery):
             await cq.message.edit_text(text)
             await cq.answer()
 
-            # Создаем fake callback query
-            fake_cq = CallbackQuery(
-                id="fake_id",
-                from_user=User(id=cq.from_user.id, first_name="User"),
-                chat_instance="fake_chat_instance",
-                message=cq.message  # или создайте fake message
-            )
-            await show_subs(fake_cq)
+            await show_subs(cq)
 
             return
 
