@@ -11,8 +11,15 @@ def subscriptions_keyboard() -> InlineKeyboardMarkup:
 def admin_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👤 Пользователи", callback_data="admin:users"),
+         InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")],
+        [InlineKeyboardButton(text="💳 Платежи", callback_data="admin:payments"),
          InlineKeyboardButton(text="📣 Рассылка", callback_data="admin:broadcast")],
-        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")]
+        [InlineKeyboardButton(text="🔄 Проверить платежи", callback_data="admin:check_payments")]
+    ])
+
+def admin_back_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ В админ-панель", callback_data="admin:main")]
     ])
 
 def keyboards_for_modes() -> InlineKeyboardMarkup:

@@ -2,14 +2,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from sqlalchemy import select, update
-from config import cfg
 from db import AsyncSessionMaker
 from models import Payment, User
 from payments.yoomoney import YooMoneyProvider
 from services.subscriptions import activate_paid_plan
 from services.referrals import apply_referral_bonus
 from services.notifications import NotificationService
-from router_admin import is_admin
+from services.auth import is_admin  # Используем нашу новую функцию
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +54,7 @@ class PaymentMonitor:
         """Обрабатывает один платеж"""
         try:
             # Для админов автоматически подтверждаем платежи
-            if is_admin(payment.user_id):
+            if is_admin(payment.user_id):  # Теперь используем нашу функцию
                 logger.info(f"Админский платеж {payment.provider_payment_id}: пользователь {payment.user_id}")
                 status = "succeeded"
             else:
@@ -93,6 +92,7 @@ class PaymentMonitor:
 
         # Отправляем уведомление пользователю
         if self.notification_service and subscription:
+            from config import cfg  # Локальный импорт чтобы избежать циклических зависимостей
             plan = cfg.plans.get(payment.plan_code)
             plan_title = plan.title if plan else payment.plan_code
             await self.notification_service.send_subscription_activated(

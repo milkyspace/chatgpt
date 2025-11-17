@@ -1,0 +1,28 @@
+from __future__ import annotations
+from config import cfg
+
+
+def is_admin(user_id: int) -> bool:
+    """
+    Проверяет, является ли пользователь администратором
+
+    Args:
+        user_id: ID пользователя в Telegram
+
+    Returns:
+        bool: True если пользователь администратор
+    """
+    return user_id in cfg.admin_ids
+
+
+async def admin_required(user_id: int) -> bool:
+    """
+    Асинхронная версия проверки администратора (для фильтров)
+
+    Args:
+        user_id: ID пользователя в Telegram
+
+    Returns:
+        bool: True если пользователь администратор
+    """
+    return is_admin(user_id)
