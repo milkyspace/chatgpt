@@ -1,4 +1,3 @@
-# services/payments_monitor.py
 from __future__ import annotations
 import asyncio
 import logging
@@ -49,12 +48,12 @@ class PaymentMonitor:
             for p in payments:
                 try:
                     status = await provider.check_status(p.provider_payment_id)
-                    logger.info("Платеж " + p.provider_payment_id + ": " + p.user_id + " : " + status)
+                    logger.info(f"Платеж {p.provider_payment_id}: пользователь {p.user_id} : статус {status}")  # Исправлено
                     if is_admin(p.user_id):
-                        logger.info("Админский платеж " + p.provider_payment_id + ": " + p.user_id)
+                        logger.info(f"Админский платеж {p.provider_payment_id}: пользователь {p.user_id}")  # Исправлено
                         status = "succeeded"
                 except Exception as e:
-                    logger.warning(f"[PaymentMonitor] Ошибка запроса статуса для {p.id}: {e}")
+                    logger.warning(f"[PaymentMonitor] Ошибка запроса статуса для платежа {p.id}: {e}")  # Исправлено
                     continue
 
                 if status == "succeeded":
