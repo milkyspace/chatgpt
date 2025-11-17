@@ -190,6 +190,7 @@ async def show_subs(cq: CallbackQuery):
         [InlineKeyboardButton(text="Купить Pro Lite", callback_data="buy:pro_lite")],
         [InlineKeyboardButton(text="Купить Pro Plus", callback_data="buy:pro_plus")],
         [InlineKeyboardButton(text="Купить Pro Premium", callback_data="buy:pro_premium")],
+        [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")],
     ])
     await cq.message.edit_text(text=text, reply_markup=kb)
     await cq.answer()
