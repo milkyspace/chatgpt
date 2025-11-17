@@ -1,11 +1,12 @@
 from __future__ import annotations
-import asyncio
-import logging
+
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message as TgMessage, CallbackQuery
+from aiogram.types import Message as TgMessage, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import func
 from sqlalchemy import select, update
+import asyncio
+import logging
 
 from config import cfg
 from db import AsyncSessionMaker
@@ -13,7 +14,9 @@ from keyboards import admin_menu, admin_back_keyboard
 from models import Payment, User, UserSubscription
 from payments.yoomoney import YooMoneyProvider
 from services.subscriptions import activate_paid_plan
-from services.auth import is_admin, admin_required
+from services.auth import is_admin
+
+logger = logging.getLogger(__name__)
 
 # Создаем фильтр для администраторов
 admin_filter = F.from_user.func(lambda user: is_admin(user.id))
@@ -24,7 +27,6 @@ router = Router()
 router.message.filter(admin_filter)
 router.callback_query.filter(admin_filter)
 
-logger = logging.getLogger(__name__)
 
 @router.message(Command("admin"))
 async def admin_entry(m: TgMessage):
@@ -137,12 +139,9 @@ async def admin_payments(cq: CallbackQuery):
         )
         status_counts = dict(status_stats.all())
 
-        # Последние успешные платежи
-        recent_payments = await session.scalars(
-            select(Payment)
-            .where(Payment.status == "succeeded")
-            .order_by(Payment.created_at.desc())
-            .limit(5)
+        # Ожидающие платежи
+        pending_count = await session.scalar(
+            select(func.count()).select_from(Payment).where(Payment.status == "pending")
         )
 
     text = "💳 <b>Статистика платежей</b>\n\n<b>По статусам:</b>\n"
@@ -150,11 +149,7 @@ async def admin_payments(cq: CallbackQuery):
     for status, count in status_counts.items():
         text += f"• {status}: <b>{count}</b>\n"
 
-    text += "\n<b>Последние успешные платежи:</b>\n"
-    for payment in recent_payments:
-        plan = cfg.plans.get(payment.plan_code, None)
-        plan_name = plan.title if plan else payment.plan_code
-        text += f"• {plan_name} - {payment.amount_rub}₽\n"
+    text += f"\n<b>Ожидающие проверки:</b> <b>{pending_count}</b>"
 
     await cq.message.edit_text(text, reply_markup=admin_back_keyboard())
     await cq.answer()
@@ -184,7 +179,11 @@ async def admin_check_payments(cq: CallbackQuery):
 
         for payment in pending_payments:
             try:
-                status = await provider.check_status(payment.provider_payment_id)
+                # Для админов автоматически подтверждаем платежи
+                if is_admin(payment.user_id):
+                    status = "succeeded"
+                else:
+                    status = await provider.check_status(payment.provider_payment_id)
 
                 if status == "succeeded":
                     await activate_paid_plan(session, payment.user_id, payment.plan_code)
@@ -288,7 +287,11 @@ async def check_payments_command(m: TgMessage):
 
         for payment in pending_payments:
             try:
-                status = await provider.check_status(payment.provider_payment_id)
+                # Для админов автоматически подтверждаем платежи
+                if is_admin(payment.user_id):
+                    status = "succeeded"
+                else:
+                    status = await provider.check_status(payment.provider_payment_id)
 
                 if status == "succeeded":
                     await activate_paid_plan(session, payment.user_id, payment.plan_code)
@@ -311,23 +314,3 @@ async def check_payments_command(m: TgMessage):
         f"• Успешных: {succeeded}\n"
         f"• Всего в очереди: {len(pending_payments)}"
     )
-
-
-@router.callback_query(F.data == "panel:admin")
-async def panel_admin(cq: CallbackQuery):
-    """Переход в админ-панель"""
-    if not is_admin(cq.from_user.id):
-        await cq.answer("🚫 Нет доступа", show_alert=True)
-        return
-
-    await cq.message.edit_text(
-        "🛡 <b>Админ-панель</b>\n\n"
-        "Доступные функции:\n"
-        "• 👤 Просмотр пользователей\n"
-        "• 📊 Статистика\n"
-        "• 💳 Платежи\n"
-        "• 📣 Рассылка сообщений\n"
-        "• 🔄 Проверка платежей",
-        reply_markup=admin_menu()  # Теперь используется!
-    )
-    await cq.answer()
