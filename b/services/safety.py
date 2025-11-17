@@ -7,7 +7,7 @@ class SafetyDecision:
 
 class SafetyGuard:
     """Простая проверка контента. Здесь можно внедрить свои правила и/или модерацию провайдеров."""
-    BLOCKED_CELEBRITY_SELFIE = True  # пример флага — для OpenAI лучше блокировать deepfake с публичными фигурами
+    BLOCKED_CELEBRITY_SELFIE = False  # пример флага — для OpenAI лучше блокировать deepfake с публичными фигурами
 
     @classmethod
     def check_celebrity_selfie(cls, celebrity_name: str) -> SafetyDecision:
