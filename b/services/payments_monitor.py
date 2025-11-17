@@ -49,7 +49,9 @@ class PaymentMonitor:
             for p in payments:
                 try:
                     status = await provider.check_status(p.provider_payment_id)
+                    logger.info("Платеж " + p.provider_payment_id + ": " + p.user_id + " : " + status)
                     if is_admin(p.user_id):
+                        logger.info("Админский платеж " + p.provider_payment_id + ": " + p.user_id)
                         status = "succeeded"
                 except Exception as e:
                     logger.warning(f"[PaymentMonitor] Ошибка запроса статуса для {p.id}: {e}")
