@@ -314,3 +314,22 @@ async def check_payments_command(m: TgMessage):
         f"• Успешных: {succeeded}\n"
         f"• Всего в очереди: {len(pending_payments)}"
     )
+
+@router.callback_query(F.data == "panel:admin")
+async def panel_admin(cq: CallbackQuery):
+    """Переход в админ-панель"""
+    if not is_admin(cq.from_user.id):
+        await cq.answer("🚫 Нет доступа", show_alert=True)
+        return
+
+    await cq.message.edit_text(
+        "🛡 <b>Админ-панель</b>\n\n"
+        "Доступные функции:\n"
+        "• 👤 Просмотр пользователей\n"
+        "• 📊 Статистика\n"
+        "• 💳 Платежи\n"
+        "• 📣 Рассылка сообщений\n"
+        "• 🔄 Проверка платежей",
+        reply_markup=admin_menu()  # Теперь используется!
+    )
+    await cq.answer()
