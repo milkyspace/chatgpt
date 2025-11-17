@@ -240,20 +240,6 @@ async def panel_help(cq: CallbackQuery):
     await cq.answer()
 
 
-@router.callback_query(F.data == "panel:admin")
-async def panel_admin(cq: CallbackQuery):
-    if cq.from_user.id not in cfg.admin_ids:
-        await cq.answer("🚫 Нет доступа", show_alert=True)
-        return
-    await cq.message.edit_text(
-        "🛡 <b>Админ-панель</b>\n\nФункции управления ботом.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")]
-        ])
-    )
-    await cq.answer()
-
-
 @router.callback_query(F.data.startswith("mode:"))
 async def switch_mode(cq: CallbackQuery):
     mode = cq.data.split(":", 1)[1]
