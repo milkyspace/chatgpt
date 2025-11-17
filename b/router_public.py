@@ -84,7 +84,7 @@ async def _render_status_line(session, user_id: int) -> str:
     text = f"<b>Подписка:</b> {status}\n" \
                 f"<b>Тариф:</b> {plan_name}\n"
     if expires_str:
-        text = f"<b>Действует до:</b> {expires_str}\n"
+        text += f"<b>Действует до:</b> {expires_str}\n"
         text += f"<b>Лимиты:</b> {limits}"
 
     return text
