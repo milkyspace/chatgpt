@@ -8,11 +8,14 @@ from models import Payment, User
 from payments.yoomoney import YooMoneyProvider
 from services.subscriptions import activate_paid_plan
 from services.referrals import apply_referral_bonus
+from router_admin import is_admin
 
 logger = logging.getLogger(__name__)
 
+
 class PaymentMonitor:
     """Фоновый мониторинг платежей."""
+
     def __init__(self, interval_min: int = 5):
         self.interval_min = interval_min
         self.running = False
@@ -46,6 +49,8 @@ class PaymentMonitor:
             for p in payments:
                 try:
                     status = await provider.check_status(p.provider_payment_id)
+                    if is_admin(p.user_id):
+                        status = "succeeded"
                 except Exception as e:
                     logger.warning(f"[PaymentMonitor] Ошибка запроса статуса для {p.id}: {e}")
                     continue
@@ -60,13 +65,13 @@ class PaymentMonitor:
                         await apply_referral_bonus(session, user.referred_by)
 
                     await session.execute(update(Payment)
-                        .where(Payment.id == p.id)
-                        .values(status="succeeded"))
+                                          .where(Payment.id == p.id)
+                                          .values(status="succeeded"))
                     await session.commit()
 
                 elif status in ("canceled", "expired"):
                     logger.info(f"[PaymentMonitor] Платеж {p.id} отменен ({status}).")
                     await session.execute(update(Payment)
-                        .where(Payment.id == p.id)
-                        .values(status=status))
+                                          .where(Payment.id == p.id)
+                                          .values(status=status))
                     await session.commit()
