@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
@@ -34,13 +35,16 @@ async def main():
     logging.basicConfig(level=logging.INFO)
     logging.info(f"✅ BOT_TOKEN: {cfg.bot_token[:10]}…")
 
+    # Добавляем хранилище для FSM
+    storage = MemoryStorage()
+
     bot = Bot(
         token=cfg.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
     await _set_commands(bot)
 
-    dp = Dispatcher()
+    dp = Dispatcher(storage=storage)  # Передаем хранилище в диспетчер
     dp.include_router(public_router)
     dp.include_router(admin_router)
 

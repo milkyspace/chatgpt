@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from aiogram import Router, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message as TgMessage, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import func
 from sqlalchemy import select, update
@@ -27,8 +29,10 @@ router = Router()
 router.message.filter(admin_filter)
 router.callback_query.filter(admin_filter)
 
-# Словарь для хранения состояний рассылки (в продакшене лучше использовать Redis или БД)
-broadcast_states = {}
+
+# FSM состояния для рассылки
+class BroadcastStates(StatesGroup):
+    waiting_for_broadcast_text = State()
 
 
 @router.message(Command("admin"))
@@ -214,17 +218,13 @@ async def admin_check_payments(cq: CallbackQuery):
 
 
 @router.callback_query(F.data == "admin:broadcast")
-async def admin_broadcast(cq: CallbackQuery):
+async def admin_broadcast(cq: CallbackQuery, state: FSMContext):
     """Начало процесса рассылки"""
-    # Сохраняем состояние рассылки для пользователя
-    broadcast_states[cq.from_user.id] = {
-        'waiting_for_broadcast': True,
-        'original_message_id': cq.message.message_id
-    }
+    await state.set_state(BroadcastStates.waiting_for_broadcast_text)
 
     await cq.message.edit_text(
         "📣 <b>Рассылка сообщений</b>\n\n"
-        "Отправьте текст для рассылки ответом на это сообщение.\n"
+        "Отправьте текст для рассылки.\n"
         "Сообщение будет отправлено всем пользователям бота.\n\n"
         "<i>Используйте HTML-разметку для форматирования.</i>",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -234,32 +234,17 @@ async def admin_broadcast(cq: CallbackQuery):
     await cq.answer()
 
 
-@router.message(F.text & ~F.via_bot)
-async def process_broadcast_or_text(m: TgMessage):
-    """Обрабатывает либо рассылку, либо обычные текстовые сообщения"""
-    user_id = m.from_user.id
-
-    # Проверяем, находится ли пользователь в режиме рассылки
-    if user_id in broadcast_states and broadcast_states[user_id].get('waiting_for_broadcast'):
-        await _process_broadcast_text(m)
-    else:
-        # Если не в режиме рассылки, обрабатываем как обычное сообщение
-        await _process_regular_text(m)
-
-
-async def _process_broadcast_text(m: TgMessage):
-    """Обрабатывает текст для рассылки"""
-    user_id = m.from_user.id
+@router.message(BroadcastStates.waiting_for_broadcast_text, F.text)
+async def process_broadcast_text(m: TgMessage, state: FSMContext):
+    """Обрабатывает текст для рассылки (только в состоянии ожидания)"""
     broadcast_text = m.text.strip()
 
     if not broadcast_text or len(broadcast_text) < 5:
         await m.answer("❌ Текст рассылки слишком короткий (минимум 5 символов)")
-        # Восстанавливаем состояние ожидания
         return
 
-    # Убираем состояние рассылки
-    if user_id in broadcast_states:
-        del broadcast_states[user_id]
+    # Сбрасываем состояние
+    await state.clear()
 
     # Получаем всех пользователей
     async with AsyncSessionMaker() as session:
@@ -292,13 +277,6 @@ async def _process_broadcast_text(m: TgMessage):
         f"• Всего: {len(user_list)}",
         reply_markup=admin_back_keyboard()
     )
-
-
-async def _process_regular_text(m: TgMessage):
-    """Обрабатывает обычные текстовые сообщения (перенаправляет в router_public)"""
-    # Импортируем здесь чтобы избежать циклических импортов
-    from router_public import on_text
-    await on_text(m)
 
 
 @router.message(Command("check_payments"))
@@ -371,11 +349,9 @@ async def panel_admin(cq: CallbackQuery):
 
 
 @router.callback_query(F.data == "cancel_broadcast")
-async def cancel_broadcast(cq: CallbackQuery):
+async def cancel_broadcast(cq: CallbackQuery, state: FSMContext):
     """Отмена рассылки"""
-    user_id = cq.from_user.id
-    if user_id in broadcast_states:
-        del broadcast_states[user_id]
+    await state.clear()
 
     await cq.message.edit_text(
         "❌ Рассылка отменена",
