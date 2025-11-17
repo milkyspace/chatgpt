@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from sqlalchemy import select, update
+from config import cfg
 from db import AsyncSessionMaker
 from models import Payment, User
 from payments.yoomoney import YooMoneyProvider
