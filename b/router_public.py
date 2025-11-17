@@ -62,7 +62,7 @@ async def _render_status_line(session, user_id: int) -> str:
     if not sub or not expires_at or expires_at <= now:
         status = "🔴 Неактивна"
         expires_str = "—"
-        plan_name = "Trial истёк" if (sub and sub.is_trial) else "Нет"
+        plan_name = "Пробный период истёк" if (sub and sub.is_trial) else "Нет"
         limits = "Запросы: 0 / Изображения: 0"
     else:
         plan_code = sub.plan_code or "trial"
@@ -81,10 +81,13 @@ async def _render_status_line(session, user_id: int) -> str:
         limits = f"Запросы: {('∞' if max_req is None else f'{ur}/{max_req}')}, " \
                  f"Изобр.: {('∞' if max_img is None else f'{ui}/{max_img}')}"
 
-    return (f"<b>Подписка:</b> {status}\n"
-            f"<b>Тариф:</b> {plan_name}\n"
-            f"<b>Действует до:</b> {expires_str}\n"
-            f"<b>Лимиты:</b> {limits}")
+    text = f"<b>Подписка:</b> {status}\n" \
+                f"<b>Тариф:</b> {plan_name}\n"
+    if expires_str:
+        text = f"<b>Действует до:</b> {expires_str}\n"
+        text += f"<b>Лимиты:</b> {limits}"
+
+    return text
 
 
 @router.message(CommandStart())
@@ -131,6 +134,7 @@ async def panel_help(cq: CallbackQuery):
 
 @router.callback_query(F.data == "panel:admin")
 async def panel_admin(cq: CallbackQuery):
+    print(cfg.admins)
     if cq.from_user.id not in cfg.admins:
         await cq.answer("🚫 Нет доступа", show_alert=True)
         return

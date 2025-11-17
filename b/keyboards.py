@@ -38,12 +38,12 @@ def keyboards_for_modes() -> InlineKeyboardMarkup:
 
 def top_panel(bot_username: str, ref_code: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Подлить подписку", callback_data="subs:show"),
+        [InlineKeyboardButton(text="💳 Продлить подписку", callback_data="subs:show"),
          InlineKeyboardButton(text="🎛 Режим", callback_data="panel:mode")],
         [
             InlineKeyboardButton(
                 text="👥 Пригласить",
-                switch_inline_query=f"Переходи в @{bot_username}?start={ref_code} — получи бонус!"
+                switch_inline_query=f"Переходи в https://t.me/{bot_username}?start={ref_code} — получи бонус!"
             )
         ],
         [InlineKeyboardButton(text="❓ Помощь", callback_data="panel:help"),
