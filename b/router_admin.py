@@ -9,7 +9,7 @@ from sqlalchemy import select, update
 
 from config import cfg
 from db import AsyncSessionMaker
-from keyboards import admin_menu
+from keyboards import admin_menu, admin_back_keyboard
 from models import Payment, User, UserSubscription
 from payments.yoomoney import YooMoneyProvider
 from services.subscriptions import activate_paid_plan
@@ -32,12 +32,29 @@ async def admin_entry(m: TgMessage):
     await m.answer(
         "🛡 <b>Админ-панель</b>\n\n"
         "Доступные функции:\n"
-        "• Просмотр пользователей\n"
-        "• Статистика\n"
-        "• Проверка платежей\n"
-        "• Рассылка сообщений",
+        "• 👤 Просмотр пользователей\n"
+        "• 📊 Статистика\n"
+        "• 💳 Платежи\n"
+        "• 📣 Рассылка сообщений\n"
+        "• 🔄 Проверка платежей",
         reply_markup=admin_menu()
     )
+
+
+@router.callback_query(F.data == "admin:main")
+async def admin_main(cq: CallbackQuery):
+    """Возврат в главное меню админ-панели"""
+    await cq.message.edit_text(
+        "🛡 <b>Админ-панель</b>\n\n"
+        "Доступные функции:\n"
+        "• 👤 Просмотр пользователей\n"
+        "• 📊 Статистика\n"
+        "• 💳 Платежи\n"
+        "• 📣 Рассылка сообщений\n"
+        "• 🔄 Проверка платежей",
+        reply_markup=admin_menu()
+    )
+    await cq.answer()
 
 
 @router.callback_query(F.data == "admin:users")
@@ -50,13 +67,19 @@ async def admin_users(cq: CallbackQuery):
                 UserSubscription.expires_at > func.now()
             )
         )
+        trial_users = await session.scalar(
+            select(func.count()).select_from(UserSubscription).where(
+                UserSubscription.is_trial == True
+            )
+        )
 
     text = (
         f"👥 <b>Статистика пользователей</b>\n\n"
         f"• Всего пользователей: <b>{total_users}</b>\n"
-        f"• Активных подписок: <b>{active_subs}</b>"
+        f"• Активных подписок: <b>{active_subs}</b>\n"
+        f"• Пробных периодов: <b>{trial_users}</b>"
     )
-    await cq.message.edit_text(text)
+    await cq.message.edit_text(text, reply_markup=admin_back_keyboard())
     await cq.answer()
 
 
@@ -99,17 +122,106 @@ async def admin_stats(cq: CallbackQuery):
         plan_name = plan.title if plan else plan_code
         text += f"• {plan_name}: <b>{count}</b>\n"
 
-    await cq.message.edit_text(text)
+    await cq.message.edit_text(text, reply_markup=admin_back_keyboard())
+    await cq.answer()
+
+
+@router.callback_query(F.data == "admin:payments")
+async def admin_payments(cq: CallbackQuery):
+    """Статистика по платежам"""
+    async with AsyncSessionMaker() as session:
+        # Статистика по статусам платежей
+        status_stats = await session.execute(
+            select(Payment.status, func.count(Payment.id))
+            .group_by(Payment.status)
+        )
+        status_counts = dict(status_stats.all())
+
+        # Последние успешные платежи
+        recent_payments = await session.scalars(
+            select(Payment)
+            .where(Payment.status == "succeeded")
+            .order_by(Payment.created_at.desc())
+            .limit(5)
+        )
+
+    text = "💳 <b>Статистика платежей</b>\n\n<b>По статусам:</b>\n"
+
+    for status, count in status_counts.items():
+        text += f"• {status}: <b>{count}</b>\n"
+
+    text += "\n<b>Последние успешные платежи:</b>\n"
+    for payment in recent_payments:
+        plan = cfg.plans.get(payment.plan_code, None)
+        plan_name = plan.title if plan else payment.plan_code
+        text += f"• {plan_name} - {payment.amount_rub}₽\n"
+
+    await cq.message.edit_text(text, reply_markup=admin_back_keyboard())
+    await cq.answer()
+
+
+@router.callback_query(F.data == "admin:check_payments")
+async def admin_check_payments(cq: CallbackQuery):
+    """Проверка ожидающих платежей"""
+    provider = YooMoneyProvider()
+
+    async with AsyncSessionMaker() as session:
+        payments = await session.scalars(
+            select(Payment).where(Payment.status == "pending")
+        )
+        pending_payments = payments.all()
+
+        if not pending_payments:
+            await cq.message.edit_text(
+                "✅ Нет ожидающих платежей",
+                reply_markup=admin_back_keyboard()
+            )
+            await cq.answer()
+            return
+
+        processed = 0
+        succeeded = 0
+
+        for payment in pending_payments:
+            try:
+                status = await provider.check_status(payment.provider_payment_id)
+
+                if status == "succeeded":
+                    await activate_paid_plan(session, payment.user_id, payment.plan_code)
+                    payment.status = "succeeded"
+                    succeeded += 1
+                elif status in ("canceled", "expired"):
+                    payment.status = status
+
+                processed += 1
+
+            except Exception as e:
+                logger.error(f"Ошибка проверки платежа {payment.id}: {e}")
+                continue
+
+        await session.commit()
+
+    await cq.message.edit_text(
+        f"🔍 Проверка платежей завершена:\n"
+        f"• Обработано: {processed}\n"
+        f"• Успешных: {succeeded}\n"
+        f"• Всего в очереди: {len(pending_payments)}",
+        reply_markup=admin_back_keyboard()
+    )
     await cq.answer()
 
 
 @router.callback_query(F.data == "admin:broadcast")
 async def admin_broadcast(cq: CallbackQuery):
     """Начало процесса рассылки"""
-    await cq.message.answer(
+    await cq.message.edit_text(
         "📣 <b>Рассылка сообщений</b>\n\n"
         "Отправьте текст для рассылки ответом на это сообщение.\n"
-        "Сообщение будет отправлено всем пользователям бота."
+        "Сообщение будет отправлено всем пользователям бота.\n\n"
+        "<i>Используйте HTML-разметку для форматирования.</i>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Отмена", callback_data="admin:main")]
+        ])
     )
     await cq.answer()
 
@@ -128,7 +240,7 @@ async def process_broadcast(m: TgMessage):
         users = await session.scalars(select(User))
         user_list = users.all()
 
-    await m.answer(f"🔄 Начинаю рассылку для {len(user_list)} пользователей...")
+    processing_msg = await m.answer(f"🔄 Начинаю рассылку для {len(user_list)} пользователей...")
 
     success_count = 0
     fail_count = 0
@@ -147,16 +259,18 @@ async def process_broadcast(m: TgMessage):
             logger.error(f"Ошибка отправки пользователю {user.id}: {e}")
             fail_count += 1
 
-    await m.answer(
+    await processing_msg.edit_text(
         f"✅ Рассылка завершена:\n"
         f"• Успешно: {success_count}\n"
-        f"• Не удалось: {fail_count}"
+        f"• Не удалось: {fail_count}\n"
+        f"• Всего: {len(user_list)}",
+        reply_markup=admin_back_keyboard()
     )
 
 
 @router.message(Command("check_payments"))
-async def check_payments(m: TgMessage):
-    """Ручная проверка ожидающих платежей"""
+async def check_payments_command(m: TgMessage):
+    """Ручная проверка платежей через команду"""
     provider = YooMoneyProvider()
 
     async with AsyncSessionMaker() as session:
@@ -199,35 +313,21 @@ async def check_payments(m: TgMessage):
     )
 
 
-@router.callback_query(F.data == "admin:payments")
-async def admin_payments(cq: CallbackQuery):
-    """Статистика по платежам"""
-    async with AsyncSessionMaker() as session:
-        # Статистика по статусам платежей
-        status_stats = await session.execute(
-            select(Payment.status, func.count(Payment.id))
-            .group_by(Payment.status)
-        )
-        status_counts = dict(status_stats.all())
+@router.callback_query(F.data == "panel:admin")
+async def panel_admin(cq: CallbackQuery):
+    """Переход в админ-панель"""
+    if not is_admin(cq.from_user.id):
+        await cq.answer("🚫 Нет доступа", show_alert=True)
+        return
 
-        # Последние успешные платежи
-        recent_payments = await session.scalars(
-            select(Payment)
-            .where(Payment.status == "succeeded")
-            .order_by(Payment.created_at.desc())
-            .limit(10)
-        )
-
-    text = "💳 <b>Статистика платежей</b>\n\n<b>По статусам:</b>\n"
-
-    for status, count in status_counts.items():
-        text += f"• {status}: <b>{count}</b>\n"
-
-    text += "\n<b>Последние успешные платежи:</b>\n"
-    for payment in recent_payments:
-        plan = cfg.plans.get(payment.plan_code, None)
-        plan_name = plan.title if plan else payment.plan_code
-        text += f"• {plan_name} - {payment.amount_rub}₽\n"
-
-    await cq.message.edit_text(text)
+    await cq.message.edit_text(
+        "🛡 <b>Админ-панель</b>\n\n"
+        "Доступные функции:\n"
+        "• 👤 Просмотр пользователей\n"
+        "• 📊 Статистика\n"
+        "• 💳 Платежи\n"
+        "• 📣 Рассылка сообщений\n"
+        "• 🔄 Проверка платежей",
+        reply_markup=admin_menu()  # Теперь используется!
+    )
     await cq.answer()
