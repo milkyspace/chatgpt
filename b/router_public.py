@@ -171,7 +171,7 @@ async def switch_mode(cq: CallbackQuery):
             # Создаем fake callback query
             fake_cq = CallbackQuery(
                 id="fake_id",
-                from_user=User(id=cq.from_user.id, is_bot=False, first_name="User"),
+                from_user=User(id=cq.from_user.id, first_name="User"),
                 chat_instance="fake_chat_instance",
                 message=cq.message  # или создайте fake message
             )
