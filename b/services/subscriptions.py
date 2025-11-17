@@ -5,7 +5,9 @@ from datetime import datetime, timedelta, timezone
 from config import cfg
 from models import User, UserSubscription, Usage
 
-async def ensure_user(session: AsyncSession, tg_user_id: int, username: str | None, first_name: str | None, last_name: str | None, referred_by_code: str | None = None) -> User:
+
+async def ensure_user(session: AsyncSession, tg_user_id: int, username: str | None, first_name: str | None,
+                      last_name: str | None, referred_by_code: str | None = None) -> User:
     """Создаёт пользователя, подписку trial и usage при первом входе."""
     user = await session.scalar(select(User).where(User.id == tg_user_id))
     if user:
@@ -40,11 +42,20 @@ async def ensure_user(session: AsyncSession, tg_user_id: int, username: str | No
     await session.commit()
     return user
 
+
 async def has_active_subscription(session: AsyncSession, user_id: int) -> bool:
     sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
     if not sub or not sub.expires_at:
         return False
-    return sub.expires_at > datetime.now(datetime.now().astimezone().tzinfo).astimezone().replace(tzinfo=None)
+    # Приводим обе даты к UTC для сравнения
+    now = datetime.now(timezone.utc)
+    expires_at = sub.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    else:
+        expires_at = expires_at.astimezone(timezone.utc)
+    return expires_at > now
+
 
 async def get_limits(session: AsyncSession, user_id: int) -> tuple[int | None, int | None, int]:
     """Возвращает (max_requests, max_images, max_text_len) для текущего плана/триала."""
@@ -59,19 +70,33 @@ async def get_limits(session: AsyncSession, user_id: int) -> tuple[int | None, i
         return (0, 0, 0)
     return (plan.max_requests, plan.max_image_generations, plan.max_text_len)
 
+
 async def activate_paid_plan(session: AsyncSession, user_id: int, plan_code: str) -> None:
     """Активация платного плана (вызывается после оплаты). Продлевает время и сбрасывает usage."""
     sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
-    now = datetime.now(datetime.now().astimezone().tzinfo)
+    now = datetime.now(timezone.utc)  # Исправлено: всегда используем UTC
+
     if not sub:
         sub = UserSubscription(user_id=user_id)
         session.add(sub)
 
     plan = cfg.plans[plan_code]
-    if sub.expires_at and sub.expires_at > now:
-        sub.expires_at = sub.expires_at + timedelta(days=plan.duration_days)
+
+    # Приводим expires_at к UTC для корректного сравнения
+    if sub.expires_at:
+        expires_at = sub.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        else:
+            expires_at = expires_at.astimezone(timezone.utc)
+
+        if expires_at > now:
+            sub.expires_at = expires_at + timedelta(days=plan.duration_days)
+        else:
+            sub.expires_at = now + timedelta(days=plan.duration_days)
     else:
         sub.expires_at = now + timedelta(days=plan.duration_days)
+
     sub.plan_code = plan_code
     sub.is_trial = False
 

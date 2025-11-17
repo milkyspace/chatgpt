@@ -53,14 +53,16 @@ async def _shutdown(bot):
 async def _render_status_line(session, user_id: int) -> str:
     sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
     usage = await session.scalar(select(Usage).where(Usage.user_id == user_id))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)  # Исправлено: всегда используем UTC
 
     expires_at = None
     if sub and sub.expires_at:
-        # если дата без таймзоны — считаем её UTC
+        # Приводим дату к UTC для корректного сравнения
         expires_at = sub.expires_at
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
+        else:
+            expires_at = expires_at.astimezone(timezone.utc)
 
     if not sub or not expires_at or expires_at <= now:
         status = "🔴 Неактивна"
@@ -71,6 +73,7 @@ async def _render_status_line(session, user_id: int) -> str:
         plan_code = sub.plan_code or "trial"
         plan_conf = cfg.plans.get(plan_code)
         status = "🟢 Активна"
+        # Форматируем дату для отображения
         expires_str = expires_at.astimezone().strftime("%d.%m.%Y %H:%M")
         if sub.is_trial:
             plan_name = "Trial"
@@ -85,7 +88,7 @@ async def _render_status_line(session, user_id: int) -> str:
                  f"Изобр.: {('∞' if max_img is None else f'{ui}/{max_img}')}"
 
     text = f"<b>Подписка:</b> {status}\n" \
-           f"<b>Тариф:</b> {plan_name}\n"
+                f"<b>Тариф:</b> {plan_name}\n"
     if expires_str:
         text += f"<b>Действует до:</b> {expires_str}\n"
         text += f"<b>Лимиты:</b> {limits}"
