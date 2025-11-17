@@ -18,8 +18,8 @@ class YooMoneyProvider:
         Configuration.secret_key = cfg.yookassa_secret_key
         self.email = cfg.yookassa_invoice_email
 
-    async def create_invoice(self, user_id: int, plan_code: str, amount_rub: int, description: str) -> str:
-        """Создает платёж и возвращает redirect URL"""
+    async def create_invoice(self, user_id: int, plan_code: str, amount_rub: int, description: str) -> tuple[str, str]:
+        """Создает платёж и возвращает (redirect_url, payment_id)"""
         idempotence_key = str(uuid.uuid4())
         try:
             payment = YooPayment.create({
@@ -56,10 +56,13 @@ class YooMoneyProvider:
                     "plan_code": plan_code
                 }
             }, idempotence_key)
+
+            # Возвращаем и URL для редиректа, и ID платежа
+            return payment.confirmation.confirmation_url, payment.id
+
         except requests.exceptions.HTTPError as e:
             logger.error(f"[YooKassa] Ошибка HTTP: {e.response.text}")
             raise
-        return payment.confirmation.confirmation_url
 
     async def check_status(self, payment_id: str) -> str:
         payment = YooPayment.find_one(payment_id)

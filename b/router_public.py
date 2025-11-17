@@ -18,6 +18,7 @@ from models import (
     ChatSession,
     UserSubscription,
     Usage,
+    Payment,
 )
 from payments.yoomoney import YooMoneyProvider
 from queue_bg import AsyncWorkerPool
@@ -84,7 +85,7 @@ async def _render_status_line(session, user_id: int) -> str:
                  f"Изобр.: {('∞' if max_img is None else f'{ui}/{max_img}')}"
 
     text = f"<b>Подписка:</b> {status}\n" \
-                f"<b>Тариф:</b> {plan_name}\n"
+           f"<b>Тариф:</b> {plan_name}\n"
     if expires_str:
         text += f"<b>Действует до:</b> {expires_str}\n"
         text += f"<b>Лимиты:</b> {limits}"
@@ -119,6 +120,7 @@ async def cmd_mode(m: TgMessage):
 async def cmd_subscription(m: TgMessage):
     await show_subscription_panel(m)
 
+
 @router.message(Command("help"))
 async def cmd_help(m: TgMessage):
     text = (
@@ -133,6 +135,7 @@ async def cmd_help(m: TgMessage):
     await m.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")]
     ]))
+
 
 @router.message(Command("new"))
 async def cmd_new_chat(m: TgMessage):
@@ -155,6 +158,7 @@ async def cmd_new_chat(m: TgMessage):
         await session.commit()
 
     await m.answer("✅ Создан новый чат. Теперь можно отправлять сообщения.")
+
 
 @router.message(Command("admin"))
 async def cmd_admin(m: TgMessage):
@@ -290,8 +294,21 @@ async def buy(cq: CallbackQuery):
     provider = YooMoneyProvider() if cfg.payment_provider == "yoomoney" else None
     description = f"Оплата плана {plan_conf.title}"
 
-    # создаем платёж
-    pay_url = await provider.create_invoice(cq.from_user.id, plan, plan_conf.price_rub, description)
+    # создаем платёж и получаем URL и ID платежа
+    pay_url, payment_id = await provider.create_invoice(cq.from_user.id, plan, plan_conf.price_rub, description)
+
+    # Сохраняем информацию о платеже в базу данных
+    async with AsyncSessionMaker() as session:
+        payment = Payment(
+            user_id=cq.from_user.id,
+            provider=cfg.payment_provider,
+            provider_payment_id=payment_id,
+            plan_code=plan,
+            amount_rub=plan_conf.price_rub,
+            status="pending"
+        )
+        session.add(payment)
+        await session.commit()
 
     # красивый текст + красивая кнопка
     text = (
