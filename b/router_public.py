@@ -110,6 +110,70 @@ async def start(m: TgMessage):
     )
 
 
+@router.message(Command("mode"))
+async def cmd_mode(m: TgMessage):
+    await m.answer("Выберите режим:", reply_markup=keyboards_for_modes())
+
+
+@router.message(Command("subscription"))
+async def cmd_subscription(m: TgMessage):
+    await show_subscription_panel(m)
+
+@router.message(Command("help"))
+async def cmd_help(m: TgMessage):
+    text = (
+        "ℹ️ <b>Помощь</b>\n\n"
+        "Команды:\n"
+        "• /start — главное меню\n"
+        "• /mode — выбор режима\n"
+        "• /subscription — информация о подписке\n"
+        "• /new — новый чат\n\n"
+        "Просто отправьте текст, и бот ответит вам 🤖"
+    )
+    await m.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")]
+    ]))
+
+@router.message(Command("new"))
+async def cmd_new_chat(m: TgMessage):
+    """Создание нового чата"""
+    async with AsyncSessionMaker() as session:
+        # Деактивируем все активные чаты
+        await session.execute(update(ChatSession).where(
+            ChatSession.user_id == m.from_user.id,
+            ChatSession.is_active == True
+        ).values(is_active=False))
+
+        # Создаем новый чат
+        new_session = ChatSession(
+            user_id=m.from_user.id,
+            title="Новый чат",
+            mode="assistant",
+            is_active=True
+        )
+        session.add(new_session)
+        await session.commit()
+
+    await m.answer("✅ Создан новый чат. Теперь можно отправлять сообщения.")
+
+@router.message(Command("admin"))
+async def cmd_admin(m: TgMessage):
+    if m.from_user.id not in cfg.admin_ids:
+        await m.answer("🚫 У вас нет доступа к админ-панели.")
+        return
+
+    await m.answer(
+        "🛡 <b>Админ-панель</b>\n\n"
+        "1️⃣ Управление пользователями\n"
+        "2️⃣ Рассылки\n"
+        "3️⃣ Проверка платежей\n\n"
+        "⚙️ Доступ только для администраторов.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")]
+        ])
+    )
+
+
 @router.callback_query(F.data == "panel:mode")
 async def panel_mode(cq: CallbackQuery):
     await cq.message.edit_reply_markup(reply_markup=keyboards_for_modes())
@@ -387,71 +451,3 @@ async def panel_main(cq: CallbackQuery):
     me = await cq.bot.get_me()
     await cq.message.edit_text(status, reply_markup=top_panel(me.username, user_row.referral_code))
     await cq.answer()
-
-
-@router.message(Command("mode"))
-async def cmd_mode(m: TgMessage):
-    await m.answer("Выберите режим:", reply_markup=keyboards_for_modes())
-
-
-@router.message(Command("subscription"))
-async def cmd_subscription(m: TgMessage):
-    await show_subscription_panel(m)
-
-@router.message(Command("help"))
-async def cmd_help(m: TgMessage):
-    text = (
-        "ℹ️ <b>Помощь</b>\n\n"
-        "Команды:\n"
-        "• /start — главное меню\n"
-        "• /mode — выбор режима\n"
-        "• /subscription — информация о подписке\n"
-        "• /new — новый чат\n\n"
-        "Просто отправьте текст, и бот ответит вам 🤖"
-    )
-    await m.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")]
-    ]))
-
-@router.message(Command("mode"))
-async def cmd_mode(m: TgMessage):
-    await m.answer("Выберите режим:", reply_markup=keyboards_for_modes())
-
-@router.message(Command("new"))
-async def cmd_new_chat(m: TgMessage):
-    """Создание нового чата"""
-    async with AsyncSessionMaker() as session:
-        # Деактивируем все активные чаты
-        await session.execute(update(ChatSession).where(
-            ChatSession.user_id == m.from_user.id,
-            ChatSession.is_active == True
-        ).values(is_active=False))
-
-        # Создаем новый чат
-        new_session = ChatSession(
-            user_id=m.from_user.id,
-            title="Новый чат",
-            mode="assistant",
-            is_active=True
-        )
-        session.add(new_session)
-        await session.commit()
-
-    await m.answer("✅ Создан новый чат. Теперь можно отправлять сообщения.")
-
-@router.message(Command("admin"))
-async def cmd_admin(m: TgMessage):
-    if m.from_user.id not in cfg.admin_ids:
-        await m.answer("🚫 У вас нет доступа к админ-панели.")
-        return
-
-    await m.answer(
-        "🛡 <b>Админ-панель</b>\n\n"
-        "1️⃣ Управление пользователями\n"
-        "2️⃣ Рассылки\n"
-        "3️⃣ Проверка платежей\n\n"
-        "⚙️ Доступ только для администраторов.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")]
-        ])
-    )
