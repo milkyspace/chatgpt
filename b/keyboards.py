@@ -1,18 +1,6 @@
 from __future__ import annotations
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-def main_menu(bot_username: str, ref_code: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Ассистент", callback_data="mode:assistant"),
-         InlineKeyboardButton(text="🎨 Генерация", callback_data="mode:image")],
-        [InlineKeyboardButton(text="🛠 Редактор фото", callback_data="mode:editor")],
-        [InlineKeyboardButton(text="➕ Добавить людей", callback_data="mode:add_people")],
-        [InlineKeyboardButton(text="👥 Реферальная ссылка", url=f"https://t.me/{bot_username}?start={ref_code}")],
-        [InlineKeyboardButton(text="💳 Подписки", callback_data="subs:show")],
-        [InlineKeyboardButton(text="🆕 Новый чат", callback_data="chat:new")],
-        [InlineKeyboardButton(text="🗂 Мои чаты", callback_data="chat:list")],
-    ])
-
 def subscriptions_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Pro Lite — 499₽ / 10 дней", callback_data="buy:pro_lite")],

@@ -7,6 +7,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import Message as TgMessage, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select
 from sqlalchemy import update
+from aiogram.types import CallbackQuery, User, Chat
 
 from config import cfg
 from db import AsyncSessionMaker
@@ -24,6 +25,7 @@ from services.chat import ChatService
 from services.images import ImageService
 from services.subscriptions import ensure_user, get_limits
 from services.usage import can_spend_request, spend_request, can_spend_image, spend_image
+from services.subscriptions import has_active_subscription
 from utils import store_message, get_history, trim_messages
 
 router = Router()
@@ -152,6 +154,31 @@ async def switch_mode(cq: CallbackQuery):
     if mode not in cfg.modes:
         await cq.answer("Неизвестный режим")
         return
+
+    # Проверяем доступ к режиму
+    async with AsyncSessionMaker() as session:
+        has_access = await has_active_subscription(session, cq.from_user.id)
+
+        if not has_access:
+            # Показываем окно с предложением подписки
+            text = (
+                f"🚫 <b>Доступ ограничен</b>\n\n"
+                f"💎 <b>Оформите подписку</b> чтобы получить доступ ко всем функциям:"
+            )
+            await cq.message.edit_text(text)
+            await cq.answer()
+
+            # Создаем fake callback query
+            fake_cq = CallbackQuery(
+                id="fake_id",
+                from_user=User(id=cq.from_user.id, is_bot=False, first_name="User"),
+                chat_instance="fake_chat_instance",
+                message=cq.message  # или создайте fake message
+            )
+            await show_subs(fake_cq)
+
+            return
+
     async with AsyncSessionMaker() as session:
         # создаем новую сессию чата в выбранном режиме
         res = await session.execute(select(ChatSession).where(
