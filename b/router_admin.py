@@ -27,6 +27,9 @@ router = Router()
 router.message.filter(admin_filter)
 router.callback_query.filter(admin_filter)
 
+# Словарь для хранения состояний рассылки (в продакшене лучше использовать Redis или БД)
+broadcast_states = {}
+
 
 @router.message(Command("admin"))
 async def admin_entry(m: TgMessage):
@@ -213,6 +216,12 @@ async def admin_check_payments(cq: CallbackQuery):
 @router.callback_query(F.data == "admin:broadcast")
 async def admin_broadcast(cq: CallbackQuery):
     """Начало процесса рассылки"""
+    # Сохраняем состояние рассылки для пользователя
+    broadcast_states[cq.from_user.id] = {
+        'waiting_for_broadcast': True,
+        'original_message_id': cq.message.message_id
+    }
+
     await cq.message.edit_text(
         "📣 <b>Рассылка сообщений</b>\n\n"
         "Отправьте текст для рассылки ответом на это сообщение.\n"
@@ -225,14 +234,32 @@ async def admin_broadcast(cq: CallbackQuery):
     await cq.answer()
 
 
-@router.message(F.reply_to_message & F.reply_to_message.text.contains("Рассылка"))
-async def process_broadcast(m: TgMessage):
-    """Обрабатывает рассылку"""
-    broadcast_text = m.text
+@router.message(F.text & ~F.via_bot)
+async def process_broadcast_or_text(m: TgMessage):
+    """Обрабатывает либо рассылку, либо обычные текстовые сообщения"""
+    user_id = m.from_user.id
 
-    if not broadcast_text or len(broadcast_text.strip()) < 5:
-        await m.answer("❌ Текст рассылки слишком короткий")
+    # Проверяем, находится ли пользователь в режиме рассылки
+    if user_id in broadcast_states and broadcast_states[user_id].get('waiting_for_broadcast'):
+        await _process_broadcast_text(m)
+    else:
+        # Если не в режиме рассылки, обрабатываем как обычное сообщение
+        await _process_regular_text(m)
+
+
+async def _process_broadcast_text(m: TgMessage):
+    """Обрабатывает текст для рассылки"""
+    user_id = m.from_user.id
+    broadcast_text = m.text.strip()
+
+    if not broadcast_text or len(broadcast_text) < 5:
+        await m.answer("❌ Текст рассылки слишком короткий (минимум 5 символов)")
+        # Восстанавливаем состояние ожидания
         return
+
+    # Убираем состояние рассылки
+    if user_id in broadcast_states:
+        del broadcast_states[user_id]
 
     # Получаем всех пользователей
     async with AsyncSessionMaker() as session:
@@ -253,7 +280,7 @@ async def process_broadcast(m: TgMessage):
             )
             success_count += 1
             # Небольшая задержка чтобы не превысить лимиты Telegram
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.05)
         except Exception as e:
             logger.error(f"Ошибка отправки пользователю {user.id}: {e}")
             fail_count += 1
@@ -265,6 +292,13 @@ async def process_broadcast(m: TgMessage):
         f"• Всего: {len(user_list)}",
         reply_markup=admin_back_keyboard()
     )
+
+
+async def _process_regular_text(m: TgMessage):
+    """Обрабатывает обычные текстовые сообщения (перенаправляет в router_public)"""
+    # Импортируем здесь чтобы избежать циклических импортов
+    from router_public import on_text
+    await on_text(m)
 
 
 @router.message(Command("check_payments"))
@@ -315,6 +349,7 @@ async def check_payments_command(m: TgMessage):
         f"• Всего в очереди: {len(pending_payments)}"
     )
 
+
 @router.callback_query(F.data == "panel:admin")
 async def panel_admin(cq: CallbackQuery):
     """Переход в админ-панель"""
@@ -330,6 +365,20 @@ async def panel_admin(cq: CallbackQuery):
         "• 💳 Платежи\n"
         "• 📣 Рассылка сообщений\n"
         "• 🔄 Проверка платежей",
-        reply_markup=admin_menu()  # Теперь используется!
+        reply_markup=admin_menu()
+    )
+    await cq.answer()
+
+
+@router.callback_query(F.data == "cancel_broadcast")
+async def cancel_broadcast(cq: CallbackQuery):
+    """Отмена рассылки"""
+    user_id = cq.from_user.id
+    if user_id in broadcast_states:
+        del broadcast_states[user_id]
+
+    await cq.message.edit_text(
+        "❌ Рассылка отменена",
+        reply_markup=admin_back_keyboard()
     )
     await cq.answer()

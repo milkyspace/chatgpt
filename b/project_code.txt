@@ -12,7 +12,6 @@ from router_public import router as public_router
 from router_admin import router as admin_router
 from services.payments_monitor import PaymentMonitor
 
-
 import logging
 
 logging.basicConfig(
@@ -32,6 +31,7 @@ async def _set_commands(bot):
         BotCommand(command="help", description="Помощь"),
     ])
 
+
 async def main():
     logging.basicConfig(level=logging.INFO)
     logging.info(f"✅ BOT_TOKEN: {cfg.bot_token[:10]}…")
@@ -41,12 +41,16 @@ async def main():
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
     await _set_commands(bot)
-    
+
     dp = Dispatcher()
     dp.include_router(public_router)
     dp.include_router(admin_router)
 
-    monitor = PaymentMonitor(interval_min=cfg.payment_check_interval_min)
+    # Создаем монитор платежей с передачей бота для уведомлений
+    monitor = PaymentMonitor(
+        interval_min=cfg.payment_check_interval_min,
+        bot=bot  # Передаем бота для отправки уведомлений
+    )
     asyncio.create_task(monitor.run_forever())
 
     await dp.start_polling(bot)
@@ -54,7 +58,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
 
 ============================================================
 
@@ -207,6 +210,7 @@ from __future__ import annotations
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 def subscriptions_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для выбора подписки"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Pro Lite — 499₽ / 10 дней", callback_data="buy:pro_lite")],
         [InlineKeyboardButton(text="Pro Plus — 1290₽ / 30 дней", callback_data="buy:pro_plus")],
@@ -214,22 +218,34 @@ def subscriptions_keyboard() -> InlineKeyboardMarkup:
     ])
 
 def admin_menu() -> InlineKeyboardMarkup:
+    """Главное меню админ-панели"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👤 Пользователи", callback_data="admin:users"),
+         InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")],
+        [InlineKeyboardButton(text="💳 Платежи", callback_data="admin:payments"),
          InlineKeyboardButton(text="📣 Рассылка", callback_data="admin:broadcast")],
-        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")]
+        [InlineKeyboardButton(text="🔄 Проверить платежи", callback_data="admin:check_payments")],
+        [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")]
+    ])
+
+def admin_back_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для возврата в админ-панель"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ В админ-панель", callback_data="admin:main")]
     ])
 
 def keyboards_for_modes() -> InlineKeyboardMarkup:
+    """Клавиатура для выбора режимов"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💬 Ассистент", callback_data="mode:assistant"),
          InlineKeyboardButton(text="🎨 Генерация", callback_data="mode:image")],
         [InlineKeyboardButton(text="🛠 Редактор фото", callback_data="mode:editor"),
          InlineKeyboardButton(text="🤳 Селфи со звёздой", callback_data="mode:celebrity_selfie")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")],  # ← новая кнопка
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")],
     ])
 
 def top_panel(bot_username: str, ref_code: str) -> InlineKeyboardMarkup:
+    """Верхняя панель управления"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💳 Продлить подписку", callback_data="subs:show"),
          InlineKeyboardButton(text="🎛 Режим", callback_data="panel:mode")],
@@ -244,6 +260,7 @@ def top_panel(bot_username: str, ref_code: str) -> InlineKeyboardMarkup:
     ])
 
 def plan_buy_keyboard(plan_code: str, pay_url: str) -> InlineKeyboardMarkup:
+    """Клавиатура для оплаты плана"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💳 Оплатить", url=pay_url)],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="subs:show")]
@@ -576,60 +593,337 @@ from __future__ import annotations
 
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message as TgMessage, CallbackQuery
+from aiogram.types import Message as TgMessage, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import func
 from sqlalchemy import select, update
+import asyncio
+import logging
 
 from config import cfg
 from db import AsyncSessionMaker
-from keyboards import admin_menu
-from models import Payment
-from models import User
+from keyboards import admin_menu, admin_back_keyboard
+from models import Payment, User, UserSubscription
 from payments.yoomoney import YooMoneyProvider
 from services.subscriptions import activate_paid_plan
+from services.auth import is_admin
+
+logger = logging.getLogger(__name__)
+
+# Создаем фильтр для администраторов
+admin_filter = F.from_user.func(lambda user: is_admin(user.id))
 
 router = Router()
 
-def is_admin(user_id: int) -> bool:
-    return user_id in cfg.admin_ids
+# Применяем фильтр ко всем хендлерам этого роутера
+router.message.filter(admin_filter)
+router.callback_query.filter(admin_filter)
+
 
 @router.message(Command("admin"))
 async def admin_entry(m: TgMessage):
-    if not is_admin(m.from_user.id):
-        return
-    await m.answer("Админ-панель:", reply_markup=admin_menu())
+    """Главное меню админ-панели"""
+    await m.answer(
+        "🛡 <b>Админ-панель</b>\n\n"
+        "Доступные функции:\n"
+        "• 👤 Просмотр пользователей\n"
+        "• 📊 Статистика\n"
+        "• 💳 Платежи\n"
+        "• 📣 Рассылка сообщений\n"
+        "• 🔄 Проверка платежей",
+        reply_markup=admin_menu()
+    )
+
+
+@router.callback_query(F.data == "admin:main")
+async def admin_main(cq: CallbackQuery):
+    """Возврат в главное меню админ-панели"""
+    await cq.message.edit_text(
+        "🛡 <b>Админ-панель</b>\n\n"
+        "Доступные функции:\n"
+        "• 👤 Просмотр пользователей\n"
+        "• 📊 Статистика\n"
+        "• 💳 Платежи\n"
+        "• 📣 Рассылка сообщений\n"
+        "• 🔄 Проверка платежей",
+        reply_markup=admin_menu()
+    )
+    await cq.answer()
+
 
 @router.callback_query(F.data == "admin:users")
 async def admin_users(cq: CallbackQuery):
-    if not is_admin(cq.from_user.id): return
+    """Показывает количество пользователей"""
     async with AsyncSessionMaker() as session:
-        total = await session.scalar(select(func.count()).select_from(User))
-    await cq.message.answer(f"Пользователей: {total}")
+        total_users = await session.scalar(select(func.count()).select_from(User))
+        active_subs = await session.scalar(
+            select(func.count()).select_from(UserSubscription).where(
+                UserSubscription.expires_at > func.now()
+            )
+        )
+        trial_users = await session.scalar(
+            select(func.count()).select_from(UserSubscription).where(
+                UserSubscription.is_trial == True
+            )
+        )
+
+    text = (
+        f"👥 <b>Статистика пользователей</b>\n\n"
+        f"• Всего пользователей: <b>{total_users}</b>\n"
+        f"• Активных подписок: <b>{active_subs}</b>\n"
+        f"• Пробных периодов: <b>{trial_users}</b>"
+    )
+    await cq.message.edit_text(text, reply_markup=admin_back_keyboard())
     await cq.answer()
+
+
+@router.callback_query(F.data == "admin:stats")
+async def admin_stats(cq: CallbackQuery):
+    """Подробная статистика"""
+    async with AsyncSessionMaker() as session:
+        # Общая статистика
+        total_users = await session.scalar(select(func.count()).select_from(User))
+        total_payments = await session.scalar(select(func.count()).select_from(Payment))
+        successful_payments = await session.scalar(
+            select(func.count()).select_from(Payment).where(Payment.status == "succeeded")
+        )
+        total_revenue = await session.scalar(
+            select(func.sum(Payment.amount_rub)).where(Payment.status == "succeeded")
+        ) or 0
+
+        # Статистика по планам
+        plan_stats = {}
+        for plan_code in cfg.plans.keys():
+            count = await session.scalar(
+                select(func.count()).select_from(Payment).where(
+                    Payment.plan_code == plan_code,
+                    Payment.status == "succeeded"
+                )
+            )
+            plan_stats[plan_code] = count
+
+    text = (
+        "📊 <b>Общая статистика</b>\n\n"
+        f"• Пользователей: <b>{total_users}</b>\n"
+        f"• Всего платежей: <b>{total_payments}</b>\n"
+        f"• Успешных платежей: <b>{successful_payments}</b>\n"
+        f"• Общая выручка: <b>{total_revenue} ₽</b>\n\n"
+        "<b>Статистика по тарифам:</b>\n"
+    )
+
+    for plan_code, count in plan_stats.items():
+        plan = cfg.plans.get(plan_code)
+        plan_name = plan.title if plan else plan_code
+        text += f"• {plan_name}: <b>{count}</b>\n"
+
+    await cq.message.edit_text(text, reply_markup=admin_back_keyboard())
+    await cq.answer()
+
+
+@router.callback_query(F.data == "admin:payments")
+async def admin_payments(cq: CallbackQuery):
+    """Статистика по платежам"""
+    async with AsyncSessionMaker() as session:
+        # Статистика по статусам платежей
+        status_stats = await session.execute(
+            select(Payment.status, func.count(Payment.id))
+            .group_by(Payment.status)
+        )
+        status_counts = dict(status_stats.all())
+
+        # Ожидающие платежи
+        pending_count = await session.scalar(
+            select(func.count()).select_from(Payment).where(Payment.status == "pending")
+        )
+
+    text = "💳 <b>Статистика платежей</b>\n\n<b>По статусам:</b>\n"
+
+    for status, count in status_counts.items():
+        text += f"• {status}: <b>{count}</b>\n"
+
+    text += f"\n<b>Ожидающие проверки:</b> <b>{pending_count}</b>"
+
+    await cq.message.edit_text(text, reply_markup=admin_back_keyboard())
+    await cq.answer()
+
+
+@router.callback_query(F.data == "admin:check_payments")
+async def admin_check_payments(cq: CallbackQuery):
+    """Проверка ожидающих платежей"""
+    provider = YooMoneyProvider()
+
+    async with AsyncSessionMaker() as session:
+        payments = await session.scalars(
+            select(Payment).where(Payment.status == "pending")
+        )
+        pending_payments = payments.all()
+
+        if not pending_payments:
+            await cq.message.edit_text(
+                "✅ Нет ожидающих платежей",
+                reply_markup=admin_back_keyboard()
+            )
+            await cq.answer()
+            return
+
+        processed = 0
+        succeeded = 0
+
+        for payment in pending_payments:
+            try:
+                # Для админов автоматически подтверждаем платежи
+                if is_admin(payment.user_id):
+                    status = "succeeded"
+                else:
+                    status = await provider.check_status(payment.provider_payment_id)
+
+                if status == "succeeded":
+                    await activate_paid_plan(session, payment.user_id, payment.plan_code)
+                    payment.status = "succeeded"
+                    succeeded += 1
+                elif status in ("canceled", "expired"):
+                    payment.status = status
+
+                processed += 1
+
+            except Exception as e:
+                logger.error(f"Ошибка проверки платежа {payment.id}: {e}")
+                continue
+
+        await session.commit()
+
+    await cq.message.edit_text(
+        f"🔍 Проверка платежей завершена:\n"
+        f"• Обработано: {processed}\n"
+        f"• Успешных: {succeeded}\n"
+        f"• Всего в очереди: {len(pending_payments)}",
+        reply_markup=admin_back_keyboard()
+    )
+    await cq.answer()
+
 
 @router.callback_query(F.data == "admin:broadcast")
 async def admin_broadcast(cq: CallbackQuery):
-    if not is_admin(cq.from_user.id): return
-    await cq.message.answer("Отправьте текст рассылки ответом на это сообщение.")
+    """Начало процесса рассылки"""
+    await cq.message.edit_text(
+        "📣 <b>Рассылка сообщений</b>\n\n"
+        "Отправьте текст для рассылки ответом на это сообщение.\n"
+        "Сообщение будет отправлено всем пользователям бота.\n\n"
+        "<i>Используйте HTML-разметку для форматирования.</i>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Отмена", callback_data="admin:main")]
+        ])
+    )
     await cq.answer()
 
-@router.message(Command("check_payments"))
-async def check_payments(m: TgMessage):
-    if not is_admin(m.from_user.id):
-        return
-    provider = YooMoneyProvider()
-    async with AsyncSessionMaker() as session:
-        payments = (await session.execute(
-            select(Payment).where(Payment.status == "pending")
-        )).scalars().all()
-        for p in payments:
-            status = await provider.check_status(p.provider_payment_id)
-            if status == "succeeded":
-                await activate_paid_plan(session, p.user_id, p.plan_code)
-                await session.execute(update(Payment).where(Payment.id == p.id).values(status="succeeded"))
-        await session.commit()
-    await m.answer("✅ Проверка платежей завершена.")
 
+@router.message(F.reply_to_message & F.reply_to_message.text.contains("Рассылка"))
+async def process_broadcast(m: TgMessage):
+    """Обрабатывает рассылку"""
+    broadcast_text = m.text
+
+    if not broadcast_text or len(broadcast_text.strip()) < 5:
+        await m.answer("❌ Текст рассылки слишком короткий")
+        return
+
+    # Получаем всех пользователей
+    async with AsyncSessionMaker() as session:
+        users = await session.scalars(select(User))
+        user_list = users.all()
+
+    processing_msg = await m.answer(f"🔄 Начинаю рассылку для {len(user_list)} пользователей...")
+
+    success_count = 0
+    fail_count = 0
+
+    for user in user_list:
+        try:
+            await m.bot.send_message(
+                chat_id=user.id,
+                text=broadcast_text,
+                parse_mode="HTML"
+            )
+            success_count += 1
+            # Небольшая задержка чтобы не превысить лимиты Telegram
+            await asyncio.sleep(0.1)
+        except Exception as e:
+            logger.error(f"Ошибка отправки пользователю {user.id}: {e}")
+            fail_count += 1
+
+    await processing_msg.edit_text(
+        f"✅ Рассылка завершена:\n"
+        f"• Успешно: {success_count}\n"
+        f"• Не удалось: {fail_count}\n"
+        f"• Всего: {len(user_list)}",
+        reply_markup=admin_back_keyboard()
+    )
+
+
+@router.message(Command("check_payments"))
+async def check_payments_command(m: TgMessage):
+    """Ручная проверка платежей через команду"""
+    provider = YooMoneyProvider()
+
+    async with AsyncSessionMaker() as session:
+        payments = await session.scalars(
+            select(Payment).where(Payment.status == "pending")
+        )
+        pending_payments = payments.all()
+
+        if not pending_payments:
+            await m.answer("✅ Нет ожидающих платежей")
+            return
+
+        processed = 0
+        succeeded = 0
+
+        for payment in pending_payments:
+            try:
+                # Для админов автоматически подтверждаем платежи
+                if is_admin(payment.user_id):
+                    status = "succeeded"
+                else:
+                    status = await provider.check_status(payment.provider_payment_id)
+
+                if status == "succeeded":
+                    await activate_paid_plan(session, payment.user_id, payment.plan_code)
+                    payment.status = "succeeded"
+                    succeeded += 1
+                elif status in ("canceled", "expired"):
+                    payment.status = status
+
+                processed += 1
+
+            except Exception as e:
+                logger.error(f"Ошибка проверки платежа {payment.id}: {e}")
+                continue
+
+        await session.commit()
+
+    await m.answer(
+        f"🔍 Проверка платежей завершена:\n"
+        f"• Обработано: {processed}\n"
+        f"• Успешных: {succeeded}\n"
+        f"• Всего в очереди: {len(pending_payments)}"
+    )
+
+@router.callback_query(F.data == "panel:admin")
+async def panel_admin(cq: CallbackQuery):
+    """Переход в админ-панель"""
+    if not is_admin(cq.from_user.id):
+        await cq.answer("🚫 Нет доступа", show_alert=True)
+        return
+
+    await cq.message.edit_text(
+        "🛡 <b>Админ-панель</b>\n\n"
+        "Доступные функции:\n"
+        "• 👤 Просмотр пользователей\n"
+        "• 📊 Статистика\n"
+        "• 💳 Платежи\n"
+        "• 📣 Рассылка сообщений\n"
+        "• 🔄 Проверка платежей",
+        reply_markup=admin_menu()  # Теперь используется!
+    )
+    await cq.answer()
 
 ============================================================
 
@@ -725,7 +1019,7 @@ async def _render_status_line(session, user_id: int) -> str:
                  f"Изобр.: {('∞' if max_img is None else f'{ui}/{max_img}')}"
 
     text = f"<b>Подписка:</b> {status}\n" \
-                f"<b>Тариф:</b> {plan_name}\n"
+           f"<b>Тариф:</b> {plan_name}\n"
     if expires_str:
         text += f"<b>Действует до:</b> {expires_str}\n"
         text += f"<b>Лимиты:</b> {limits}"
@@ -800,6 +1094,41 @@ async def cmd_new_chat(m: TgMessage):
     await m.answer("✅ Создан новый чат. Теперь можно отправлять сообщения.")
 
 
+@router.callback_query(F.data == "panel:referral")
+async def panel_referral(cq: CallbackQuery):
+    """Показывает информацию о реферальной программе"""
+    async with AsyncSessionMaker() as session:
+        user_row = await session.scalar(
+            select(User).where(User.id == cq.from_user.id)
+        )
+
+    if not user_row:
+        await cq.answer("Ошибка: пользователь не найден")
+        return
+
+    me = await cq.bot.get_me()
+    referral_url = f"https://t.me/{me.username}?start={user_row.referral_code}"
+
+    text = (
+        "👫 <b>Приглашайте друзей и получайте бонусы!</b>\n\n"
+        f"Ваша реферальная ссылка:\n<code>{referral_url}</code>\n\n"
+        "За каждого друга, который оплатит подписку:\n"
+        "• <b>Вам</b> – +5 дней к подписке\n"
+        "• <b>Другу</b> – 7 дней бесплатного доступа\n\n"
+        "Просто поделитесь ссылкой с друзьями!"
+    )
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📤 Поделиться ссылкой",
+                              switch_inline_query=f"Присоединяйся! {referral_url}")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")]
+    ])
+
+    await cq.message.edit_text(text, reply_markup=keyboard)
+    await cq.answer()
+
+
 @router.message(Command("admin"))
 async def cmd_admin(m: TgMessage):
     if m.from_user.id not in cfg.admin_ids:
@@ -839,20 +1168,6 @@ async def panel_help(cq: CallbackQuery):
     await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")]
     ]))
-    await cq.answer()
-
-
-@router.callback_query(F.data == "panel:admin")
-async def panel_admin(cq: CallbackQuery):
-    if cq.from_user.id not in cfg.admin_ids:
-        await cq.answer("🚫 Нет доступа", show_alert=True)
-        return
-    await cq.message.edit_text(
-        "🛡 <b>Админ-панель</b>\n\nФункции управления ботом.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")]
-        ])
-    )
     await cq.answer()
 
 
@@ -1112,6 +1427,39 @@ async def panel_main(cq: CallbackQuery):
 
 ============================================================
 
+services/auth.py:
+========================================
+from __future__ import annotations
+from config import cfg
+
+
+def is_admin(user_id: int) -> bool:
+    """
+    Проверяет, является ли пользователь администратором
+
+    Args:
+        user_id: ID пользователя в Telegram
+
+    Returns:
+        bool: True если пользователь администратор
+    """
+    return user_id in cfg.admin_ids
+
+
+async def admin_required(user_id: int) -> bool:
+    """
+    Асинхронная версия проверки администратора (для фильтров)
+
+    Args:
+        user_id: ID пользователя в Telegram
+
+    Returns:
+        bool: True если пользователь администратор
+    """
+    return is_admin(user_id)
+
+============================================================
+
 services/chat.py:
 ========================================
 from __future__ import annotations
@@ -1193,6 +1541,100 @@ class ImageService:
 
 ============================================================
 
+services/notifications.py:
+========================================
+from __future__ import annotations
+from aiogram import Bot
+from datetime import datetime
+from config import cfg
+
+
+class NotificationService:
+    """Сервис для отправки уведомлений пользователям"""
+
+    def __init__(self, bot: Bot):
+        self.bot = bot
+
+    async def send_subscription_activated(
+            self,
+            user_id: int,
+            plan_title: str,
+            expires_at: datetime
+    ) -> None:
+        """
+        Отправляет сообщение об успешной активации подписки
+
+        Args:
+            user_id: ID пользователя в Telegram
+            plan_title: Название тарифного плана
+            expires_at: Дата истечения подписки
+        """
+        try:
+            # Форматируем дату в русском формате
+            expires_str = expires_at.strftime("%d.%m.%Y %H:%M")
+
+            # Текст сообщения по вашему примеру
+            message_text = (
+                "🚀 Ваша подписка успешно активирована!\n"
+                f"Тариф: {plan_title} до {expires_str} МСК.\n"
+                "Спасибо, что выбрали наш сервис!\n\n"
+
+                "💌 Подарочные сертификаты\n"
+                "Хотите сделать необычный подарок? У нас есть стильные электронные "
+                "сертификаты на подписку – идеальный вариант для близких и друзей!\n\n"
+
+                "👫 Приглашайте друзей и получайте бонусы:\n"
+                "• Вам – +1 месяц бесплатно за каждого приглашённого друга с оплаченной подпиской\n"
+                "• Вашим друзьям – 7 дней бесплатного доступа\n\n"
+
+                "Если у вас возникнут вопросы, мы всегда рады помочь!\n"
+                "Приятного пользования! 🫶"
+            )
+
+            # Создаем клавиатуру с кнопками
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="👫 Пригласить друга", callback_data="panel:referral")],
+                [InlineKeyboardButton(text="❓ Помощь", callback_data="panel:help")]
+            ])
+
+            await self.bot.send_message(
+                chat_id=user_id,
+                text=message_text,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+
+        except Exception as e:
+            # Логируем ошибку, но не прерываем выполнение
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Ошибка отправки уведомления пользователю {user_id}: {e}")
+
+    async def send_payment_failed(self, user_id: int, reason: str) -> None:
+        """
+        Отправляет уведомление о неудачном платеже
+
+        Args:
+            user_id: ID пользователя в Telegram
+            reason: Причина отказа
+        """
+        try:
+            message_text = (
+                "❌ Платеж не прошел\n\n"
+                f"Причина: {reason}\n\n"
+                "Пожалуйста, попробуйте еще раз или обратитесь в поддержку."
+            )
+
+            await self.bot.send_message(chat_id=user_id, text=message_text)
+
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Ошибка отправки уведомления об ошибке платежа пользователю {user_id}: {e}")
+
+============================================================
+
 services/payments_monitor.py:
 ========================================
 from __future__ import annotations
@@ -1204,7 +1646,8 @@ from models import Payment, User
 from payments.yoomoney import YooMoneyProvider
 from services.subscriptions import activate_paid_plan
 from services.referrals import apply_referral_bonus
-from router_admin import is_admin
+from services.notifications import NotificationService
+from services.auth import is_admin  # Используем нашу новую функцию
 
 logger = logging.getLogger(__name__)
 
@@ -1212,9 +1655,11 @@ logger = logging.getLogger(__name__)
 class PaymentMonitor:
     """Фоновый мониторинг платежей."""
 
-    def __init__(self, interval_min: float = 1):
+    def __init__(self, interval_min: float = 1, bot=None):
         self.interval_min = interval_min
         self.running = False
+        self.bot = bot
+        self.notification_service = NotificationService(bot) if bot else None
 
     async def run_forever(self):
         """Запускает бесконечный цикл проверки."""
@@ -1239,40 +1684,80 @@ class PaymentMonitor:
             )).scalars().all()
 
             if not payments:
-                logger.info("[PaymentMonitor] Нет ожидающих платежей.")
                 return
 
-            for p in payments:
-                try:
-                    status = await provider.check_status(p.provider_payment_id)
-                    logger.info(f"Платеж {p.provider_payment_id}: пользователь {p.user_id} : статус {status}")  # Исправлено
-                    if is_admin(p.user_id):
-                        logger.info(f"Админский платеж {p.provider_payment_id}: пользователь {p.user_id}")  # Исправлено
-                        status = "succeeded"
-                except Exception as e:
-                    logger.warning(f"[PaymentMonitor] Ошибка запроса статуса для платежа {p.id}: {e}")  # Исправлено
-                    continue
+            for payment in payments:
+                await self._process_payment(session, provider, payment)
 
-                if status == "succeeded":
-                    logger.info(f"[PaymentMonitor] Платеж {p.id} ({p.plan_code}) подтвержден.")
-                    await activate_paid_plan(session, p.user_id, p.plan_code)
+    async def _process_payment(self, session, provider: YooMoneyProvider, payment: Payment):
+        """Обрабатывает один платеж"""
+        try:
+            # Для админов автоматически подтверждаем платежи
+            if is_admin(payment.user_id):  # Теперь используем нашу функцию
+                logger.info(f"Админский платеж {payment.provider_payment_id}: пользователь {payment.user_id}")
+                status = "succeeded"
+            else:
+                status = await provider.check_status(payment.provider_payment_id)
 
-                    # Бонус за рефералку
-                    user = await session.get(User, p.user_id)
-                    if user and user.referred_by:
-                        await apply_referral_bonus(session, user.referred_by)
+            logger.info(f"Платеж {payment.provider_payment_id}: пользователь {payment.user_id} : статус {status}")
 
-                    await session.execute(update(Payment)
-                                          .where(Payment.id == p.id)
-                                          .values(status="succeeded"))
-                    await session.commit()
+            if status == "succeeded":
+                await self._handle_successful_payment(session, payment)
+            elif status in ("canceled", "expired"):
+                await self._handle_failed_payment(session, payment, status)
 
-                elif status in ("canceled", "expired"):
-                    logger.info(f"[PaymentMonitor] Платеж {p.id} отменен ({status}).")
-                    await session.execute(update(Payment)
-                                          .where(Payment.id == p.id)
-                                          .values(status=status))
-                    await session.commit()
+        except Exception as e:
+            logger.warning(f"Ошибка запроса статуса для платежа {payment.id}: {e}")
+
+    async def _handle_successful_payment(self, session, payment: Payment):
+        """Обрабатывает успешный платеж"""
+        logger.info(f"Платеж {payment.id} ({payment.plan_code}) подтвержден.")
+
+        # Активируем подписку
+        subscription = await activate_paid_plan(session, payment.user_id, payment.plan_code)
+
+        # Начисляем бонус рефереру
+        user = await session.get(User, payment.user_id)
+        if user and user.referred_by:
+            await apply_referral_bonus(session, user.referred_by)
+
+        # Обновляем статус платежа
+        await session.execute(
+            update(Payment)
+            .where(Payment.id == payment.id)
+            .values(status="succeeded")
+        )
+        await session.commit()
+
+        # Отправляем уведомление пользователю
+        if self.notification_service and subscription:
+            from config import cfg  # Локальный импорт чтобы избежать циклических зависимостей
+            plan = cfg.plans.get(payment.plan_code)
+            plan_title = plan.title if plan else payment.plan_code
+            await self.notification_service.send_subscription_activated(
+                user_id=payment.user_id,
+                plan_title=plan_title,
+                expires_at=subscription.expires_at
+            )
+
+    async def _handle_failed_payment(self, session, payment: Payment, status: str):
+        """Обрабатывает неудачный платеж"""
+        logger.info(f"Платеж {payment.id} отменен ({status}).")
+
+        await session.execute(
+            update(Payment)
+            .where(Payment.id == payment.id)
+            .values(status=status)
+        )
+        await session.commit()
+
+        # Отправляем уведомление об ошибке
+        if self.notification_service:
+            reason = "отменен" if status == "canceled" else "истек срок действия"
+            await self.notification_service.send_payment_failed(
+                user_id=payment.user_id,
+                reason=reason
+            )
 
 ============================================================
 
@@ -1418,10 +1903,21 @@ async def get_limits(session: AsyncSession, user_id: int) -> tuple[int | None, i
     return (plan.max_requests, plan.max_image_generations, plan.max_text_len)
 
 
-async def activate_paid_plan(session: AsyncSession, user_id: int, plan_code: str) -> None:
-    """Активация платного плана (вызывается после оплаты). Продлевает время и сбрасывает usage."""
+async def activate_paid_plan(session: AsyncSession, user_id: int, plan_code: str) -> UserSubscription:
+    """
+    Активация платного плана (вызывается после оплаты).
+    Продлевает время и сбрасывает usage.
+
+    Args:
+        session: Асинхронная сессия БД
+        user_id: ID пользователя
+        plan_code: Код плана
+
+    Returns:
+        UserSubscription: Обновленная подписка
+    """
     sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
-    now = datetime.now(timezone.utc)  # Исправлено: всегда используем UTC
+    now = datetime.now(timezone.utc)
 
     if not sub:
         sub = UserSubscription(user_id=user_id)
@@ -1454,6 +1950,7 @@ async def activate_paid_plan(session: AsyncSession, user_id: int, plan_code: str
         usage.used_images = 0
 
     await session.commit()
+    return sub  # Возвращаем подписку для использования в уведомлениях
 
 ============================================================
 
