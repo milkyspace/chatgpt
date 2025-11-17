@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class PaymentMonitor:
     """Фоновый мониторинг платежей."""
 
-    def __init__(self, interval_min: int = 5):
+    def __init__(self, interval_min: float = 1):
         self.interval_min = interval_min
         self.running = False
 

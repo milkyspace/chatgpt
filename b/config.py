@@ -31,7 +31,7 @@ class AppConfig(BaseModel):
     openai_api_base: str | None = os.getenv("OPENAI_API_BASE")
 
     # Платежи (YooMoney/ЮKassa)
-    payment_check_interval_min: int = int(os.getenv("PAYMENT_CHECK_INTERVAL_MIN", "1"))
+    payment_check_interval_min: float = float(os.getenv("PAYMENT_CHECK_INTERVAL_MIN", "1"))
     yookassa_shop_id: str | None = os.getenv("YOOKASSA_SHOP_ID")
     yookassa_secret_key: str | None = os.getenv("YOOKASSA_SECRET_KEY")
     yookassa_invoice_email: str | None = os.getenv("YOOKASSA_INVOICE_EMAIL")
