@@ -168,7 +168,7 @@ async def switch_mode(cq: CallbackQuery):
             await cq.message.edit_text(text)
             await cq.answer()
 
-            await show_subs(cq)
+            await show_subs(cq, False)
 
             return
 
