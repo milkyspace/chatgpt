@@ -1,0 +1,1471 @@
+bot.py:
+========================================
+from __future__ import annotations
+import asyncio
+from aiogram import Bot, Dispatcher
+from aiogram.types import BotCommand
+from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
+
+from config import cfg
+from router_public import router as public_router
+from router_admin import router as admin_router
+from services.payments_monitor import PaymentMonitor
+
+
+import logging
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+
+logger = logging.getLogger(__name__)
+
+
+async def _set_commands(bot):
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Запуск и главное меню"),
+        BotCommand(command="new", description="Начать новый чат"),
+        BotCommand(command="mode", description="Выбрать режим"),
+        BotCommand(command="subscription", description="Моя подписка"),
+        BotCommand(command="help", description="Помощь"),
+    ])
+
+async def main():
+    logging.basicConfig(level=logging.INFO)
+    logging.info(f"✅ BOT_TOKEN: {cfg.bot_token[:10]}…")
+
+    bot = Bot(
+        token=cfg.bot_token,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
+    await _set_commands(bot)
+    
+    dp = Dispatcher()
+    dp.include_router(public_router)
+    dp.include_router(admin_router)
+
+    monitor = PaymentMonitor(interval_min=cfg.payment_check_interval_min)
+    asyncio.create_task(monitor.run_forever())
+
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+============================================================
+
+code_collector.py:
+========================================
+import os
+import glob
+
+
+def simple_collect_code(output_file="project_code.txt"):
+    """
+    Простая версия для сбора Python файлов
+    """
+    # Ищем все .py файлы в текущей директории и поддиректориях
+    py_files = glob.glob('**/*.py', recursive=True)
+
+    # Исключаем системные директории
+    exclude_dirs = ['__pycache__', '.git', 'venv', 'env']
+    filtered_files = [f for f in py_files if not any(exclude in f for exclude in exclude_dirs)]
+
+    # Сортируем по имени
+    filtered_files.sort()
+
+    with open(output_file, 'w', encoding='utf-8') as out_file:
+        for file_path in filtered_files:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as in_file:
+                    content = in_file.read()
+
+                out_file.write(f"{file_path}:\n")
+                out_file.write("=" * 40 + "\n")
+                out_file.write(content)
+                out_file.write("\n\n" + "=" * 60 + "\n\n")
+
+                print(f"Добавлен: {file_path}")
+
+            except Exception as e:
+                print(f"Ошибка с файлом {file_path}: {e}")
+
+    print(f"\nГотово! Файлы сохранены в {output_file}")
+
+
+# Запуск
+if __name__ == "__main__":
+    simple_collect_code()
+
+============================================================
+
+config.py:
+========================================
+from __future__ import annotations
+
+from typing import List
+
+from pydantic import BaseModel
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+class PlanConfig(BaseModel):
+    code: str
+    title: str
+    price_rub: int
+    duration_days: int
+    max_requests: int | None       # None = безлимит
+    max_image_generations: int | None
+    max_text_len: int              # макс. символов в одном запросе
+
+class AppConfig(BaseModel):
+    # Telegram
+    admins: List[int] = [os.getenv("ADMIN_IDS", "")]
+    bot_token: str = os.getenv("BOT_TOKEN", "")
+    admin_ids: set[int] = set(map(int, os.getenv("ADMIN_IDS", "0").split(","))) if os.getenv("ADMIN_IDS") else set()
+
+    # DB
+    db_url: str = os.getenv("DATABASE_URL", "mysql+aiomysql://root:password@mariadb:3306/ai_bot_db")
+
+    # OpenAI
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    openai_api_base: str | None = os.getenv("OPENAI_API_BASE")
+
+    # Платежи (YooMoney/ЮKassa)
+    payment_check_interval_min: int = int(os.getenv("PAYMENT_CHECK_INTERVAL_MIN", "1"))
+    yookassa_shop_id: str | None = os.getenv("YOOKASSA_SHOP_ID")
+    yookassa_secret_key: str | None = os.getenv("YOOKASSA_SECRET_KEY")
+    yookassa_invoice_email: str | None = os.getenv("YOOKASSA_INVOICE_EMAIL")
+    payment_provider: str = os.getenv("PAYMENT_PROVIDER", "yoomoney")  # yoomoney|mock
+
+    # Тестовый период
+    trial_days: int = 3
+    trial_max_requests: int = 15
+    trial_max_images: int = 3
+
+    # Очереди
+    workers_chat: int = 4
+    workers_images: int = 2
+
+    # Рефералка
+    referral_bonus_days: int = 5
+
+    # Разрешенные режимы
+    modes: tuple[str, ...] = ("assistant", "image", "editor", "celebrity_selfie", "add_people")
+
+    # Планы (легко менять)
+    plans: dict[str, PlanConfig] = {
+        "pro_lite": PlanConfig(
+            code="pro_lite", title="Pro Lite", price_rub=499, duration_days=10,
+            max_requests=1000, max_image_generations=20, max_text_len=4000
+        ),
+        "pro_plus": PlanConfig(
+            code="pro_plus", title="Pro Plus", price_rub=1290, duration_days=30,
+            max_requests=None, max_image_generations=30, max_text_len=32000
+        ),
+        "pro_premium": PlanConfig(
+            code="pro_premium", title="Pro Premium", price_rub=2990, duration_days=90,
+            max_requests=None, max_image_generations=50, max_text_len=32000
+        ),
+    }
+
+cfg = AppConfig()
+
+
+============================================================
+
+db.py:
+========================================
+from __future__ import annotations
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.orm import DeclarativeBase
+from config import cfg
+
+class Base(DeclarativeBase):
+    """Базовый класс моделей."""
+
+engine = create_async_engine(cfg.db_url, echo=False, pool_pre_ping=True)
+AsyncSessionMaker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+async def get_session() -> AsyncSession:
+    """Фабрика сессий для DI."""
+    async with AsyncSessionMaker() as session:
+        yield session
+
+
+============================================================
+
+keyboards.py:
+========================================
+from __future__ import annotations
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+def subscriptions_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Pro Lite — 499₽ / 10 дней", callback_data="buy:pro_lite")],
+        [InlineKeyboardButton(text="Pro Plus — 1290₽ / 30 дней", callback_data="buy:pro_plus")],
+        [InlineKeyboardButton(text="Pro Premium — 2990₽ / 90 дней", callback_data="buy:pro_premium")],
+    ])
+
+def admin_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👤 Пользователи", callback_data="admin:users"),
+         InlineKeyboardButton(text="📣 Рассылка", callback_data="admin:broadcast")],
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")]
+    ])
+
+def keyboards_for_modes() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Ассистент", callback_data="mode:assistant"),
+         InlineKeyboardButton(text="🎨 Генерация", callback_data="mode:image")],
+        [InlineKeyboardButton(text="🛠 Редактор фото", callback_data="mode:editor"),
+         InlineKeyboardButton(text="🤳 Селфи со звёздой", callback_data="mode:celebrity_selfie")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")],  # ← новая кнопка
+    ])
+
+def top_panel(bot_username: str, ref_code: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Продлить подписку", callback_data="subs:show"),
+         InlineKeyboardButton(text="🎛 Режим", callback_data="panel:mode")],
+        [
+            InlineKeyboardButton(
+                text="👥 Пригласить",
+                switch_inline_query=f"Переходи в https://t.me/{bot_username}?start={ref_code} — получи бонус!"
+            )
+        ],
+        [InlineKeyboardButton(text="❓ Помощь", callback_data="panel:help"),
+         InlineKeyboardButton(text="🛡 Админ-панель", callback_data="panel:admin")],
+    ])
+
+def plan_buy_keyboard(plan_code: str, pay_url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Оплатить", url=pay_url)],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="subs:show")]
+    ])
+
+============================================================
+
+models.py:
+========================================
+from __future__ import annotations
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import String, Integer, DateTime, ForeignKey, Boolean, Text
+from sqlalchemy.sql import func
+from db import Base
+from typing import Optional
+from datetime import datetime
+
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(primary_key=True)         # telegram user id
+    username: Mapped[Optional[str]] = mapped_column(String(255))
+    first_name: Mapped[Optional[str]] = mapped_column(String(255))
+    last_name: Mapped[Optional[str]] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    referral_code: Mapped[str] = mapped_column(String(32), unique=True)     # персональная ссылка-код
+    referred_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"))
+
+    # отношения
+    subscription: Mapped[Optional["UserSubscription"]] = relationship(back_populates="user", uselist=False)
+    usage: Mapped[Optional["Usage"]] = relationship(back_populates="user", uselist=False)
+
+class UserSubscription(Base):
+    __tablename__ = "user_subscriptions"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True)
+    plan_code: Mapped[Optional[str]] = mapped_column(String(64))     # None означает тестовую
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    is_trial: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    user: Mapped["User"] = relationship(back_populates="subscription")
+
+class Usage(Base):
+    __tablename__ = "usage"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True)
+    used_requests: Mapped[int] = mapped_column(Integer, default=0)
+    used_images: Mapped[int] = mapped_column(Integer, default=0)
+
+    user: Mapped["User"] = relationship(back_populates="usage")
+
+class Payment(Base):
+    __tablename__ = "payments"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    provider: Mapped[str] = mapped_column(String(64))
+    provider_payment_id: Mapped[str] = mapped_column(String(128), index=True)
+    plan_code: Mapped[str] = mapped_column(String(64))
+    amount_rub: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(32), default="pending")  # pending/succeeded/canceled
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    mode: Mapped[str] = mapped_column(String(32), default="assistant")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+class Message(Base):
+    __tablename__ = "messages"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id"), index=True)
+    role: Mapped[str] = mapped_column(String(32))  # user|assistant|system
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+============================================================
+
+payments/base.py:
+========================================
+from __future__ import annotations
+from typing import Protocol
+
+class PaymentProvider(Protocol):
+    """Интерфейс платёжного провайдера."""
+    async def create_invoice(self, user_id: int, plan_code: str, amount_rub: int, description: str) -> str:
+        """Создает ссылку на оплату и возвращает URL (redirect)."""
+        ...
+
+    # Подтверждение/вебхук — реализуется на стороне вебхука (webhooks.py),
+    # который вызывает services.subscriptions.activate_paid_plan(...)
+
+
+============================================================
+
+payments/mock.py:
+========================================
+from __future__ import annotations
+from payments.base import PaymentProvider
+
+class MockPaymentProvider(PaymentProvider):
+    async def create_invoice(self, user_id: int, plan_code: str, amount_rub: int, description: str) -> str:
+        # Возвращаем фейковую ссылку
+        return f"https://example.com/pay?user={user_id}&plan={plan_code}&sum={amount_rub}"
+
+
+============================================================
+
+payments/yoomoney.py:
+========================================
+from __future__ import annotations
+
+import requests
+from config import cfg
+from yookassa import Configuration, Payment as YooPayment
+import uuid
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class YooMoneyProvider:
+    """ЮKassa с ручной проверкой статуса (без вебхуков)."""
+
+    def __init__(self):
+        Configuration.account_id = cfg.yookassa_shop_id
+        Configuration.secret_key = cfg.yookassa_secret_key
+        self.email = cfg.yookassa_invoice_email
+
+    async def create_invoice(self, user_id: int, plan_code: str, amount_rub: int, description: str) -> str:
+        """Создает платёж и возвращает redirect URL"""
+        idempotence_key = str(uuid.uuid4())
+        try:
+            payment = YooPayment.create({
+                "amount": {
+                    "value": f"{amount_rub:.2f}",
+                    "currency": "RUB"
+                },
+                "confirmation": {
+                    "type": "redirect",
+                    "return_url": "https://yoomoney.ru"
+                },
+                "capture": True,
+                "description": description or f"План {plan_code}",
+                "receipt": {
+                    "customer": {
+                        "email": self.email,
+                    },
+                    "items": [
+                        {
+                            "description": description,
+                            "quantity": "1.00",
+                            "amount": {
+                                "value": f"{amount_rub:.2f}",
+                                "currency": "RUB"
+                            },
+                            "vat_code": "1",
+                            "payment_mode": "full_payment",
+                            "payment_subject": "commodity",
+                        },
+                    ]
+                },
+                "metadata": {
+                    "user_id": str(user_id),
+                    "plan_code": plan_code
+                }
+            }, idempotence_key)
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"[YooKassa] Ошибка HTTP: {e.response.text}")
+            raise
+        return payment.confirmation.confirmation_url
+
+    async def check_status(self, payment_id: str) -> str:
+        payment = YooPayment.find_one(payment_id)
+        return payment.status
+
+
+============================================================
+
+providers/base.py:
+========================================
+from __future__ import annotations
+from typing import Protocol, Any, Sequence
+
+class ChatProvider(Protocol):
+    """Интерфейс чата."""
+    async def chat(self, messages: Sequence[dict[str, str]], max_tokens: int, temperature: float = 0.7) -> str: ...
+
+class ImageProvider(Protocol):
+    """Интерфейс изображений."""
+    async def generate(self, prompt: str) -> bytes: ...
+    async def edit(self, image_bytes: bytes, instruction: str) -> bytes: ...
+    async def add_people(self, image_bytes: bytes, description: str) -> bytes: ...
+    async def celebrity_selfie(self, image_bytes: bytes, celebrity_name: str, style: str | None = None) -> bytes: ...
+
+
+============================================================
+
+providers/openai_provider.py:
+========================================
+from __future__ import annotations
+from typing import Sequence, AsyncGenerator
+from openai import AsyncOpenAI
+from config import cfg
+import httpx
+
+
+class OpenAIChatProvider:
+    """OpenAI GPT с поддержкой потокового вывода и кастомным httpx-клиентом."""
+
+    def __init__(self, model: str = "gpt-4o"):
+        self.model = model
+        self.http_client = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0))
+        self.client = AsyncOpenAI(
+            api_key=cfg.openai_api_key,
+            base_url=cfg.openai_api_base,
+            http_client=self.http_client
+        )
+
+    async def stream_chat(
+            self, messages: Sequence[dict[str, str]], max_tokens: int = 800, temperature: float = 0.7
+    ) -> AsyncGenerator[str, None]:
+        """Асинхронный стриминг OpenAI GPT-4o."""
+        async with self.client.chat.completions.stream(
+                model=self.model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+        ) as stream:
+            async for event in stream:
+                if event.type == "message.delta":
+                    delta = event.delta.content or ""
+                    if delta:
+                        yield delta
+
+
+class OpenAIImageProvider:
+    """Провайдер изображений через DALL-E с кастомным httpx-клиентом."""
+
+    def __init__(self, model: str = "dall-e-3"):  # ← ИЗМЕНИТЕ ЗДЕСЬ
+        self.model = model
+        self.http_client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
+        self.client = AsyncOpenAI(
+            api_key=cfg.openai_api_key,
+            base_url=cfg.openai_api_base,
+            http_client=self.http_client,
+        )
+
+    async def generate(self, prompt: str) -> bytes:
+        import base64
+        try:
+            response = await self.client.images.generate(
+                model=self.model,
+                prompt=prompt,
+                size="1024x1024",
+                n=1,
+                response_format="b64_json"  # ← ДОБАВЬТЕ ЭТО
+            )
+            b64 = response.data[0].b64_json
+            return base64.b64decode(b64)
+        except Exception as e:
+            print(f"OpenAI API Error: {e}")
+            raise
+
+    async def edit(self, image_bytes: bytes, instruction: str) -> bytes:
+        prompt = f"Отредактируй изображение согласно инструкции: {instruction}"
+        return await self.generate(prompt)
+
+    async def add_people(self, image_bytes: bytes, description: str) -> bytes:
+        prompt = f"На основе исходного фото, добавь людей: {description}. Сохрани стиль и реалистичность."
+        return await self.generate(prompt)
+
+    async def celebrity_selfie(self, image_bytes: bytes, celebrity_name: str, style: str | None = None) -> bytes:
+        # Для DALL-E нам нужно создать новый промпт, так как он не принимает исходное изображение
+        prompt = f"Реалистичное селфи двух людей. Один выглядит как {celebrity_name}, второй - обычный человек. {style or ''} Фотография должна выглядеть как настоящее селфи, естественное освещение, высокое качество."
+        return await self.generate(prompt)
+
+============================================================
+
+queue_bg.py:
+========================================
+from __future__ import annotations
+import asyncio
+from typing import Callable, Awaitable, Any
+
+class AsyncWorkerPool:
+    """Простой пул воркеров. Кладем задачи в очередь — обрабатываются в фоне."""
+    def __init__(self, workers: int):
+        self.queue: asyncio.Queue[Callable[[], Awaitable[Any]]] = asyncio.Queue()
+        self.workers = workers
+        self._tasks: list[asyncio.Task] = []
+
+    async def start(self):
+        for _ in range(self.workers):
+            self._tasks.append(asyncio.create_task(self._worker()))
+
+    async def _worker(self):
+        while True:
+            job = await self.queue.get()
+            try:
+                await job()
+            except Exception:
+                # логируем/метрики — опущено
+                pass
+            finally:
+                self.queue.task_done()
+
+    async def submit(self, coro_factory: Callable[[], Awaitable[Any]]):
+        """Добавляет задачу (ленивую фабрику корутины) в очередь."""
+        await self.queue.put(coro_factory)
+
+    async def stop(self):
+        for t in self._tasks:
+            t.cancel()
+
+
+============================================================
+
+router_admin.py:
+========================================
+from __future__ import annotations
+
+from aiogram import Router, F
+from aiogram.filters import Command
+from aiogram.types import Message as TgMessage, CallbackQuery
+from sqlalchemy import func
+from sqlalchemy import select, update
+
+from config import cfg
+from db import AsyncSessionMaker
+from keyboards import admin_menu
+from models import Payment
+from models import User
+from payments.yoomoney import YooMoneyProvider
+from services.subscriptions import activate_paid_plan
+
+router = Router()
+
+def is_admin(user_id: int) -> bool:
+    return user_id in cfg.admin_ids
+
+@router.message(Command("admin"))
+async def admin_entry(m: TgMessage):
+    if not is_admin(m.from_user.id):
+        return
+    await m.answer("Админ-панель:", reply_markup=admin_menu())
+
+@router.callback_query(F.data == "admin:users")
+async def admin_users(cq: CallbackQuery):
+    if not is_admin(cq.from_user.id): return
+    async with AsyncSessionMaker() as session:
+        total = await session.scalar(select(func.count()).select_from(User))
+    await cq.message.answer(f"Пользователей: {total}")
+    await cq.answer()
+
+@router.callback_query(F.data == "admin:broadcast")
+async def admin_broadcast(cq: CallbackQuery):
+    if not is_admin(cq.from_user.id): return
+    await cq.message.answer("Отправьте текст рассылки ответом на это сообщение.")
+    await cq.answer()
+
+@router.message(Command("check_payments"))
+async def check_payments(m: TgMessage):
+    if not is_admin(m.from_user.id):
+        return
+    provider = YooMoneyProvider()
+    async with AsyncSessionMaker() as session:
+        payments = (await session.execute(
+            select(Payment).where(Payment.status == "pending")
+        )).scalars().all()
+        for p in payments:
+            status = await provider.check_status(p.provider_payment_id)
+            if status == "succeeded":
+                await activate_paid_plan(session, p.user_id, p.plan_code)
+                await session.execute(update(Payment).where(Payment.id == p.id).values(status="succeeded"))
+        await session.commit()
+    await m.answer("✅ Проверка платежей завершена.")
+
+
+============================================================
+
+router_public.py:
+========================================
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from aiogram import Router, F
+from aiogram.filters import Command, CommandStart
+from aiogram.types import Message as TgMessage, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from sqlalchemy import select
+from sqlalchemy import update
+from aiogram.types import CallbackQuery, User, Chat
+
+from config import cfg
+from db import AsyncSessionMaker
+from keyboards import plan_buy_keyboard
+from keyboards import top_panel, keyboards_for_modes
+from models import (
+    User,
+    ChatSession,
+    UserSubscription,
+    Usage,
+)
+from payments.yoomoney import YooMoneyProvider
+from queue_bg import AsyncWorkerPool
+from services.chat import ChatService
+from services.images import ImageService
+from services.subscriptions import ensure_user, get_limits
+from services.usage import can_spend_request, spend_request, can_spend_image, spend_image
+from services.subscriptions import has_active_subscription
+from utils import store_message, get_history, trim_messages
+
+router = Router()
+
+# Пулы фоновых задач
+chat_pool = AsyncWorkerPool(cfg.workers_chat)
+img_pool = AsyncWorkerPool(cfg.workers_images)
+
+
+@router.startup()
+async def _startup(bot):
+    """Запуск фоновых пулов при старте бота."""
+    await chat_pool.start()
+    await img_pool.start()
+
+
+@router.shutdown()
+async def _shutdown(bot):
+    """Остановка фоновых пулов при завершении работы."""
+    await chat_pool.stop()
+    await img_pool.stop()
+
+
+async def _render_status_line(session, user_id: int) -> str:
+    sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
+    usage = await session.scalar(select(Usage).where(Usage.user_id == user_id))
+    now = datetime.now(timezone.utc)
+
+    expires_at = None
+    if sub and sub.expires_at:
+        # если дата без таймзоны — считаем её UTC
+        expires_at = sub.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if not sub or not expires_at or expires_at <= now:
+        status = "🔴 Неактивна"
+        expires_str = "—"
+        plan_name = "Пробный период истёк" if (sub and sub.is_trial) else "Нет"
+        limits = "Запросы: 0 / Изображения: 0"
+    else:
+        plan_code = sub.plan_code or "trial"
+        plan_conf = cfg.plans.get(plan_code)
+        status = "🟢 Активна"
+        expires_str = expires_at.astimezone().strftime("%d.%m.%Y %H:%M")
+        if sub.is_trial:
+            plan_name = "Trial"
+            max_req, max_img, _ = cfg.trial_max_requests, cfg.trial_max_images, 4000
+        else:
+            plan_name = plan_conf.title if plan_conf else plan_code
+            max_req = plan_conf.max_requests
+            max_img = plan_conf.max_image_generations
+        ur = usage.used_requests if usage else 0
+        ui = usage.used_images if usage else 0
+        limits = f"Запросы: {('∞' if max_req is None else f'{ur}/{max_req}')}, " \
+                 f"Изобр.: {('∞' if max_img is None else f'{ui}/{max_img}')}"
+
+    text = f"<b>Подписка:</b> {status}\n" \
+                f"<b>Тариф:</b> {plan_name}\n"
+    if expires_str:
+        text += f"<b>Действует до:</b> {expires_str}\n"
+        text += f"<b>Лимиты:</b> {limits}"
+
+    return text
+
+
+@router.message(CommandStart())
+async def start(m: TgMessage):
+    ref_code = None
+    if m.text and " " in m.text:
+        ref_code = m.text.split(" ", 1)[1].strip()
+
+    async with AsyncSessionMaker() as session:
+        user = await ensure_user(session, m.from_user.id, m.from_user.username,
+                                 m.from_user.first_name, m.from_user.last_name, ref_code)
+        status = await _render_status_line(session, m.from_user.id)
+
+    me = await m.bot.get_me()  # ← вот здесь получаем имя бота
+    await m.answer(
+        status,
+        reply_markup=top_panel(me.username, user.referral_code)  # ← передаём его сюда
+    )
+
+
+@router.callback_query(F.data == "panel:mode")
+async def panel_mode(cq: CallbackQuery):
+    await cq.message.edit_reply_markup(reply_markup=keyboards_for_modes())
+    await cq.answer("Выберите режим")
+
+
+@router.callback_query(F.data == "panel:help")
+async def panel_help(cq: CallbackQuery):
+    text = (
+        "ℹ️ <b>Помощь</b>\n\n"
+        "Доступные команды:\n"
+        "• /start — главное меню\n"
+        "• /new — новый чат\n"
+        "• /mode — выбрать режим\n"
+        "• /subscription — информация о подписке\n"
+        "• Просто отправьте текст — и получите ответ\n\n"
+        "Поддержка: @your_support_username"
+    )
+    await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")]
+    ]))
+    await cq.answer()
+
+
+@router.callback_query(F.data == "panel:admin")
+async def panel_admin(cq: CallbackQuery):
+    if cq.from_user.id not in cfg.admin_ids:
+        await cq.answer("🚫 Нет доступа", show_alert=True)
+        return
+    await cq.message.edit_text(
+        "🛡 <b>Админ-панель</b>\n\nФункции управления ботом.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")]
+        ])
+    )
+    await cq.answer()
+
+
+@router.callback_query(F.data.startswith("mode:"))
+async def switch_mode(cq: CallbackQuery):
+    mode = cq.data.split(":", 1)[1]
+    if mode not in cfg.modes:
+        await cq.answer("Неизвестный режим")
+        return
+
+    # Проверяем доступ к режиму
+    async with AsyncSessionMaker() as session:
+        has_access = await has_active_subscription(session, cq.from_user.id)
+
+        if not has_access:
+            # Показываем окно с предложением подписки
+            text = (
+                f"🚫 <b>Доступ ограничен</b>\n\n"
+                f"💎 <b>Оформите подписку</b> чтобы получить доступ ко всем функциям:"
+            )
+            await cq.message.edit_text(text)
+            await cq.answer()
+
+            await show_subs(cq, False)
+
+            return
+
+    async with AsyncSessionMaker() as session:
+        # создаем новую сессию чата в выбранном режиме
+        res = await session.execute(select(ChatSession).where(
+            ChatSession.user_id == cq.from_user.id, ChatSession.is_active == True))
+        active = res.scalars().first()
+        if active:
+            active.is_active = False
+        session.add(ChatSession(user_id=cq.from_user.id, title=f"{mode.capitalize()} чат", mode=mode, is_active=True))
+        await session.commit()
+    await cq.message.answer(f"Режим переключен: {mode}")
+    await cq.answer()
+
+
+def format_plan_info(code: str) -> str:
+    plan = cfg.plans[code]
+    limits = []
+    limits.append("Запросы: ∞" if plan.max_requests is None else f"Запросы: до {plan.max_requests}")
+    limits.append(
+        "Генерации: ∞" if plan.max_image_generations is None else f"Генерации: до {plan.max_image_generations}")
+    limits.append(f"Длина запроса: до {plan.max_text_len} символов")
+    return (f"<b>{plan.title}</b>\n"
+            f"Стоимость: <b>{plan.price_rub} ₽</b> / {plan.duration_days} дней\n"
+            f"{' • '.join(limits)}")
+
+
+@router.callback_query(F.data == "subs:show")
+async def show_subs(cq: CallbackQuery, is_edit: bool = True):
+    text = (
+        "💳 <b>Доступные подписки</b>\n\n"
+        f"{format_plan_info('pro_lite')}\n\n"
+        f"{format_plan_info('pro_plus')}\n\n"
+        f"{format_plan_info('pro_premium')}\n\n"
+        "Выберите нужный тариф для оплаты."
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Купить Pro Lite", callback_data="buy:pro_lite")],
+        [InlineKeyboardButton(text="Купить Pro Plus", callback_data="buy:pro_plus")],
+        [InlineKeyboardButton(text="Купить Pro Premium", callback_data="buy:pro_premium")],
+        [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")],
+    ])
+    if is_edit:
+        await cq.message.edit_text(text=text, reply_markup=kb)
+        await cq.answer()
+    else:
+        await cq.message.answer(text=text, reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("buy:"))
+async def buy(cq: CallbackQuery):
+    plan = cq.data.split(":", 1)[1]
+    plan_conf = cfg.plans[plan]
+    provider = YooMoneyProvider() if cfg.payment_provider == "yoomoney" else None
+    description = f"Оплата плана {plan_conf.title}"
+
+    # создаем платёж
+    pay_url = await provider.create_invoice(cq.from_user.id, plan, plan_conf.price_rub, description)
+
+    # красивый текст + красивая кнопка
+    text = (
+        f"🧾 <b>Счёт на оплату</b>\n\n"
+        f"<b>Тариф:</b> {plan_conf.title}\n"
+        f"<b>Стоимость:</b> {plan_conf.price_rub} ₽ за {plan_conf.duration_days} дней\n"
+        f"<b>Что входит:</b>\n"
+        f"• Запросы: {'∞' if plan_conf.max_requests is None else plan_conf.max_requests}\n"
+        f"• Генерации изображений: {'∞' if plan_conf.max_image_generations is None else plan_conf.max_image_generations}\n"
+        f"• Длина запроса: до {plan_conf.max_text_len} символов\n\n"
+        f"Нажмите кнопку ниже, чтобы перейти к оплате 👇"
+    )
+    await cq.message.answer(text, reply_markup=plan_buy_keyboard(plan, pay_url))
+    await cq.answer()
+
+
+@router.message(F.photo)
+async def on_photo(m: TgMessage):
+    """Принимаем фото. Работаем в выбранном режиме: editor/add_people/celebrity_selfie."""
+    file_id = m.photo[-1].file_id
+    mode = "editor"
+    async with AsyncSessionMaker() as session:
+        # узнаем активную сессию и лимиты
+        res = await session.execute(
+            select(ChatSession).where(ChatSession.user_id == m.from_user.id, ChatSession.is_active == True))
+        chat_sess = res.scalars().first()
+        if chat_sess:
+            mode = chat_sess.mode
+        max_req, max_img, max_text_len = await get_limits(session, m.from_user.id)
+        if not await can_spend_image(session, m.from_user.id):
+            await m.answer("Лимит изображений исчерпан. Оформите подписку или подождите продления.")
+            return
+
+    # подгружаем bytes фото
+    photo_file = await m.bot.get_file(file_id)
+    photo_bytes = await m.bot.download_file(photo_file.file_path)
+
+    img_service = ImageService()
+
+    # Задача в фоне
+    async def job():
+        new_img: bytes | None = None
+        error: str | None = None
+        if mode == "editor":
+            instruction = m.caption or "Слегка улучшить качество и цвет."
+            new_img, error = await img_service.edit(photo_bytes.read(), instruction)
+        elif mode == "add_people":
+            desc = m.caption or "Добавить двух людей на задний план, естественная композиция."
+            new_img, error = await img_service.add_people(photo_bytes.read(), desc)
+        elif mode == "celebrity_selfie":
+            celeb = (m.caption or "Известная личность").strip()
+            new_img, error = await img_service.celebrity_selfie(photo_bytes.read(), celeb)
+        else:
+            new_img, error = await img_service.edit(photo_bytes.read(), "Улучшить изображение.")
+
+        if error:
+            await m.answer(f"❗️ {error}")
+            return
+
+        if new_img:
+            await m.answer_photo(new_img, caption=f"Готово! Режим: {mode}")
+            async with AsyncSessionMaker() as session:
+                await spend_image(session, m.from_user.id)
+
+    await img_pool.submit(job)
+
+
+@router.message(F.text & ~F.via_bot)
+async def on_text(m: TgMessage):
+    """Обрабатывает обычные текстовые сообщения в текущем режиме."""
+    text = m.text.strip()
+    user_id = m.from_user.id
+
+    # режим (например assistant / image) — получаем из базы, но пока пусть дефолт
+    mode = "assistant"
+
+    if mode == "assistant":
+        chat_service = ChatService()
+        await chat_service.handle_user_message(text, m.bot, m.chat.id)
+    else:
+        await m.answer("⚙️ Другие режимы пока в разработке.")
+
+
+@router.callback_query(F.data == "chat:new")
+async def new_chat(cq: CallbackQuery):
+    async with AsyncSessionMaker() as session:
+        # деактивируем все и создаем новый assistant
+        await session.execute(update(ChatSession).where(
+            ChatSession.user_id == cq.from_user.id, ChatSession.is_active == True
+        ).values(is_active=False))
+        session.add(ChatSession(user_id=cq.from_user.id, title="Новый чат", mode="assistant", is_active=True))
+        await session.commit()
+    await cq.message.answer("Создан новый чат. Пишите сообщение.")
+    await cq.answer()
+
+
+@router.callback_query(F.data == "chat:list")
+async def chat_list(cq: CallbackQuery):
+    PAGE_SIZE = 10
+    page = 1
+    if cq.message and cq.message.reply_markup:
+        # можно реализовать пагинацию через callback_data вида chat:list:2
+        pass
+    async with AsyncSessionMaker() as session:
+        rows = (await session.execute(
+            select(ChatSession).where(ChatSession.user_id == cq.from_user.id).order_by(ChatSession.id.desc()).limit(100)
+        )).scalars().all()
+
+    if not rows:
+        await cq.message.answer("У вас пока нет сохранённых чатов.")
+        await cq.answer()
+        return
+
+    lines = []
+    for s in rows[:PAGE_SIZE]:
+        mark = "🟢" if s.is_active else "⚪️"
+        lines.append(f"{mark} <b>{s.title}</b> — {s.mode} (#{s.id})")
+    text = "📁 <b>Ваши чаты</b>\n" + "\n".join(lines)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Активировать первый", callback_data=f"chat:activate:{rows[0].id}")],
+        [InlineKeyboardButton(text="Создать новый", callback_data="chat:new")]
+    ])
+    await cq.message.answer(text, reply_markup=kb)
+    await cq.answer()
+
+
+@router.callback_query(F.data.startswith("chat:activate:"))
+async def chat_activate(cq: CallbackQuery):
+    sess_id = int(cq.data.split(":")[-1])
+    async with AsyncSessionMaker() as session:
+        await session.execute(update(ChatSession).where(
+            ChatSession.user_id == cq.from_user.id, ChatSession.is_active == True
+        ).values(is_active=False))
+        await session.execute(update(ChatSession).where(
+            ChatSession.id == sess_id, ChatSession.user_id == cq.from_user.id
+        ).values(is_active=True))
+        await session.commit()
+    await cq.message.answer(f"✔️ Активирован чат #{sess_id}")
+    await cq.answer()
+
+
+async def show_subscription_panel(m: TgMessage):
+    async with AsyncSessionMaker() as session:
+        status = await _render_status_line(session, m.from_user.id)
+        user_row = (await session.execute(select(User).where(User.id == m.from_user.id))).scalars().first()
+    me = await m.bot.get_me()
+    await m.answer(status, reply_markup=top_panel(me.username, user_row.referral_code))
+
+
+@router.message(Command("subscription"))
+async def cmd_subscription(m: TgMessage):
+    await show_subscription_panel(m)
+
+
+@router.message(Command("help"))
+async def cmd_help(m: TgMessage):
+    await m.answer(
+        "ℹ️ Помощь\n\n"
+        "• /start — главное меню\n"
+        "• /new — новый чат\n"
+        "• /mode — выбрать режим (ассистент/изображения/редактор/...)\n"
+        "• /subscription — информация о подписке и лимитах\n"
+        "• Просто отправьте текст — и получите ответ\n"
+        "• Отправьте фото — и выберите нужный режим обработки"
+    )
+
+
+@router.callback_query(F.data == "panel:main")
+async def panel_main(cq: CallbackQuery):
+    async with AsyncSessionMaker() as session:
+        status = await _render_status_line(session, cq.from_user.id)
+        user_row = (await session.execute(
+            select(User).where(User.id == cq.from_user.id)
+        )).scalars().first()
+    me = await cq.bot.get_me()
+    await cq.message.edit_text(status, reply_markup=top_panel(me.username, user_row.referral_code))
+    await cq.answer()
+
+
+@router.message(Command("mode"))
+async def cmd_mode(m: TgMessage):
+    await m.answer("Выберите режим:", reply_markup=keyboards_for_modes())
+
+
+@router.message(Command("subscription"))
+async def cmd_subscription(m: TgMessage):
+    await show_subscription_panel(m)
+
+@router.message(Command("help"))
+async def cmd_help(m: TgMessage):
+    text = (
+        "ℹ️ <b>Помощь</b>\n\n"
+        "Команды:\n"
+        "• /start — главное меню\n"
+        "• /mode — выбор режима\n"
+        "• /subscription — информация о подписке\n"
+        "• /new — новый чат\n\n"
+        "Просто отправьте текст, и бот ответит вам 🤖"
+    )
+    await m.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")]
+    ]))
+
+
+@router.message(Command("admin"))
+async def cmd_admin(m: TgMessage):
+    if m.from_user.id not in cfg.admin_ids:
+        await m.answer("🚫 У вас нет доступа к админ-панели.")
+        return
+
+    await m.answer(
+        "🛡 <b>Админ-панель</b>\n\n"
+        "1️⃣ Управление пользователями\n"
+        "2️⃣ Рассылки\n"
+        "3️⃣ Проверка платежей\n\n"
+        "⚙️ Доступ только для администраторов.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")]
+        ])
+    )
+
+============================================================
+
+services/chat.py:
+========================================
+from __future__ import annotations
+from providers.openai_provider import OpenAIChatProvider
+from services.safety import SafetyGuard
+
+class ChatService:
+    def __init__(self, provider=None):
+        self.provider = provider or OpenAIChatProvider(model="gpt-4o")
+
+    async def handle_user_message(self, message: str, bot, chat_id: int):
+        """Асинхронный потоковый ответ GPT."""
+        sent = await bot.send_message(chat_id, "🤔 Думаю…")
+        full_text = ""
+        async for delta in self.provider.stream_chat([{"role": "user", "content": message}]):
+            full_text += delta
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=sent.message_id,
+                    text=f"💬 {full_text}"
+                )
+            except Exception:
+                pass
+        await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=sent.message_id,
+            text=f"💬 {full_text}"
+        )
+
+============================================================
+
+services/images.py:
+========================================
+from __future__ import annotations
+from providers.openai_provider import OpenAIImageProvider
+from services.safety import SafetyGuard, SafetyDecision
+
+
+class ImageService:
+    """Фасад для изображений. Легко заменить провайдер."""
+
+    def __init__(self, provider: OpenAIImageProvider | None = None):
+        self.provider = provider or OpenAIImageProvider()
+
+    async def generate(self, prompt: str) -> tuple[bytes | None, str | None]:
+        try:
+            img = await self.provider.generate(prompt)
+            return img, None
+        except Exception as e:
+            return None, f"Ошибка генерации: {str(e)}"
+
+    async def edit(self, image_bytes: bytes, instruction: str) -> tuple[bytes | None, str | None]:
+        try:
+            img = await self.provider.edit(image_bytes, instruction)
+            return img, None
+        except Exception as e:
+            return None, f"Ошибка редактирования: {str(e)}"
+
+    async def add_people(self, image_bytes: bytes, description: str) -> tuple[bytes | None, str | None]:
+        try:
+            img = await self.provider.add_people(image_bytes, description)
+            return img, None
+        except Exception as e:
+            return None, f"Ошибка добавления людей: {str(e)}"
+
+    async def celebrity_selfie(self, image_bytes: bytes, celebrity_name: str, style: str | None = None) -> tuple[
+        bytes | None, str | None]:
+        # SafetyGate: блокируем deepfake со знаменитостями
+        dec: SafetyDecision = SafetyGuard.check_celebrity_selfie(celebrity_name)
+        if not dec.allowed:
+            return None, dec.reason or "Операция запрещена политиками."
+
+        try:
+            img = await self.provider.celebrity_selfie(image_bytes, celebrity_name, style)
+            return img, None
+        except Exception as e:
+            return None, f"Ошибка создания селфи: {str(e)}"
+
+============================================================
+
+services/payments_monitor.py:
+========================================
+# services/payments_monitor.py
+from __future__ import annotations
+import asyncio
+import logging
+from sqlalchemy import select, update
+from db import AsyncSessionMaker
+from models import Payment, User
+from payments.yoomoney import YooMoneyProvider
+from services.subscriptions import activate_paid_plan
+from services.referrals import apply_referral_bonus
+
+logger = logging.getLogger(__name__)
+
+class PaymentMonitor:
+    """Фоновый мониторинг платежей."""
+    def __init__(self, interval_min: int = 5):
+        self.interval_min = interval_min
+        self.running = False
+
+    async def run_forever(self):
+        """Запускает бесконечный цикл проверки."""
+        self.running = True
+        provider = YooMoneyProvider()
+        logger.info(f"[PaymentMonitor] Запущен. Интервал: {self.interval_min} минут.")
+        while self.running:
+            try:
+                await self.check_pending(provider)
+            except Exception as e:
+                logger.exception(f"[PaymentMonitor] Ошибка проверки: {e}")
+            await asyncio.sleep(self.interval_min * 60)
+
+    async def stop(self):
+        self.running = False
+
+    async def check_pending(self, provider: YooMoneyProvider):
+        """Проверяет все незавершенные платежи."""
+        async with AsyncSessionMaker() as session:
+            payments = (await session.execute(
+                select(Payment).where(Payment.status == "pending")
+            )).scalars().all()
+
+            if not payments:
+                logger.info("[PaymentMonitor] Нет ожидающих платежей.")
+                return
+
+            for p in payments:
+                try:
+                    status = await provider.check_status(p.provider_payment_id)
+                except Exception as e:
+                    logger.warning(f"[PaymentMonitor] Ошибка запроса статуса для {p.id}: {e}")
+                    continue
+
+                if status == "succeeded":
+                    logger.info(f"[PaymentMonitor] Платеж {p.id} ({p.plan_code}) подтвержден.")
+                    await activate_paid_plan(session, p.user_id, p.plan_code)
+
+                    # Бонус за рефералку
+                    user = await session.get(User, p.user_id)
+                    if user and user.referred_by:
+                        await apply_referral_bonus(session, user.referred_by)
+
+                    await session.execute(update(Payment)
+                        .where(Payment.id == p.id)
+                        .values(status="succeeded"))
+                    await session.commit()
+
+                elif status in ("canceled", "expired"):
+                    logger.info(f"[PaymentMonitor] Платеж {p.id} отменен ({status}).")
+                    await session.execute(update(Payment)
+                        .where(Payment.id == p.id)
+                        .values(status=status))
+                    await session.commit()
+
+
+============================================================
+
+services/referrals.py:
+========================================
+from __future__ import annotations
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from datetime import timedelta, datetime
+from config import cfg
+from models import UserSubscription
+
+async def apply_referral_bonus(session: AsyncSession, referrer_user_id: int) -> None:
+    """Дарим рефереру +N дней к текущей подписке."""
+    sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == referrer_user_id))
+    now = datetime.now(datetime.now().astimezone().tzinfo)
+    bonus = timedelta(days=cfg.referral_bonus_days)
+
+    if not sub:
+        sub = UserSubscription(user_id=referrer_user_id, is_trial=False, plan_code="pro_lite")
+        session.add(sub)
+
+    if sub.expires_at and sub.expires_at > now:
+        sub.expires_at = sub.expires_at + bonus
+    else:
+        sub.expires_at = now + bonus
+
+    await session.commit()
+
+
+============================================================
+
+services/safety.py:
+========================================
+from __future__ import annotations
+
+class SafetyDecision:
+    def __init__(self, allowed: bool, reason: str | None = None):
+        self.allowed = allowed
+        self.reason = reason
+
+class SafetyGuard:
+    """Простая проверка контента. Здесь можно внедрить свои правила и/или модерацию провайдеров."""
+    BLOCKED_CELEBRITY_SELFIE = False  # пример флага — для OpenAI лучше блокировать deepfake с публичными фигурами
+
+    @classmethod
+    def check_celebrity_selfie(cls, celebrity_name: str) -> SafetyDecision:
+        if cls.BLOCKED_CELEBRITY_SELFIE:
+            return SafetyDecision(False, "Создание реалистичных изображений с участием знаменитостей ограничено политиками. Выберите другой режим.")
+        return SafetyDecision(True)
+
+    @classmethod
+    def check_text_length(cls, text: str, max_len: int) -> SafetyDecision:
+        if len(text) > max_len:
+            return SafetyDecision(False, f"Превышена длина текста ({len(text)} > {max_len}). Укоротите запрос.")
+        return SafetyDecision(True)
+
+
+============================================================
+
+services/subscriptions.py:
+========================================
+from __future__ import annotations
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from datetime import datetime, timedelta, timezone
+from config import cfg
+from models import User, UserSubscription, Usage
+
+async def ensure_user(session: AsyncSession, tg_user_id: int, username: str | None, first_name: str | None, last_name: str | None, referred_by_code: str | None = None) -> User:
+    """Создаёт пользователя, подписку trial и usage при первом входе."""
+    user = await session.scalar(select(User).where(User.id == tg_user_id))
+    if user:
+        return user
+
+    # генерируем реф. код
+    ref_code = f"ref{tg_user_id}"
+    user = User(
+        id=tg_user_id, username=username, first_name=first_name, last_name=last_name, referral_code=ref_code
+    )
+    session.add(user)
+    await session.flush()
+
+    # связываем рефера
+    if referred_by_code:
+        referrer = await session.scalar(select(User).where(User.referral_code == referred_by_code))
+        if referrer:
+            user.referred_by = referrer.id
+
+    # создаем trial подписку
+    sub = UserSubscription(
+        user_id=user.id,
+        plan_code=None,
+        is_trial=True,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=cfg.trial_days),
+    )
+    session.add(sub)
+    # usage
+    usage = Usage(user_id=user.id, used_requests=0, used_images=0)
+    session.add(usage)
+
+    await session.commit()
+    return user
+
+async def has_active_subscription(session: AsyncSession, user_id: int) -> bool:
+    sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
+    if not sub or not sub.expires_at:
+        return False
+    return sub.expires_at > datetime.now(datetime.now().astimezone().tzinfo).astimezone().replace(tzinfo=None)
+
+async def get_limits(session: AsyncSession, user_id: int) -> tuple[int | None, int | None, int]:
+    """Возвращает (max_requests, max_images, max_text_len) для текущего плана/триала."""
+    sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
+    if not sub:
+        # без подписки — нет доступа
+        return (0, 0, 0)
+    if sub.is_trial:
+        return (cfg.trial_max_requests, cfg.trial_max_images, 4000)
+    plan = cfg.plans.get(sub.plan_code or "", None)
+    if not plan:
+        return (0, 0, 0)
+    return (plan.max_requests, plan.max_image_generations, plan.max_text_len)
+
+async def activate_paid_plan(session: AsyncSession, user_id: int, plan_code: str) -> None:
+    """Активация платного плана (вызывается после оплаты). Продлевает время и сбрасывает usage."""
+    sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
+    now = datetime.now(datetime.now().astimezone().tzinfo)
+    if not sub:
+        sub = UserSubscription(user_id=user_id)
+        session.add(sub)
+
+    plan = cfg.plans[plan_code]
+    if sub.expires_at and sub.expires_at > now:
+        sub.expires_at = sub.expires_at + timedelta(days=plan.duration_days)
+    else:
+        sub.expires_at = now + timedelta(days=plan.duration_days)
+    sub.plan_code = plan_code
+    sub.is_trial = False
+
+    # Сброс usage под новый период
+    usage = await session.scalar(select(Usage).where(Usage.user_id == user_id))
+    if usage:
+        usage.used_requests = 0
+        usage.used_images = 0
+
+    await session.commit()
+
+
+============================================================
+
+services/usage.py:
+========================================
+from __future__ import annotations
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from models import Usage
+from services.subscriptions import get_limits
+
+async def can_spend_request(session: AsyncSession, user_id: int) -> bool:
+    max_req, _, _ = await get_limits(session, user_id)
+    if max_req is None:
+        return True
+    usage = await session.scalar(select(Usage).where(Usage.user_id == user_id))
+    return usage.used_requests < max_req
+
+async def can_spend_image(session: AsyncSession, user_id: int) -> bool:
+    _, max_img, _ = await get_limits(session, user_id)
+    if max_img is None:
+        return True
+    usage = await session.scalar(select(Usage).where(Usage.user_id == user_id))
+    return usage.used_images < max_img
+
+async def spend_request(session: AsyncSession, user_id: int) -> None:
+    usage = await session.scalar(select(Usage).where(Usage.user_id == user_id))
+    usage.used_requests += 1
+    await session.commit()
+
+async def spend_image(session: AsyncSession, user_id: int) -> None:
+    usage = await session.scalar(select(Usage).where(Usage.user_id == user_id))
+    usage.used_images += 1
+    await session.commit()
+
+
+============================================================
+
+utils.py:
+========================================
+from __future__ import annotations
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from models import User, UserSubscription, Usage, ChatSession, Message
+from services.subscriptions import get_limits
+from typing import Iterable
+
+async def require_active_subscription(session: AsyncSession, user_id: int) -> bool:
+    """Возвращает True, если подписка активна и не истёк trial."""
+    sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
+    if not sub or not sub.expires_at:
+        return False
+    return sub.expires_at.timestamp() > __import__("time").time()
+
+async def store_message(session: AsyncSession, session_id: int, role: str, content: str) -> None:
+    m = Message(session_id=session_id, role=role, content=content)
+    session.add(m)
+    await session.commit()
+
+async def get_history(session: AsyncSession, session_id: int, limit: int = 30) -> list[dict[str, str]]:
+    res = (await session.execute(
+        select(Message).where(Message.session_id == session_id).order_by(Message.id.desc()).limit(limit)
+    )).scalars().all()
+    out: list[dict[str, str]] = [{"role": m.role, "content": m.content} for m in reversed(res)]
+    return out
+
+def trim_messages(tokens_est: int, messages: list[dict[str, str]], max_len: int) -> list[dict[str, str]]:
+    """Простое усечение истории по длине текста (упрощённо)."""
+    total = 0
+    out: list[dict[str, str]] = []
+    for m in reversed(messages):
+        l = len(m.get("content", ""))
+        if total + l > max_len:
+            break
+        out.append(m)
+        total += l
+    return list(reversed(out))
+
+
+============================================================
+

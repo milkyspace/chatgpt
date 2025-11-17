@@ -377,24 +377,6 @@ async def show_subscription_panel(m: TgMessage):
     await m.answer(status, reply_markup=top_panel(me.username, user_row.referral_code))
 
 
-@router.message(Command("subscription"))
-async def cmd_subscription(m: TgMessage):
-    await show_subscription_panel(m)
-
-
-@router.message(Command("help"))
-async def cmd_help(m: TgMessage):
-    await m.answer(
-        "ℹ️ Помощь\n\n"
-        "• /start — главное меню\n"
-        "• /new — новый чат\n"
-        "• /mode — выбрать режим (ассистент/изображения/редактор/...)\n"
-        "• /subscription — информация о подписке и лимитах\n"
-        "• Просто отправьте текст — и получите ответ\n"
-        "• Отправьте фото — и выберите нужный режим обработки"
-    )
-
-
 @router.callback_query(F.data == "panel:main")
 async def panel_main(cq: CallbackQuery):
     async with AsyncSessionMaker() as session:
@@ -431,6 +413,31 @@ async def cmd_help(m: TgMessage):
         [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")]
     ]))
 
+@router.message(Command("mode"))
+async def cmd_mode(m: TgMessage):
+    await m.answer("Выберите режим:", reply_markup=keyboards_for_modes())
+
+@router.message(Command("new"))
+async def cmd_new_chat(m: TgMessage):
+    """Создание нового чата"""
+    async with AsyncSessionMaker() as session:
+        # Деактивируем все активные чаты
+        await session.execute(update(ChatSession).where(
+            ChatSession.user_id == m.from_user.id,
+            ChatSession.is_active == True
+        ).values(is_active=False))
+
+        # Создаем новый чат
+        new_session = ChatSession(
+            user_id=m.from_user.id,
+            title="Новый чат",
+            mode="assistant",
+            is_active=True
+        )
+        session.add(new_session)
+        await session.commit()
+
+    await m.answer("✅ Создан новый чат. Теперь можно отправлять сообщения.")
 
 @router.message(Command("admin"))
 async def cmd_admin(m: TgMessage):
