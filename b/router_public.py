@@ -198,7 +198,7 @@ def format_plan_info(code: str) -> str:
 
 
 @router.callback_query(F.data == "subs:show")
-async def show_subs(cq: CallbackQuery):
+async def show_subs(cq: CallbackQuery, is_edit: bool = True):
     text = (
         "💳 <b>Доступные подписки</b>\n\n"
         f"{format_plan_info('pro_lite')}\n\n"
@@ -212,8 +212,11 @@ async def show_subs(cq: CallbackQuery):
         [InlineKeyboardButton(text="Купить Pro Premium", callback_data="buy:pro_premium")],
         [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")],
     ])
-    await cq.message.edit_text(text=text, reply_markup=kb)
-    await cq.answer()
+    if is_edit:
+        await cq.message.edit_text(text=text, reply_markup=kb)
+        await cq.answer()
+    else:
+        await cq.message.answer(text=text, reply_markup=kb)
 
 
 @router.callback_query(F.data.startswith("buy:"))
