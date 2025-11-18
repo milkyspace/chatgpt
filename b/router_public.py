@@ -452,10 +452,50 @@ async def on_text(m: TgMessage):
 
     # image — генерация изображения по тексту
     if mode == "image":
-        async def job():
+
+        done_event = asyncio.Event()
+
+        # Начальное сообщение
+        progress_msg = await m.answer(
+            "🎨 Генерирую изображение…\n"
+            "▰▱▱▱▱▱▱▱▱  0%"
+        )
+
+        # ----- ПРОГРЕСС-БАР -----
+        async def progress_updater():
+            total_blocks = 9
+            progress = 0  # 0..100 %
+
+            while not done_event.is_set():
+                await asyncio.sleep(0.5)
+                progress = min(progress + 5, 95)  # растет до 95%
+
+                filled = progress * total_blocks // 100
+                bar = "▰" * filled + "▱" * (total_blocks - filled)
+
+                try:
+                    await progress_msg.edit_text(
+                        f"🎨 Генерирую изображение…\n{bar}  {progress}%"
+                    )
+                except Exception:
+                    pass
+
+            # Когда генерация закончилась → показываем полный прогресс
+            bar = "▰" * total_blocks
+            try:
+                await progress_msg.edit_text(
+                    f"📸 Готово!\n{bar}  100%"
+                )
+            except Exception:
+                pass
+
+        # ----- ОСНОВНАЯ ЗАДАЧА -----
+        async def generate_job():
             img, err = await img_service.generate(text)
+            done_event.set()  # остановить прогресс
+
             if err:
-                await m.answer(f"❗ {err}")
+                await progress_msg.edit_text(f"❗ Ошибка: {err}")
                 return
 
             file = BufferedInputFile(img, filename="generated.png")
@@ -464,7 +504,10 @@ async def on_text(m: TgMessage):
             async with AsyncSessionMaker() as session:
                 await spend_image(session, user_id)
 
-        await img_pool.submit(job)
+        # Запускаем прогресс и генерацию
+        asyncio.create_task(progress_updater())
+        await img_pool.submit(generate_job)
+
         return
 
     # editor — создаём изображение с текстовой инструкцией
