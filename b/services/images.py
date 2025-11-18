@@ -1,13 +1,11 @@
-from __future__ import annotations
-from providers.openai_provider import OpenAIImageProvider
+from providers.openai_vision_edit import OpenAIVisionEditProvider
 from services.safety import SafetyGuard, SafetyDecision
 
 
 class ImageService:
-    """Фасад для изображений. Легко заменить провайдер."""
 
-    def __init__(self, provider: OpenAIImageProvider | None = None):
-        self.provider = provider or OpenAIImageProvider()
+    def __init__(self, provider: OpenAIVisionEditProvider | None = None):
+        self.provider = provider or OpenAIVisionEditProvider()
 
     async def generate(self, prompt: str) -> tuple[bytes | None, str | None]:
         try:
@@ -16,9 +14,9 @@ class ImageService:
         except Exception as e:
             return None, f"Ошибка генерации: {str(e)}"
 
-    async def edit(self, image_bytes: bytes, instruction: str) -> tuple[bytes | None, str | None]:
+    async def edit(self, image_bytes: bytes, instruction: str):
         try:
-            img = await self.provider.edit(image_bytes, instruction)
+            img = await self.provider.edit_image(image_bytes, instruction)
             return img, None
         except Exception as e:
             return None, f"Ошибка редактирования: {str(e)}"
