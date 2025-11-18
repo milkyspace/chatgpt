@@ -519,7 +519,7 @@ async def on_text(m: TgMessage):
 
         done_event = asyncio.Event()
 
-        # стартовое сообщение
+        # показываем прогресс
         progress_msg = await m.answer(
             "🛠 Редактирую изображение…\n"
             "▰▱▱▱▱▱▱▱▱  0%"
@@ -532,7 +532,6 @@ async def on_text(m: TgMessage):
             while not done_event.is_set():
                 await asyncio.sleep(0.3)
 
-                # медленный прогресс 1–2%
                 progress = min(progress + random.randint(1, 2), 80)
 
                 filled = progress * total_blocks // 100
@@ -542,24 +541,24 @@ async def on_text(m: TgMessage):
                     await progress_msg.edit_text(
                         f"🛠 Редактирую изображение…\n{bar}  {progress}%"
                     )
-                except Exception:
+                except:
                     pass
 
-            # финальный рывок до 100%
+            # финальный рывок
             try:
                 bar = "▰" * total_blocks
                 await progress_msg.edit_text(
                     f"📸 Готово!\n{bar}  100%"
                 )
-            except Exception:
+            except:
                 pass
 
         async def edit_job():
-            instruction = m.caption or text or "Улучшить изображение."
-
+            # ВНИМАНИЕ — ТЕПЕРЬ ИСПОЛЬЗУЕМ ПРАВИЛЬНО
             img_bytes = photo_bytes.read()
 
-            # вызываем OpenAI
+            instruction = m.caption or "Слегка улучшить качество и цвет."
+
             new_img, err = await img_service.edit(img_bytes, instruction)
             done_event.set()
 
@@ -567,12 +566,13 @@ async def on_text(m: TgMessage):
                 await progress_msg.edit_text(f"❗ Ошибка: {err}")
                 return
 
-            # важно: отправлять через BufferedInputFile
-            file = BufferedInputFile(new_img, filename="edited.png")
+            # Telegram-файл
+            file = BufferedInputFile(new_img, filename="edit.png")
+
             await m.answer_photo(file, caption="Готово! Режим: editor")
 
             async with AsyncSessionMaker() as session:
-                await spend_image(session, user_id)
+                await spend_image(session, m.from_user.id)
 
         asyncio.create_task(progress_updater())
         await img_pool.submit(edit_job)
