@@ -448,6 +448,8 @@ async def on_text(m: TgMessage):
     if mode == "assistant":
         chat_service = ChatService()
         await chat_service.handle_user_message(text, m.bot, m.chat.id)
+        async with AsyncSessionMaker() as session:
+            await spend_request(session, user_id)
         return
 
     # ---- Изображения ----
@@ -502,7 +504,7 @@ async def on_text(m: TgMessage):
                 return
 
             file = BufferedInputFile(img, filename="generated.png")
-            await m.answer_photo(file, caption="Готово! Режим: image")
+            await m.answer_photo(file, caption="Готово!")
 
             async with AsyncSessionMaker() as session:
                 await spend_image(session, user_id)
