@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 
 from datetime import datetime, timezone
 
@@ -457,20 +458,21 @@ async def on_text(m: TgMessage):
 
         done_event = asyncio.Event()
 
-        # Начальное сообщение
+        # начальное сообщение
         progress_msg = await m.answer(
             "🎨 Генерирую изображение…\n"
             "▰▱▱▱▱▱▱▱▱  0%"
         )
 
-        # ----- ПРОГРЕСС-БАР -----
         async def progress_updater():
             total_blocks = 9
-            progress = 0  # 0..100 %
+            progress = 0  # проценты 0–100
 
             while not done_event.is_set():
-                await asyncio.sleep(0.5)
-                progress = min(progress + 5, 95)  # растет до 95%
+                await asyncio.sleep(0.3)
+
+                # медленный прогресс — 1–2% за шаг
+                progress = min(progress + random.randint(1, 2), 80)
 
                 filled = progress * total_blocks // 100
                 bar = "▰" * filled + "▱" * (total_blocks - filled)
@@ -482,19 +484,18 @@ async def on_text(m: TgMessage):
                 except Exception:
                     pass
 
-            # Когда генерация закончилась → показываем полный прогресс
-            bar = "▰" * total_blocks
+            # закончили — ставим 100%
             try:
+                bar = "▰" * total_blocks
                 await progress_msg.edit_text(
                     f"📸 Готово!\n{bar}  100%"
                 )
             except Exception:
                 pass
 
-        # ----- ОСНОВНАЯ ЗАДАЧА -----
         async def generate_job():
             img, err = await img_service.generate(text)
-            done_event.set()  # остановить прогресс
+            done_event.set()  # останов прогресса
 
             if err:
                 await progress_msg.edit_text(f"❗ Ошибка: {err}")
@@ -506,7 +507,6 @@ async def on_text(m: TgMessage):
             async with AsyncSessionMaker() as session:
                 await spend_image(session, user_id)
 
-        # Запускаем прогресс и генерацию
         asyncio.create_task(progress_updater())
         await img_pool.submit(generate_job)
 
