@@ -6,11 +6,19 @@ import httpx
 
 
 class OpenAIChatProvider:
-    """OpenAI GPT с поддержкой потокового вывода и кастомным httpx-клиентом."""
+    """
+    Провайдер для GPT с поддержкой потоковой передачи данных.
+    Использует новый OpenAI SDK (v1.x), в котором используется client.chat.completions.create(stream=True)
+    """
 
     def __init__(self, model: str = "gpt-4o"):
         self.model = model
-        self.http_client = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0))
+
+        # кастомный httpx клиент — корректно
+        self.http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(60.0, connect=10.0)
+        )
+
         self.client = AsyncOpenAI(
             api_key=cfg.openai_api_key,
             base_url=cfg.openai_api_base,
@@ -18,20 +26,29 @@ class OpenAIChatProvider:
         )
 
     async def stream_chat(
-            self, messages: Sequence[dict[str, str]], max_tokens: int = 800, temperature: float = 0.7
+        self,
+        messages: Sequence[dict[str, str]],
+        max_tokens: int = 800,
+        temperature: float = 0.7
     ) -> AsyncGenerator[str, None]:
-        """Асинхронный стриминг OpenAI GPT-4o."""
-        async with self.client.chat.completions.stream(
-                model=self.model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-        ) as stream:
-            async for event in stream:
-                if event.type == "message.delta":
-                    delta = event.delta.content or ""
-                    if delta:
-                        yield delta
+        """
+        Потоковое получение текста от модели GPT.
+        Использует современный метод create(stream=True).
+        """
+
+        stream = await self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,             # ← ВАЖНО!
+        )
+
+        async for chunk in stream:
+            # chunk.choices[0].delta.content — текстовая часть стрима
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
 
 
 class OpenAIImageProvider:
