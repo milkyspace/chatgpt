@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from aiogram import Router, F
+from aiogram.types import BufferedInputFile
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message as TgMessage, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select
@@ -456,7 +457,9 @@ async def on_text(m: TgMessage):
             if err:
                 await m.answer(f"❗ {err}")
                 return
-            await m.answer_photo(img, caption="Готово! Режим: image")
+
+            file = BufferedInputFile(img, filename="generated.png")
+            await m.answer_photo(file, caption="Готово! Режим: image")
 
             async with AsyncSessionMaker() as session:
                 await spend_image(session, user_id)
@@ -472,7 +475,9 @@ async def on_text(m: TgMessage):
             if err:
                 await m.answer(f"❗ {err}")
                 return
-            await m.answer_photo(img, caption="Готово! Режим: editor")
+
+            file = BufferedInputFile(img, filename="result.png")
+            await m.answer_photo(file, caption="Готово!")
 
             async with AsyncSessionMaker() as session:
                 await spend_image(session, user_id)
@@ -487,7 +492,9 @@ async def on_text(m: TgMessage):
             if err:
                 await m.answer(f"❗ {err}")
                 return
-            await m.answer_photo(img, caption="Готово! Режим: add_people")
+
+            file = BufferedInputFile(img, filename="result.png")
+            await m.answer_photo(file, caption="Готово!")
 
             async with AsyncSessionMaker() as session:
                 await spend_image(session, user_id)
@@ -503,7 +510,9 @@ async def on_text(m: TgMessage):
             if err:
                 await m.answer(f"❗ {err}")
                 return
-            await m.answer_photo(img, caption=f"Селфи с {celeb}")
+
+            file = BufferedInputFile(img, filename="result.png")
+            await m.answer_photo(file, caption="Готово!")
 
             async with AsyncSessionMaker() as session:
                 await spend_image(session, user_id)
