@@ -402,15 +402,25 @@ async def on_photo(m: TgMessage):
 
 @router.message(F.text & ~F.via_bot)
 async def on_text(m: TgMessage):
-    """Обрабатывает обычные текстовые сообщения в текущем режиме."""
-    # Простая проверка - если сообщение начинается с команды, игнорируем
-    if m.text and m.text.startswith('/'):
+    """
+    Обрабатывает текстовые запросы в зависимости от текущего режима чата.
+
+    Режимы:
+    - assistant: потоковый чат с GPT
+    - image: генерация изображения по тексту
+    - editor: правка изображения на основе текстовой инструкции (без фото)
+    - add_people: генерация изображения с добавлением людей
+    - celebrity_selfie: создание селфи с селебой
+    """
+
+    # Игнорируем команды
+    if m.text and m.text.startswith("/"):
         return
 
-    text = m.text.strip()
     user_id = m.from_user.id
+    text: str = m.text.strip()
 
-    # Режим получаем из активной сессии чата
+    # Получаем активный режим
     async with AsyncSessionMaker() as session:
         chat_session = await session.scalar(
             select(ChatSession).where(
@@ -420,11 +430,89 @@ async def on_text(m: TgMessage):
         )
         mode = chat_session.mode if chat_session else "assistant"
 
+        # Получаем лимиты
+        max_req, max_img, max_text_len = await get_limits(session, user_id)
+
+        # Проверка лимитов только для режимов-изображений
+        is_image_mode = mode in ("image", "editor", "add_people", "celebrity_selfie")
+        if is_image_mode:
+            if not await can_spend_image(session, user_id):
+                await m.answer("❗ Лимит изображений исчерпан. Оформите подписку или дождитесь продления.")
+                return
+
+    # Режим assistant → GPT-текст
     if mode == "assistant":
         chat_service = ChatService()
         await chat_service.handle_user_message(text, m.bot, m.chat.id)
-    else:
-        await m.answer("⚙️ Другие режимы пока в разработке.")
+        return
+
+    # ---- Изображения ----
+    img_service = ImageService()
+
+    # image — генерация изображения по тексту
+    if mode == "image":
+        async def job():
+            img, err = await img_service.generate(text)
+            if err:
+                await m.answer(f"❗ {err}")
+                return
+            await m.answer_photo(img, caption="Готово! Режим: image")
+
+            async with AsyncSessionMaker() as session:
+                await spend_image(session, user_id)
+
+        await img_pool.submit(job)
+        return
+
+    # editor — создаём изображение с текстовой инструкцией
+    if mode == "editor":
+        async def job():
+            # Генерация новой картинки (если нет фото)
+            img, err = await img_service.edit(b"", text)
+            if err:
+                await m.answer(f"❗ {err}")
+                return
+            await m.answer_photo(img, caption="Готово! Режим: editor")
+
+            async with AsyncSessionMaker() as session:
+                await spend_image(session, user_id)
+
+        await img_pool.submit(job)
+        return
+
+    # add_people — текстовое описание → картинка
+    if mode == "add_people":
+        async def job():
+            img, err = await img_service.add_people(b"", text)
+            if err:
+                await m.answer(f"❗ {err}")
+                return
+            await m.answer_photo(img, caption="Готово! Режим: add_people")
+
+            async with AsyncSessionMaker() as session:
+                await spend_image(session, user_id)
+
+        await img_pool.submit(job)
+        return
+
+    # celebrity_selfie — селфи с селебой по тексту
+    if mode == "celebrity_selfie":
+        async def job():
+            celeb = text.strip()
+            img, err = await img_service.celebrity_selfie(b"", celeb)
+            if err:
+                await m.answer(f"❗ {err}")
+                return
+            await m.answer_photo(img, caption=f"Селфи с {celeb}")
+
+            async with AsyncSessionMaker() as session:
+                await spend_image(session, user_id)
+
+        await img_pool.submit(job)
+        return
+
+    # fallback
+    await m.answer(f"⚙️ Режим '{mode}' пока недоступен для текстовых запросов.")
 
 
 @router.callback_query(F.data == "chat:new")
