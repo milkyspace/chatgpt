@@ -516,20 +516,67 @@ async def on_text(m: TgMessage):
 
     # editor — создаём изображение с текстовой инструкцией
     if mode == "editor":
-        async def job():
-            # Генерация новой картинки (если нет фото)
-            img, err = await img_service.edit(b"", text)
+
+        done_event = asyncio.Event()
+
+        # стартовое сообщение
+        progress_msg = await m.answer(
+            "🛠 Редактирую изображение…\n"
+            "▰▱▱▱▱▱▱▱▱  0%"
+        )
+
+        async def progress_updater():
+            total_blocks = 9
+            progress = 0
+
+            while not done_event.is_set():
+                await asyncio.sleep(0.3)
+
+                # медленный прогресс 1–2%
+                progress = min(progress + random.randint(1, 2), 80)
+
+                filled = progress * total_blocks // 100
+                bar = "▰" * filled + "▱" * (total_blocks - filled)
+
+                try:
+                    await progress_msg.edit_text(
+                        f"🛠 Редактирую изображение…\n{bar}  {progress}%"
+                    )
+                except Exception:
+                    pass
+
+            # финальный рывок до 100%
+            try:
+                bar = "▰" * total_blocks
+                await progress_msg.edit_text(
+                    f"📸 Готово!\n{bar}  100%"
+                )
+            except Exception:
+                pass
+
+        async def edit_job():
+            instruction = m.caption or text or "Улучшить изображение."
+
+            img_bytes = photo_bytes.read()
+
+            # вызываем OpenAI
+            new_img, err = await img_service.edit(img_bytes, instruction)
+            done_event.set()
+
             if err:
-                await m.answer(f"❗ {err}")
+                await progress_msg.edit_text(f"❗ Ошибка: {err}")
                 return
 
-            file = BufferedInputFile(img, filename="result.png")
-            await m.answer_photo(file, caption="Готово!")
+            # важно: отправлять через BufferedInputFile
+            file = BufferedInputFile(new_img, filename="edited.png")
+            await m.answer_photo(file, caption="Готово! Режим: editor")
 
             async with AsyncSessionMaker() as session:
                 await spend_image(session, user_id)
 
-        await img_pool.submit(job)
+        asyncio.create_task(progress_updater())
+        await img_pool.submit(edit_job)
+
         return
 
     # add_people — текстовое описание → картинка
