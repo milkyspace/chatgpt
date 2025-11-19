@@ -216,7 +216,6 @@ class AITunnelImageProvider:
         Редактирование изображения по текстовой инструкции.
         """
         try:
-            self.model = cfg.edit_model
             base64_image = base64.b64encode(image_bytes).decode("utf-8")
             img_url = f"data:image/jpeg;base64,{base64_image}"
 

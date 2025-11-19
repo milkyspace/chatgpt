@@ -58,14 +58,13 @@ class AppConfig(BaseModel):
     modes: tuple[str, ...] = ("assistant", "image", "editor", "celebrity_selfie")
 
     chat_model: str = field(default_factory=lambda: os.getenv("CHAT_MODEL", "gpt-4o"))
-    image_model: str = field(default_factory=lambda: os.getenv("IMAGE_MODEL", "qwen-image-edit"))
-    edit_model: str = field(default_factory=lambda: os.getenv("EDIT_MODEL", "qwen-image-edit"))
+    image_model: str = field(default_factory=lambda: os.getenv("IMAGE_MODEL", "gemini-2.5-flash-image-preview"))
 
     # Планы (легко менять)
     plans: dict[str, PlanConfig] = {
         "pro_lite": PlanConfig(
             code="pro_lite", title="Pro Lite", price_rub=499, duration_days=10,
-            max_requests=1000, max_image_generations=10, max_text_len=4000
+            max_requests=1000, max_image_generations=20, max_text_len=4000
         ),
         "pro_plus": PlanConfig(
             code="pro_plus", title="Pro Plus", price_rub=1290, duration_days=30,
