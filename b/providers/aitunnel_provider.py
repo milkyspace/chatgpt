@@ -233,7 +233,8 @@ class AITunnelImageProvider:
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                modalities=["image", "text"]
+                modalities=["image", "text"],
+                timeout=30
             )
 
             msg = response.choices[0].message
