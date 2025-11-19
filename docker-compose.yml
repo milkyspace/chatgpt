@@ -17,9 +17,9 @@ services:
 
     # ✔️ Правильный healthcheck для MariaDB
     healthcheck:
-      test: [ "CMD-SHELL", "mariadb-admin ping -uroot -p$MARIADB_ROOT_PASSWORD || exit 1" ]
+      test: [ "CMD-SHELL", "mariadb-admin ping --socket=/run/mysqld/mysqld.sock -uroot -p$MARIADB_ROOT_PASSWORD --silent" ]
       interval: 5s
-      timeout: 3s
+      timeout: 5s
       retries: 20
       start_period: 5s
 
