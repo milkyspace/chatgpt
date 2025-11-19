@@ -355,29 +355,13 @@ async def buy(cq: CallbackQuery):
 
 @router.message(F.photo)
 async def on_photo(m: TgMessage):
-    """
-    Принимаем фото. Работаем строго в on_photo, иначе нет доступа к photo_bytes.
-    """
 
+    # --- загружаем файл ---
     file_id = m.photo[-1].file_id
-
-    # определяем режим
-    async with AsyncSessionMaker() as session:
-        chat_sess = await session.scalar(
-            select(ChatSession).where(
-                ChatSession.user_id == m.from_user.id,
-                ChatSession.is_active == True
-            )
-        )
-        mode = chat_sess.mode if chat_sess else "assistant"
-
-        if not await can_spend_image(session, m.from_user.id):
-            await m.answer("❗ Лимит изображений исчерпан.")
-            return
-
-    # загружаем фото
     file = await m.bot.get_file(file_id)
     photo_bytes = await m.bot.download_file(file.file_path)
+
+    img_bytes = photo_bytes  # <-- ВАЖНО: без .read()
 
     img_service = ImageService()
 
@@ -417,37 +401,25 @@ async def on_photo(m: TgMessage):
     async def job():
         instruction = m.caption or "Улучшить изображение."
 
-        # универсальный редактор
-        if mode == "editor":
-            try:
-                new_img, err = await img_service.edit(photo_bytes.read(), instruction)
-            except Exception as e:
-                await progress_msg.edit_text(f"❗ Ошибка: {e}")
-                done_event.set()
+        try:
+            new_img, err = await img_service.edit(img_bytes, instruction)
+
+            if err:
+                await progress_msg.edit_text(f"❗ Ошибка: {err}")
                 return
 
+            tg_file = BufferedInputFile(new_img, filename="result.png")
+            await m.answer_photo(tg_file, caption="Готово! Режим: editor")
+
+            async with AsyncSessionMaker() as session:
+                await spend_image(session, m.from_user.id)
+
+        except Exception as e:
+            await progress_msg.edit_text(f"❗ Ошибка: {e}")
+
+        finally:
+            # <-- ВАЖНО: ВСЕГДА завершаем прогресс
             done_event.set()
-
-
-        elif mode == "celebrity_selfie":
-            name = m.caption or "Известная личность"
-            new_img, err = await img_service.celebrity_selfie(photo_bytes.read(), name)
-
-        else:
-            # fallback → просто улучшение
-            new_img, err = await img_service.edit(photo_bytes.read(), "Улучшить качество.")
-
-        done_event.set()
-
-        if err:
-            await progress_msg.edit_text(f"❗ Ошибка: {err}")
-            return
-
-        tg_file = BufferedInputFile(new_img, filename="result.png")
-        await m.answer_photo(tg_file, caption=f"Готово! Режим: {mode}")
-
-        async with AsyncSessionMaker() as session:
-            await spend_image(session, m.from_user.id)
 
     asyncio.create_task(progress_updater())
     await img_pool.submit(job)

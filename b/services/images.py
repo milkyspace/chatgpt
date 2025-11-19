@@ -15,29 +15,36 @@ class ImageService:
         self.client = AsyncOpenAI()
 
     async def edit(self, image_bytes: bytes, instruction: str):
-        b64 = base64.b64encode(image_bytes).decode()
-        data_url = f"data:image/jpeg;base64,{b64}"
+        try:
+            b64_image = base64.b64encode(image_bytes).decode()
+            data_url = f"data:image/jpeg;base64,{b64_image}"
 
-        resp = await self.client.responses.create(
-            model="gpt-4.1",
-            input=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": instruction},
-                        {"type": "input_image", "image_url": data_url},
-                    ],
-                }
-            ]
-        )
+            resp = await self.client.responses.create(
+                model="gpt-4.1",
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": instruction},
+                            {"type": "input_image", "image_url": data_url}
+                        ]
+                    }
+                ]
+            )
 
-        for msg in resp.output:
-            if msg["type"] == "message":
-                for c in msg["content"]:
+            # --- ВАЖНО: ПРАВИЛЬНЫЙ ПАРСИНГ ---
+            for block in resp.output:
+                if block["type"] != "message":
+                    continue
+
+                for c in block["content"]:
                     if c["type"] == "output_image":
                         return base64.b64decode(c["image"]["data"]), None
 
-        return None, "API не вернул изображение"
+            return None, "output_image не найден в ответе"
+
+        except Exception as e:
+            return None, f"OpenAI editing error: {e}"
 
     async def generate(self, prompt: str, provider="openai"):
         """Генерация нового изображения через Images API"""
