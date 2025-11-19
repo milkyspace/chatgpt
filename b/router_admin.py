@@ -297,7 +297,7 @@ async def admin_stats(cq: CallbackQuery):
         .where(User.referred_by != None)
         .where(func.date(User.created_at) == today)
     )
-    text += f"\n• Реферальных регистраций сегодня: <b>{ref_today}</b>"
+    text += f"\n• Реферальных регистраций сегодня: <b>{ref_today}</b>\n"
 
     for plan_code, count in plan_stats.items():
         plan = cfg.plans.get(plan_code)
