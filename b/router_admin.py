@@ -294,7 +294,7 @@ async def admin_stats(cq: CallbackQuery):
 
     ref_today = await session.scalar(
         select(func.count()).select_from(User)
-        .where(User.referrer_id != None)
+        .where(User.referred_by != None)
         .where(func.date(User.created_at) == today)
     )
     text += f"\n• Реферальных регистраций сегодня: <b>{ref_today}</b>"
