@@ -532,6 +532,7 @@ async def on_text(m: TgMessage):
             done_event.set()
 
             if err:
+                logger.error(f"❗ {err}")
                 await progress_msg.edit_text(f"❗ {err}")
                 return
 

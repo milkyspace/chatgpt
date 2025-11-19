@@ -5,9 +5,56 @@ import httpx
 import base64
 import logging
 import json
+from typing import Any, Optional
 from config import cfg
 
 logger = logging.getLogger(__name__)
+
+def extract_image_from_choices(choices: list[Any]) -> Optional[bytes]:
+    """
+    Универсальный парсер изображений из ответа AITunnel.
+
+    Args:
+        choices: response["choices"]
+
+    Returns:
+        Байты изображения или None
+    """
+    if not choices:
+        return None
+
+    msg = choices[0].get("message")
+    if not msg:
+        return None
+
+    images = msg.get("images")
+    if not images:
+        return None
+
+    img = images[0]
+
+    # 1) image_url: {"url": "data:image/..."} (как у OpenAI)
+    if isinstance(img, dict):
+        # Вариант: {"image_url": {"url": "..."}}
+        if "image_url" in img and isinstance(img["image_url"], dict):
+            url = img["image_url"].get("url")
+            if url and url.startswith("data:image"):
+                return base64.b64decode(url.split(",", 1)[1])
+
+        # Вариант: {"url": "data:image/..."}
+        if "url" in img:
+            url = img["url"]
+            if url and url.startswith("data:image"):
+                return base64.b64decode(url.split(",", 1)[1])
+
+        # Вариант: {"data": "<base64>"}
+        if "data" in img:
+            try:
+                return base64.b64decode(img["data"])
+            except Exception:
+                pass
+
+    return None
 
 class AITunnelChatProvider:
     """
@@ -136,69 +183,42 @@ class AITunnelImageProvider:
 
     async def generate(self, prompt: str, aspect_ratio: str = "1:1") -> bytes:
         """
-        Генерация изображения по текстовому описанию.
-
-        Args:
-            prompt: Текстовое описание изображения
-            aspect_ratio: Соотношение сторон изображения
-
-        Returns:
-            Байты сгенерированного изображения
+        Генерация изображения через AITunnel с универсальным разбором ответа.
         """
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                modalities=["image", "text"],
+                modalities=["image", "text"]
             )
 
-            # Извлекаем изображение из ответа
-            if (response.choices and
-                    response.choices[0].message.images and
-                    len(response.choices[0].message.images) > 0):
+            # !!! AITunnel возвращает обычный dict
+            data = response  # уже dict
 
-                image_data_url = response.choices[0].message.images[0].image_url.url
+            img_bytes = extract_image_from_choices(data.get("choices", []))
+            if img_bytes:
+                return img_bytes
 
-                # Декодируем base64 данные из data URL
-                if image_data_url.startswith("data:image"):
-                    base64_data = image_data_url.split(",", 1)[1]
-                    return base64.b64decode(base64_data)
-                else:
-                    raise ValueError("Неверный формат данных изображения")
-            else:
-                raise RuntimeError("Модель не вернула изображение")
+            raise RuntimeError("AITunnel не вернул изображение")
 
         except Exception as e:
             logger.error(f"Ошибка обработки generate: {e}")
-            print(f"AITUNNEL Image Generation Error: {e}")
             raise
 
     async def edit_image(self, image_bytes: bytes, instruction: str) -> bytes:
         """
-        Редактирование изображения по текстовой инструкции.
-
-        Args:
-            image_bytes: Байты исходного изображения
-            instruction: Инструкция для редактирования
-
-        Returns:
-            Байты отредактированного изображения
+        Редактирование изображения через AITunnel.
         """
         try:
-            # Кодируем изображение в base64
-            base64_image = base64.b64encode(image_bytes).decode('utf-8')
-            data_url = f"data:image/jpeg;base64,{base64_image}"
+            base64_image = base64.b64encode(image_bytes).decode("utf-8")
+            img_url = f"data:image/jpeg;base64,{base64_image}"
 
-            # Создаем мультимодальное сообщение
             messages = [
                 {
                     "role": "user",
                     "content": [
                         {"type": "text", "text": instruction},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": data_url, "detail": "high"}
-                        }
+                        {"type": "image_url", "image_url": {"url": img_url}}
                     ]
                 }
             ]
@@ -209,20 +229,15 @@ class AITunnelImageProvider:
                 modalities=["image", "text"]
             )
 
-            # Извлекаем отредактированное изображение
-            if (response.choices and
-                    response.choices[0].message.images and
-                    len(response.choices[0].message.images) > 0):
+            data = response
+            img_bytes = extract_image_from_choices(data.get("choices", []))
+            if img_bytes:
+                return img_bytes
 
-                image_data_url = response.choices[0].message.images[0].image_url.url
-                base64_data = image_data_url.split(",", 1)[1]
-                return base64.b64decode(base64_data)
-            else:
-                raise RuntimeError("Модель не вернула отредактированное изображение")
+            raise RuntimeError("AITunnel не вернул отредактированное изображение")
 
         except Exception as e:
             logger.error(f"Ошибка обработки edit_image: {e}")
-            print(f"AITUNNEL Image Edit Error: {e}")
             raise
 
     async def analyze_image(self, image_bytes: bytes, question: str) -> str:
