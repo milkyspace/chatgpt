@@ -61,19 +61,20 @@ async def _shutdown(bot):
 
 async def animate_panel_change(message, new_text: str, new_markup=None):
     """
-    Делает плавную анимацию смены текста:
-    - убирает старый текст
-    - затем плавно показывает новый
+    Плавное обновление текста без скачков.
+    Используем ZWJ и мини-переход, который Telegram
+    отрисовывает как мягкое изменение.
     """
     try:
-        # шаг 1: очистить
-        await message.edit_text("…")
-        await asyncio.sleep(0.05)
+        # Шаг 1: добавляем невидимый символ для запуска "перерисовки"
+        zwj_text = new_text + "\u2063"   # Zero-width joiner
+        await message.edit_text(zwj_text, reply_markup=new_markup)
+        await asyncio.sleep(0.03)
 
-        # шаг 2: показываем новый текст
+        # Шаг 2: финальный текст (ничего не скачет)
         await message.edit_text(new_text, reply_markup=new_markup)
+
     except Exception:
-        # На случай Telegram flood / race
         await message.edit_text(new_text, reply_markup=new_markup)
 
 def build_progress_bar(used: int, max_val: int | None, segments: int = 8) -> str:
