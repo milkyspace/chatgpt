@@ -87,7 +87,7 @@ class OpenAIImageProvider:
             response = self.clientSync.images.edit(
                 model="gpt-image-1",
                 image=image_bytes,
-                mask=None,  # type: ignore[arg-type]
+                mask=io.BytesIO(),
                 prompt=prompt,
                 size="auto",
                 n=1,
