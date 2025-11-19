@@ -372,7 +372,6 @@ async def on_photo(m: TgMessage):
         "🛠 Анализирую изображение…\n"
         "▰▱▱▱▱▱▱▱▱  0%"
     )
-    error_happened = False
 
     async def progress_updater():
         total = 9
@@ -399,6 +398,7 @@ async def on_photo(m: TgMessage):
             except Exception:
                 pass
 
+    error_happened = False
     async def job():
         instruction = m.caption or ""
         img_service = ImageService()
