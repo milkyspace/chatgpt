@@ -92,33 +92,75 @@ class NotificationService:
             user_id: int,
             result: SubscriptionUpgradeResult
     ):
-        """Подробное уведомление об апгрейде/даунгрейде."""
+        """
+        Подробное уведомление об апгрейде/даунгрейде.
+        Если подписки не было, или купили такой же тариф — расчёт не показываем.
+        """
         try:
-            old_name = result.old_plan.title if result.old_plan else "—"
-            new_name = result.new_plan.title
+            old_plan = result.old_plan       # может быть None
+            new_plan = result.new_plan
 
+            # -----------------------------
+            # 1. Не было подписки раньше
+            # -----------------------------
+            if old_plan is None:
+                msg = (
+                    "🎉 <b>Подписка активирована!</b>\n\n"
+                    f"Тариф: <b>{new_plan.title}</b>\n"
+                    f"Действует до: <b>{result.expires_at.strftime('%d.%m.%Y %H:%M')}</b>\n\n"
+                    "Спасибо, что выбрали нас ❤️"
+                )
+
+                await self.bot.send_message(user_id, msg, parse_mode="HTML")
+                return
+
+            # -----------------------------
+            # 2. Подписка была, но купили тот же тариф
+            # -----------------------------
+            if old_plan.code == new_plan.code:
+                msg = (
+                    "🎉 <b>Подписка обновлена!</b>\n\n"
+                    f"Вы продлили тариф <b>{new_plan.title}</b>.\n"
+                    f"Новая дата окончания: <b>{result.expires_at.strftime('%d.%m.%Y %H:%M')}</b>\n\n"
+                    "Спасибо, что остаётесь с нами! ❤️"
+                )
+
+                await self.bot.send_message(user_id, msg, parse_mode="HTML")
+                return
+
+            # -----------------------------
+            # 3. Настоящий апгрейд/даунгрейд → показываем расчёт
+            # -----------------------------
             msg = (
                 "🎉 <b>Подписка обновлена!</b>\n\n"
-                f"🔄 Переход: <b>{old_name} → {new_name}</b>\n\n"
-
+                f"🔄 <b>Переход:</b> {old_plan.title} → {new_plan.title}\n\n"
                 "📊 <b>Расчёт:</b>\n"
-                f"• Остаток старого тарифа → <b>{result.converted_days:.2f} дня</b>\n"
-                f"• Бонус за экономию запросов → <b>{result.bonus_days_req:.2f} дня</b>\n"
-                f"• Бонус за экономию изображений → <b>{result.bonus_days_img:.2f} дня</b>\n"
+                f"• Остаток → <b>{int(result.converted_days)} {self._plural_days(result.converted_days)}</b>\n"
+                f"• Бонус за запросы → <b>{int(result.bonus_days_req)} {self._plural_days(result.bonus_days_req)}</b>\n"
+                f"• Бонус за изображения → <b>{int(result.bonus_days_img)} {self._plural_days(result.bonus_days_img)}</b>\n"
                 "——————————\n"
-                f"📅 <b>Итого: +{result.total_days:.2f} дня</b>\n\n"
-                f"Новый срок действия подписки: <b>{result.expires_at.strftime('%d.%m.%Y %H:%M')}</b>\n\n"
-
+                f"📅 <b>Итого: +{int(result.total_days)} {self._plural_days(result.total_days)}</b>\n\n"
+                f"Новый срок действия: <b>{result.expires_at.strftime('%d.%m.%Y %H:%M')}</b>\n\n"
                 "Спасибо, что остаётесь с нами ❤️"
             )
 
-            await self.bot.send_message(
-                chat_id=user_id,
-                text=msg,
-                parse_mode="HTML"
-            )
+            await self.bot.send_message(user_id, msg, parse_mode="HTML")
 
         except Exception as e:
             import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Ошибка отправки upgrade-уведомления для {user_id}: {e}")
+            logging.getLogger(__name__).error(
+                f"Ошибка отправки upgrade-уведомления для {user_id}: {e}"
+            )
+
+
+    # ————————————————
+    #  Вспомогательная функция
+    # ————————————————
+    def _plural_days(self, n: float) -> str:
+        """Правильное склонение слова 'день'."""
+        n = int(n)
+        if n % 10 == 1 and n % 100 != 11:
+            return "день"
+        if 2 <= n % 10 <= 4 and not (12 <= n % 100 <= 14):
+            return "дня"
+        return "дней"
