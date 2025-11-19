@@ -363,7 +363,7 @@ async def on_photo(m: TgMessage):
     file = await m.bot.get_file(file_id)
     photo_bytes = await m.bot.download_file(file.file_path)
 
-    img_bytes = photo_bytes  # <-- ВАЖНО: без .read()
+    img_bytes = photo_bytes.getvalue()  # <-- ВАЖНО: без .read()
 
     img_service = ImageService()
 
