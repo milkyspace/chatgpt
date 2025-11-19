@@ -235,18 +235,14 @@ async def cmd_subscription(m: TgMessage):
 
 @router.message(Command("help"))
 async def cmd_help(m: TgMessage):
-    text = (
-        "ℹ️ <b>Помощь</b>\n\n"
-        "Команды:\n"
-        "• /start — главное меню\n"
-        "• /mode — выбор режима\n"
-        "• /subscription — информация о подписке\n"
-        "• /new — новый чат\n\n"
-        "Просто отправьте текст, и бот ответит вам 🤖"
+    fake_cq = CallbackQuery(
+        id="manual",
+        from_user=m.from_user,
+        chat_instance="manual",
+        message=m,
+        data="panel:help"
     )
-    await m.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")]
-    ]))
+    await panel_help(fake_cq)
 
 
 @router.message(Command("new"))
@@ -408,11 +404,7 @@ async def panel_help(cq: CallbackQuery):
         "👇 Выберите действие в меню ниже."
     )
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")]
-    ])
-
-    await cq.message.edit_text(text, reply_markup=kb)
+    await cq.message.edit_text(text, reply_markup=help_main_menu)
     await cq.answer()
 
 
@@ -974,15 +966,6 @@ async def panel_main(cq: CallbackQuery):
         )).scalars().first()
     me = await cq.bot.get_me()
     await cq.message.edit_text(status, reply_markup=top_panel(me.username, user_row.referral_code))
-    await cq.answer()
-
-# Меню "Помощь"
-@router.callback_query(F.data == "panel:help")
-async def help_main(cq: CallbackQuery):
-    await cq.message.edit_text(
-        "ℹ️ <b>Помощь и обучение</b>\n\nВыберите раздел:",
-        reply_markup=help_main_menu()
-    )
     await cq.answer()
 
 
