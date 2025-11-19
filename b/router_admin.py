@@ -35,7 +35,7 @@ router.callback_query.filter(admin_filter)
 class BroadcastStates(StatesGroup):
     waiting_for_broadcast_text = State()
 
-@router.message(Command("lookup"))
+@router.message(Command("lookup"), admin_filter)
 async def lookup_user(m: TgMessage):
     args = m.text.split(maxsplit=1)
     if len(args) < 2:
