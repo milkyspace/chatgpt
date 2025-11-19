@@ -33,17 +33,13 @@ def _zero_block(new_plan: PlanConfig) -> Dict[str, Any]:
     }
 
 
-def _calc_bonus_days(unused: int, max_limit: int, old_price: float, new_price: float) -> float:
+def _calc_bonus_days(unused: int, price_one_item_old: float, price_one_item_new: float) -> float:
     """
-    Общая формула бонусов:
-        (unused / max_limit) * old_price_rub  →  value_rub
-        value_rub / new_price_per_day        →  bonus_days
+    Общая формула бонусов
     """
-    if max_limit <= 0:
-        return 0
-    ratio = max(unused / max_limit, 0)
-    bonus_rub = ratio * old_price
-    return bonus_rub / new_price
+    price_old = unused * price_one_item_old
+    items = price_old/price_one_item_new
+    return items
 
 
 def _normalize_expires(sub: Optional[UserSubscription]):
@@ -72,12 +68,12 @@ def _calculate_conversion(
             "bonus_img": 0.0
         }
 
-    new_price = new_plan.price_rub / new_plan.duration_days
-    old_price = old_plan.price_rub / old_plan.duration_days
+    new_price = new_plan.price_rub / new_plan.duration_days # цена одного дня новая
+    old_price = old_plan.price_rub / old_plan.duration_days # цена одного дня старая
 
     # Конвертация остатка
-    leftover_rub = leftover_days * old_price
-    converted_days = leftover_rub / new_price
+    leftover_rub = leftover_days * old_price # цена остатка дней в старой подписке
+    converted_days = (new_plan.price_rub / leftover_rub) * 0.3
 
     bonus_req = 0.0
     bonus_img = 0.0
@@ -86,17 +82,17 @@ def _calculate_conversion(
         # запросы
         if old_plan.max_requests:
             unused = old_plan.max_requests - usage.used_requests
-            bonus_req = _calc_bonus_days(unused, old_plan.max_requests, old_plan.price_rub, new_price)
+            bonus_req = _calc_bonus_days(unused, old_plan.price_rub/old_plan.max_requests, new_plan.price_rub/new_plan.max_requests)
 
         # изображения
         if old_plan.max_image_generations:
             unused = old_plan.max_image_generations - usage.used_images
-            bonus_img = _calc_bonus_days(unused, old_plan.max_image_generations, old_plan.price_rub, new_price)
+            bonus_img = _calc_bonus_days(unused, old_plan.price_rub/old_plan.max_image_generations, new_plan.price_rub/new_plan.max_image_generations)
 
     return {
-        "converted": converted_days * 0.2,
-        "bonus_req": bonus_req * 0.1,
-        "bonus_img": bonus_img * 0.1
+        "converted": converted_days,
+        "bonus_req": bonus_req * 0.2,
+        "bonus_img": bonus_img * 0.2
     }
 
 
