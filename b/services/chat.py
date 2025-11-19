@@ -4,72 +4,56 @@ from providers.aitunnel_provider import AITunnelChatProvider
 
 
 class ChatService:
-    """
-    Сервис обработки сообщений через AITUNNEL с поддержкой потоковой передачи.
-    """
-
-    def __init__(self, provider: AITunnelChatProvider = None):
-        """
-        Инициализация сервиса чата.
-
-        Args:
-            provider: Провайдер чата (по умолчанию AITunnelChatProvider)
-        """
+    def __init__(self, provider=None):
         self.provider = provider or AITunnelChatProvider()
 
     async def handle_user_message(
-            self,
-            message: str,
-            bot,
-            chat_id: int,
-            system_prompt: str = "Ты полезный ассистент."
+        self,
+        message: str,
+        bot,
+        chat_id: int,
+        system_prompt: str = "Ты полезный ассистент."
     ) -> None:
-        """
-        Обработка пользовательского сообщения с потоковой передачей ответа.
 
-        Args:
-            message: Сообщение пользователя
-            bot: Экземпляр бота
-            chat_id: ID чата
-            system_prompt: Системный промпт
-        """
-        # Отправляем начальное сообщение
+        # начальное сообщение
         sent_message = await bot.send_message(chat_id, "🤔 Думаю…")
 
-        full_text = ""
-        last_sent_text = ""
+        buffer_text = ""
+        last_sent = ""
+        last_edit_time = 0
 
-        # Подготавливаем сообщения для модели
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": message}
+            {"role": "user", "content": message},
         ]
 
-        # Получаем потоковый ответ
         async for delta in self.provider.stream_chat(messages):
-            full_text += delta
+            buffer_text += delta
+            now = asyncio.get_event_loop().time()
 
-            # Обновляем сообщение только если текст изменился
-            if full_text != last_sent_text:
-                last_sent_text = full_text
+            # обновляем не чаще 1 раза в 0.3 сек
+            if now - last_edit_time >= 0.3:
+                last_edit_time = now
 
-                try:
-                    await bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=sent_message.message_id,
-                        text=f"💬 {full_text}"
-                    )
-                except Exception:
-                    # Игнорируем ошибки редактирования (MessageNotModified и др.)
-                    pass
+                if buffer_text != last_sent:
+                    try:
+                        await bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=sent_message.message_id,
+                            text=f"💬 {buffer_text}"
+                        )
+                        last_sent = buffer_text
+                    except Exception:
+                        # можно добавить логирование
+                        pass
 
-        # Финальное обновление для гарантии актуальности текста
-        if full_text != last_sent_text:
+        # финальное обновление
+        if buffer_text != last_sent:
             try:
                 await bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=sent_message.message_id,
-                    text=f"💬 {full_text}"
+                    text=f"💬 {buffer_text}"
                 )
             except Exception:
                 pass
