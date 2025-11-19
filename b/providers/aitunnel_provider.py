@@ -4,7 +4,6 @@ from openai import AsyncOpenAI
 import httpx
 import base64
 import logging
-import json
 from typing import Any, Optional
 from config import cfg
 
@@ -16,10 +15,14 @@ def extract_image_from_message(message: Any) -> Optional[bytes]:
     Работает с любым форматом AITunnel / OpenAI multimodal.
     """
 
+    logger.debug("message: %s", message)
+
     if message is None:
         return None
 
     content = getattr(message, "content", None)
+    logger.debug("content: %s", content)
+
 
     # --- Вариант 1: модель вернула строку: "data:image/png;base64,AAAA..."
     if isinstance(content, str) and content.startswith("data:image"):
