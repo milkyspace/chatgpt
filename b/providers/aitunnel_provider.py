@@ -219,6 +219,7 @@ class AITunnelImageProvider:
         Редактирование изображения по текстовой инструкции.
         """
         try:
+            self.model = cfg.edit_model
             base64_image = base64.b64encode(image_bytes).decode("utf-8")
             img_url = f"data:image/jpeg;base64,{base64_image}"
 
@@ -249,49 +250,6 @@ class AITunnelImageProvider:
         except Exception as e:
             logger.error(f"Ошибка обработки edit_image: {e}")
             raise
-
-    async def analyze_image(self, image_bytes: bytes, question: str) -> str:
-        """
-        Анализ изображения возвращает ТОЛЬКО текст.
-        """
-        try:
-            base64_image = base64.b64encode(image_bytes).decode("utf-8")
-            img_url = f"data:image/jpeg;base64,{base64_image}"
-
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": question},
-                        {"type": "image_url", "image_url": {"url": img_url}}
-                    ]
-                }
-            ]
-
-            response = await self.client.chat.completions.create(
-                model=cfg.chat_model,
-                messages=messages
-            )
-
-            return response.choices[0].message.content
-
-        except Exception as e:
-            logger.error(f"Ошибка анализа изображения: {e}")
-            raise
-
-    async def add_people(self, image_bytes: bytes, description: str) -> bytes:
-        """
-        Добавление людей на изображение.
-
-        Args:
-            image_bytes: Байты исходного изображения
-            description: Описание добавляемых людей
-
-        Returns:
-            Байты нового изображения
-        """
-        prompt = f"На основе исходного фото, добавь людей: {description}. Сохрани стиль и реалистичность."
-        return await self.edit_image(image_bytes, prompt)
 
     async def celebrity_selfie(self, image_bytes: bytes, celebrity_name: str, style: str = None) -> bytes:
         """

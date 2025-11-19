@@ -59,26 +59,6 @@ class ImageService:
         except Exception as e:
             return None, f"Ошибка редактирования изображения: {str(e)}"
 
-    async def analyze(
-            self,
-            image_bytes: bytes,
-            question: str
-    ) -> Tuple[Optional[str], Optional[str]]:
-        """
-        Анализ изображения с задаванием вопроса.
-
-        Args:
-            image_bytes: Изображение для анализа
-            question: Вопрос об изображении
-
-        Returns:
-            Кортеж (текстовый ответ, ошибка)
-        """
-        try:
-            analysis = await self.provider.analyze_image(image_bytes, question)
-            return analysis, None
-        except Exception as e:
-            return None, f"Ошибка анализа изображения: {str(e)}"
 
     async def celebrity_selfie(
             self,

@@ -366,8 +366,6 @@ async def on_photo(m: TgMessage):
     photo_bytes = await m.bot.download_file(file.file_path)
     img_bytes = photo_bytes.getvalue()
 
-    img_service = ImageService()
-
     # Прогресс-бар
     done_event = asyncio.Event()
     progress_msg = await m.answer(
@@ -417,14 +415,20 @@ async def on_photo(m: TgMessage):
                 mode = chat_session.mode if chat_session else "editor"
 
             if mode == "editor":
-                new_img, err = await img_service.edit(img_bytes, instruction)
-            elif mode == "analyze":
-                analysis, err = await img_service.analyze(img_bytes, instruction)
-                if not err:
-                    await m.answer(f"📊 Анализ изображения:\n{analysis}")
-                    done_event.set()
+                img_service = ImageService()
+                img, err = await img_service.edit(img_bytes, instruction)
+                done_event.set()
+
+                if err:
+                    logger.error(f"❗ {err}")
+                    await progress_msg.edit_text(f"❗ {err}")
                     return
+
+                # Отправляем результат
+                file = BufferedInputFile(img, filename="generated.png")
+                await m.answer_photo(file, caption="Готово! 🎨")
             else:
+                img_service = ImageService()
                 new_img, err = await img_service.edit(img_bytes, instruction)
 
             if err:
@@ -460,8 +464,6 @@ async def on_text(m: TgMessage):
     - assistant: потоковый чат
     - image: генерация изображения
     - editor: инструкции для редактирования
-    - analyze: анализ изображений (требует загрузки изображения)
-    - add_people: добавление людей
     - celebrity_selfie: селфи со знаменитостью
     """
 
