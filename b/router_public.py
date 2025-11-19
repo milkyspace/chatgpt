@@ -61,47 +61,111 @@ async def _shutdown(bot):
 
 
 async def _render_status_line(session, user_id: int) -> str:
+    """
+    Формирует статус пользователя:
+    - цветовой статус
+    - тариф
+    - дата окончания
+    - дни до окончания
+    - лимиты + прогресс-бары
+    - личный ID
+    """
+
+    # --- Загружаем сущности ---
     sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
     usage = await session.scalar(select(Usage).where(Usage.user_id == user_id))
-    now = datetime.now(timezone.utc)  # Исправлено: всегда используем UTC
+    user = await session.scalar(select(User).where(User.id == user_id))
 
-    expires_at = None
-    if sub and sub.expires_at:
-        # Приводим дату к UTC для корректного сравнения
-        expires_at = sub.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        else:
-            expires_at = expires_at.astimezone(timezone.utc)
+    now_utc = datetime.now(timezone.utc)
 
-    if not sub or not expires_at or expires_at <= now:
-        status = "🔴 Неактивна"
-        expires_str = "—"
-        plan_name = "Пробный период истёк" if (sub and sub.is_trial) else "Нет"
-        limits = "Запросы: 0 / Изображения: 0"
+    # Удобные значения
+    used_req = usage.used_requests if usage else 0
+    used_img = usage.used_images if usage else 0
+
+    # Базовые переменные
+    plan_name = "Нет"
+    expires_str = "—"
+    left_days_str = "—"
+
+    # Защита от отсутствия подписки
+    if not sub:
+        status_icon = "🔴"
+        status_text = "Неактивна"
+        limits_str = "Запросы: 0 / 0\nИзображения: 0 / 0"
+        progress_req = "░░░░░░░░░░ 0%"
+        progress_img = "░░░░░░░░░░ 0%"
     else:
-        plan_code = sub.plan_code or "trial"
-        plan_conf = cfg.plans.get(plan_code)
-        status = "🟢 Активна"
-        # Форматируем дату для отображения
-        expires_str = expires_at.astimezone().strftime("%d.%m.%Y %H:%M")
+        # Приводим дату
+        expires_at = sub.expires_at
+        if expires_at:
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            else:
+                expires_at = expires_at.astimezone(timezone.utc)
+
+        # Активность
+        is_active = expires_at and expires_at > now_utc
+
+        # --- Статус цвета ---
+        if not is_active:
+            status_icon = "🔴"
+            status_text = "Истекла"
+        else:
+            # Остаток дней
+            left_days = (expires_at - now_utc).days
+            if left_days <= 3:
+                status_icon = "🟡"
+                status_text = "Скоро заканчивается"
+            else:
+                status_icon = "🟢"
+                status_text = "Активна"
+
+            expires_str = expires_at.astimezone().strftime("%d.%m.%Y %H:%M")
+            left_days_str = f"{left_days}"
+
+        # --- Тариф ---
         if sub.is_trial:
             plan_name = "Trial"
-            max_req, max_img, _ = cfg.trial_max_requests, cfg.trial_max_images, 4000
+            max_req, max_img = cfg.trial_max_requests, cfg.trial_max_images
         else:
-            plan_name = plan_conf.title if plan_conf else plan_code
-            max_req = plan_conf.max_requests
-            max_img = plan_conf.max_image_generations
-        ur = usage.used_requests if usage else 0
-        ui = usage.used_images if usage else 0
-        limits = f"Запросы: {('∞' if max_req is None else f'{ur}/{max_req}')}, " \
-                 f"Изобр.: {('∞' if max_img is None else f'{ui}/{max_img}')}"
+            plan = cfg.plans.get(sub.plan_code)
+            plan_name = plan.title if plan else sub.plan_code
+            max_req = plan.max_requests
+            max_img = plan.max_image_generations
 
-    text = f"<b>Подписка:</b> {status}\n" \
-           f"<b>Тариф:</b> {plan_name}\n"
-    if expires_str:
-        text += f"<b>Действует до:</b> {expires_str}\n"
-        text += f"<b>Лимиты:</b> {limits}"
+        # --- Лимиты ---
+        def make_progress(used: int, max_val: int | None) -> tuple[str, str]:
+            """Возвращает прогресс-бар (10 сегментов) и процент."""
+            if max_val is None:
+                return ("██████████", "∞")
+            pct = min(100, int((used / max_val) * 100)) if max_val else 0
+            filled = pct * 10 // 100
+            bar = "█" * filled + "░" * (10 - filled)
+            return bar, f"{pct}%"
+
+        req_bar, req_pct = make_progress(used_req, max_req)
+        img_bar, img_pct = make_progress(used_img, max_img)
+
+        limits_str = (
+            f"Запросы: {used_req}/{max_req if max_req else '∞'}  ({req_pct})\n"
+            f"{req_bar}\n"
+            f"Изображения: {used_img}/{max_img if max_img else '∞'}  ({img_pct})\n"
+            f"{img_bar}"
+        )
+
+    # --- Формируем текст ---
+    text = (
+        f"📊 <b>Статус подписки</b>\n"
+        f"<b>Статус:</b> {status_icon} {status_text}\n"
+        f"<b>Тариф:</b> {plan_name}\n"
+        f"<b>Действует до:</b> {expires_str}\n"
+        f"<b>Осталось дней:</b> {left_days_str}\n"
+        f"\n"
+        f"📈 <b>Лимиты</b>\n"
+        f"{limits_str}\n"
+        f"\n"
+        f"🆔 <b>Ваш ID:</b> {user_id}"
+    )
 
     return text
 
@@ -242,7 +306,7 @@ async def panel_help(cq: CallbackQuery):
         "• /mode — выбрать режим\n"
         "• /subscription — информация о подписке\n"
         "• Просто отправьте текст — и получите ответ\n\n"
-        "Поддержка: @your_support_username"
+        "Поддержка: "  + cfg.support_username
     )
     await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")]

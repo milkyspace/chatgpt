@@ -23,6 +23,7 @@ class AppConfig(BaseModel):
     admins: List[int] = [os.getenv("ADMIN_IDS", "")]
     bot_token: str = os.getenv("BOT_TOKEN", "")
     admin_ids: set[int] = set(map(int, os.getenv("ADMIN_IDS", "0").split(","))) if os.getenv("ADMIN_IDS") else set()
+    support_username: str = os.getenv("SUPPORT_USERNAME", "")
 
     # DB
     db_url: str = os.getenv("DATABASE_URL", "mysql+aiomysql://root:password@mariadb:3306/ai_bot_db")
