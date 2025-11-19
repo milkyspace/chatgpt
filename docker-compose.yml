@@ -13,6 +13,11 @@ services:
       - "127.0.0.1:${MARIADB_PORT:-3306}:3306"
     volumes:
       - ./mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: [ "CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u${DB_USER} -p${DB_PASS} --silent" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   chatgpt_telegram_bot:
     container_name: chatgpt_telegram_bot
@@ -22,8 +27,9 @@ services:
     command: python3 b/bot.py
     restart: always
     env_file:
-      - .env
+      - config/config.env
     depends_on:
-      - mariadb
+      mariadb:
+        condition: service_healthy
     environment:
       - DATABASE_URL=mysql+aiomysql://${MARIADB_USER:-ai_bot}:${MARIADB_PASSWORD:-password}@mariadb:3306/${MARIADB_DATABASE:-ai_bot_db}
