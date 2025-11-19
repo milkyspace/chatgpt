@@ -455,7 +455,7 @@ async def on_photo(m: TgMessage):
                     return
 
                 new_img, err = await img_service.celebrity_selfie(
-                    img_bytes=img_bytes,
+                    image_bytes=img_bytes,
                     celebrity_name=celebrity_name,
                 )
 
