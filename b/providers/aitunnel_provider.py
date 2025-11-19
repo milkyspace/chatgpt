@@ -240,7 +240,7 @@ class AITunnelImageProvider:
             )
 
             msg = response.choices[0].message
-            img_bytes = extract_image_from_message(msg)
+            img_bytes = extract_image_from_ai_tunnel(msg)
 
             if img_bytes:
                 return img_bytes
