@@ -38,17 +38,29 @@ def trim_messages(tokens_est: int, messages: list[dict[str, str]], max_len: int)
     return list(reversed(out))
 
 async def get_subscription_button_text(session, user_id: int) -> str:
-    sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
-    now = datetime.now(timezone.utc)
+    sub = await session.scalar(
+        select(UserSubscription).where(UserSubscription.user_id == user_id)
+    )
+    now = datetime.now(timezone.utc)  # always aware
 
-    if not sub or not sub.expires_at or sub.expires_at <= now:
+    if not sub or not sub.expires_at:
         return "🔴 Подписка: неактивна"
 
-    # активная
     expires = sub.expires_at
+
+    # -------- FIX --------
+    # Приводим дату к offset-aware
     if expires.tzinfo is None:
         expires = expires.replace(tzinfo=timezone.utc)
+    else:
+        expires = expires.astimezone(timezone.utc)
+    # ----------------------
 
+    # если уже истекла
+    if expires <= now:
+        return "🔴 Подписка: неактивна"
+
+    # считаем дни
     days_left = (expires - now).days
 
     if days_left <= 3:
