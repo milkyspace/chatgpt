@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   mariadb:
     image: mariadb:latest
@@ -12,11 +14,14 @@ services:
       - "127.0.0.1:${MARIADB_PORT:-3306}:3306"
     volumes:
       - ./mariadb_data:/var/lib/mysql
+
+    # ✔️ Правильный healthcheck для MariaDB
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u${MARIADB_USER} -p${MARIADB_PASSWORD} --silent"]
-      interval: 5s
+      test: ["CMD", "mysqladmin", "ping", "-uroot", "-p${MARIADB_ROOT_PASSWORD}"]
+      interval: 10s         # проверять каждые 10 секунд
       timeout: 5s
-      retries: 10
+      retries: 30           # MariaDB иногда стартует 20–25 сек
+      start_period: 20s     # время на прогрев базы (очень важно!)
 
   chatgpt_telegram_bot:
     container_name: chatgpt_telegram_bot
@@ -27,8 +32,12 @@ services:
     restart: always
     env_file:
       - config/config.env
+
+    # Бот стартует только после healthcheck=healthy
     depends_on:
       mariadb:
         condition: service_healthy
+
     environment:
-      DATABASE_URL: "mysql+aiomysql://${MARIADB_USER:-ai_bot}:${MARIADB_PASSWORD:-password}@mariadb:3306/${MARIADB_DATABASE:-ai_bot_db}"
+      DATABASE_URL: >-
+        mysql+aiomysql://${MARIADB_USER:-ai_bot}:${MARIADB_PASSWORD:-password}@mariadb:3306/${MARIADB_DATABASE:-ai_bot_db}
