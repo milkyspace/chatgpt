@@ -32,7 +32,7 @@ from services.images import ImageService
 from services.subscriptions import ensure_user, get_limits
 from services.usage import can_spend_request, spend_request, can_spend_image, spend_image
 from services.subscriptions import has_active_subscription
-from utils import store_message, get_history, trim_messages, get_subscription_button_text
+from utils import get_subscription_button_text
 from providers.openai_provider import OpenAIImageProvider
 from aiogram.fsm.state import default_state
 from aiogram.fsm.context import FSMContext
