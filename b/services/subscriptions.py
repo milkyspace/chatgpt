@@ -53,6 +53,10 @@ def _normalize_expires(sub: Optional[UserSubscription]):
     return normalize_to_utc(sub.expires_at)
 
 
+BONUS_FACTOR = 0.3  # коэффициент прироста по лимитам
+BONUS_MAX = 0.3  # максимум +30% бонусов к конверсии
+
+
 def _calculate_conversion(
         old_plan: Optional[PlanConfig],
         new_plan: PlanConfig,
@@ -60,43 +64,58 @@ def _calculate_conversion(
         usage: Optional[Usage]
 ) -> Dict[str, float]:
     """
-    Единая функция конверсии:
-    - leftover → руб → converted_days
-    - bonus_req
-    - bonus_img
+    Честная модель:
+    - leftover_days конвертируется в рубли → в дни нового плана
+    - лимиты дают НЕ дни, а множитель к конверсии (до +30%)
     """
+
     if not old_plan:
         return {
             "converted": 0.0,
             "bonus_req": 0.0,
-            "bonus_img": 0.0
+            "bonus_img": 0.0,
+            "converted_final": 0.0
         }
 
-    new_price = new_plan.price_rub / new_plan.duration_days
-    old_price = old_plan.price_rub / old_plan.duration_days
+    # Стоимость дня старого/нового тарифов
+    old_price_per_day = old_plan.price_rub / old_plan.duration_days
+    new_price_per_day = new_plan.price_rub / new_plan.duration_days
 
-    # Конвертация остатка
-    leftover_rub = leftover_days * old_price
-    converted_days = leftover_rub / new_price
+    # 1) Чистая конвертация остатка
+    leftover_rub = leftover_days * old_price_per_day
+    converted_base = leftover_rub / new_price_per_day
 
-    bonus_req = 0.0
-    bonus_img = 0.0
+    # 2) Бонус за лимиты — множитель (максимум +30%)
+    unused_req_ratio = 0
+    unused_img_ratio = 0
 
     if usage:
         # запросы
         if old_plan.max_requests:
-            unused = old_plan.max_requests - usage.used_requests
-            bonus_req = _calc_bonus_days(unused, old_plan.max_requests, old_plan.price_rub, new_price)
+            unused_req = max(old_plan.max_requests - usage.used_requests, 0)
+            unused_req_ratio = unused_req / old_plan.max_requests
 
         # изображения
         if old_plan.max_image_generations:
-            unused = old_plan.max_image_generations - usage.used_images
-            bonus_img = _calc_bonus_days(unused, old_plan.max_image_generations, old_plan.price_rub, new_price)
+            unused_img = max(old_plan.max_image_generations - usage.used_images, 0)
+            unused_img_ratio = unused_img / old_plan.max_image_generations
+
+    # Среднее использование
+    avg_unused_ratio = (unused_req_ratio + unused_img_ratio) / 2
+    bonus_multiplier = 1 + min(avg_unused_ratio * BONUS_FACTOR, BONUS_MAX)
+
+    # Итоговая конвертация
+    converted_final = converted_base * bonus_multiplier
+
+    # Для UI всё равно выводим информацию раздельно
+    bonus_days_req = converted_base * min(unused_req_ratio * BONUS_FACTOR, BONUS_MAX)
+    bonus_days_img = converted_base * min(unused_img_ratio * BONUS_FACTOR, BONUS_MAX)
 
     return {
-        "converted": converted_days,
-        "bonus_req": bonus_req,
-        "bonus_img": bonus_img
+        "converted": converted_base,
+        "bonus_req": bonus_days_req,
+        "bonus_img": bonus_days_img,
+        "converted_final": converted_final
     }
 
 
@@ -231,7 +250,7 @@ async def activate_paid_plan(session: AsyncSession, user_id: int, new_code: str)
 
     conv = _calculate_conversion(old_plan, new_plan, leftover, usage)
 
-    total = new_plan.duration_days + conv["converted"] + conv["bonus_req"] + conv["bonus_img"]
+    total = new_plan.duration_days + conv["converted_final"]
     new_exp = now + timedelta(days=total)
 
     sub.plan_code = new_code
@@ -286,7 +305,7 @@ async def preview_plan_change(session: AsyncSession, user_id: int, new_plan_code
 
     conv = _calculate_conversion(old_plan, new_plan, leftover, usage)
 
-    final = new_plan.duration_days + conv["converted"] + conv["bonus_req"] + conv["bonus_img"]
+    final = new_plan.duration_days + conv["converted_final"]
 
     return {
         "old_plan": old_plan,
