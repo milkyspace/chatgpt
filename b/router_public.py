@@ -33,6 +33,7 @@ from services.subscriptions import ensure_user, get_limits
 from services.usage import can_spend_request, spend_request, can_spend_image, spend_image
 from services.subscriptions import has_active_subscription
 from utils import store_message, get_history, trim_messages
+from providers.openai_provider import OpenAIImageProvider
 
 router = Router()
 
@@ -478,12 +479,9 @@ async def on_text(m: TgMessage):
             await spend_request(session, user_id)
         return
 
-    # ---- Изображения ----
-    img_service = ImageService()
-
     # image — генерация изображения по тексту
     if mode == "image":
-
+        img_service = ImageService(OpenAIImageProvider())
         done_event = asyncio.Event()
 
         # начальное сообщение
