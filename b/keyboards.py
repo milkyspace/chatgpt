@@ -2,14 +2,6 @@ from __future__ import annotations
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from config import cfg
 
-def main_reply_keyboard(sub_text: str) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=sub_text)],
-        ],
-        resize_keyboard=True
-    )
-
 def subscriptions_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для выбора подписки"""
     return InlineKeyboardMarkup(inline_keyboard=[

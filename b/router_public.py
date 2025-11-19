@@ -9,15 +9,15 @@ from datetime import datetime, timezone
 from aiogram import Router, F
 from aiogram.types import BufferedInputFile
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message as TgMessage, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message as TgMessage, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select
 from sqlalchemy import update
-from aiogram.types import CallbackQuery, User, Chat
+from aiogram.types import CallbackQuery, User
 
 from config import cfg
 from db import AsyncSessionMaker
 from keyboards import plan_buy_keyboard
-from keyboards import top_panel, keyboards_for_modes, main_reply_keyboard
+from keyboards import top_panel, keyboards_for_modes
 from models import (
     User,
     ChatSession,
@@ -29,13 +29,9 @@ from payments.yoomoney import YooMoneyProvider
 from queue_bg import AsyncWorkerPool
 from services.chat import ChatService
 from services.images import ImageService
-from services.subscriptions import ensure_user, get_limits
-from services.usage import can_spend_request, spend_request, can_spend_image, spend_image
-from services.subscriptions import has_active_subscription
-from utils import get_subscription_button_text
-from providers.openai_provider import OpenAIImageProvider
+from services.subscriptions import ensure_user
+from services.usage import spend_request, can_spend_image, spend_image
 from aiogram.fsm.state import default_state
-from aiogram.fsm.context import FSMContext
 from aiogram.filters import StateFilter
 
 router = Router()
@@ -45,6 +41,7 @@ chat_pool = AsyncWorkerPool(cfg.workers_chat)
 img_pool = AsyncWorkerPool(cfg.workers_images)
 
 logger = logging.getLogger(__name__)
+
 
 @router.startup()
 async def _startup(bot):
@@ -59,6 +56,7 @@ async def _shutdown(bot):
     await chat_pool.stop()
     await img_pool.stop()
 
+
 async def animate_panel_change(message, new_text: str, new_markup=None):
     """
     Плавное обновление текста без скачков.
@@ -67,7 +65,7 @@ async def animate_panel_change(message, new_text: str, new_markup=None):
     """
     try:
         # Шаг 1: добавляем невидимый символ для запуска "перерисовки"
-        zwj_text = new_text + "\u2063"   # Zero-width joiner
+        zwj_text = new_text + "\u2063"  # Zero-width joiner
         await message.edit_text(zwj_text, reply_markup=new_markup)
         await asyncio.sleep(0.03)
 
@@ -76,6 +74,7 @@ async def animate_panel_change(message, new_text: str, new_markup=None):
 
     except Exception:
         await message.edit_text(new_text, reply_markup=new_markup)
+
 
 def build_progress_bar(used: int, max_val: int | None, segments: int = 8) -> str:
     """
@@ -108,6 +107,7 @@ def build_progress_bar(used: int, max_val: int | None, segments: int = 8) -> str
 
     bar = color * filled + "⬜️" * (segments - filled)
     return bar
+
 
 async def _render_status_line(session, user_id: int) -> str:
     """
@@ -215,17 +215,11 @@ async def start(m: TgMessage):
                                  m.from_user.first_name, m.from_user.last_name, ref_code)
 
         status_panel = await _render_status_line(session, m.from_user.id)
-        sub_btn_text = await get_subscription_button_text(session, m.from_user.id)
 
     me = await m.bot.get_me()
 
     await m.answer(
         status_panel,
-        reply_markup=main_reply_keyboard(sub_btn_text)
-    )
-
-    await m.answer(
-        "⬆️ Меню управления:",
         reply_markup=top_panel(me.username, user.referral_code)
     )
 
@@ -302,6 +296,7 @@ async def reply_subscription_status(m: TgMessage):
         status,
         reply_markup=top_panel(me.username, user.referral_code)
     )
+
 
 @router.callback_query(F.data == "panel:referral")
 async def panel_referral(cq: CallbackQuery):
@@ -396,14 +391,14 @@ async def panel_mode(cq: CallbackQuery):
 @router.callback_query(F.data == "panel:help")
 async def panel_help(cq: CallbackQuery):
     text = (
-        "ℹ️ <b>Помощь</b>\n\n"
-        "Доступные команды:\n"
-        "• /start — главное меню\n"
-        "• /new — новый чат\n"
-        "• /mode — выбрать режим\n"
-        "• /subscription — информация о подписке\n"
-        "• Просто отправьте текст — и получите ответ\n\n"
-        "Поддержка: "  + cfg.support_username
+            "ℹ️ <b>Помощь</b>\n\n"
+            "Доступные команды:\n"
+            "• /start — главное меню\n"
+            "• /new — новый чат\n"
+            "• /mode — выбрать режим\n"
+            "• /subscription — информация о подписке\n"
+            "• Просто отправьте текст — и получите ответ\n\n"
+            "Поддержка: " + cfg.support_username
     )
     await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")]
