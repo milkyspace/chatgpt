@@ -190,7 +190,7 @@ async def _render_status_line(session, user_id: int) -> str:
 
     # --- Финальный текст ---
     return (
-        "📊 <b>Подписка</b>\n"
+        "📊 <b>Подписка</b>\n\n"
         f"<b>Статус:</b> {status_icon} {status_text}\n"
         f"<b>Тариф:</b> {plan_name}\n"
         f"<b>Действует до:</b> {expires_str}\n"
