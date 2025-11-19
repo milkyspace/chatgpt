@@ -34,6 +34,9 @@ from services.usage import can_spend_request, spend_request, can_spend_image, sp
 from services.subscriptions import has_active_subscription
 from utils import store_message, get_history, trim_messages
 from providers.openai_provider import OpenAIImageProvider
+from aiogram.fsm.state import default_state
+from aiogram.fsm.context import FSMContext
+from aiogram.filters import StateFilter
 
 router = Router()
 
@@ -579,7 +582,7 @@ async def on_photo(m: TgMessage):
     await img_pool.submit(job)
 
 
-@router.message(F.text & ~F.via_bot)
+@router.message(StateFilter(default_state), F.text & ~F.via_bot)
 async def on_text(m: TgMessage):
     """
     Обработка текстовых запросов через AITUNNEL.
