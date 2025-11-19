@@ -217,23 +217,13 @@ class AITunnelImageProvider:
         """
         try:
             self.model = cfg.edit_model
-            base64_image = base64.b64encode(image_bytes).decode("utf-8")
-            img_url = f"data:image/jpeg;base64,{base64_image}"
+            # base64_image = base64.b64encode(image_bytes).decode("utf-8")
+            # img_url = f"data:image/jpeg;base64,{base64_image}"
 
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": instruction},
-                        {"type": "image_url", "image_url": {"url": img_url}}
-                    ]
-                }
-            ]
-
-            response = await self.client.chat.completions.create(
+            response = await self.client.images.edit(
                 model=self.model,
-                messages=messages,
-                modalities=["image", "text"],
+                image=image_bytes,
+                prompt=instruction,
                 timeout=30
             )
 
