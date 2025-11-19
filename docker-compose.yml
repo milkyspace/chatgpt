@@ -17,7 +17,7 @@ services:
 
     # ✔️ Правильный healthcheck для MariaDB
     healthcheck:
-      test: [ "CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/3306" ]
+      test: [ "CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u${MARIADB_USER} -p${MARIADB_PASSWORD} --silent" ]
       interval: 5s
       timeout: 5s
       retries: 10
