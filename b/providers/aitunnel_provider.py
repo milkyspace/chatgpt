@@ -201,9 +201,6 @@ class AITunnelImageProvider:
 
             msg = response.choices[0].message
 
-            logger.debug("AITunnel response.message.images = %r", getattr(msg, "images", None))
-            logger.debug("AITunnel response.message.content = %r", getattr(msg, "content", None))
-
             img_bytes = extract_image_from_ai_tunnel(msg)
             if img_bytes:
                 return img_bytes
@@ -269,4 +266,6 @@ class AITunnelImageProvider:
             f"{style or ''} Фотография должна выглядеть как настоящее селфи, "
             f"естественное освещение, высокое качество."
         )
+
+        logger.debug("instruction: %s", instruction)
         return await self.edit_image(image_bytes, instruction)
