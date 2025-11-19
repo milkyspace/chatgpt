@@ -35,7 +35,7 @@ router.callback_query.filter(admin_filter)
 class BroadcastStates(StatesGroup):
     waiting_for_broadcast_text = State()
 
-@router.message(Command("lookup"), admin_filter)
+@router.message(Command("lookup"))
 async def lookup_user(m: TgMessage):
     args = m.text.split(maxsplit=1)
     if len(args) < 2:
@@ -45,6 +45,7 @@ async def lookup_user(m: TgMessage):
     query = args[1].strip()
 
     async with AsyncSessionMaker() as session:
+        # Поиск пользователя
         if query.startswith("@"):
             username = query[1:].lower()
             user = await session.scalar(
@@ -62,29 +63,45 @@ async def lookup_user(m: TgMessage):
             await m.answer("❌ Пользователь не найден.")
             return
 
+        # Получаем подписку
         sub = await session.scalar(
-            select(UserSubscription)
-            .where(UserSubscription.user_id == user.id)
+            select(UserSubscription).where(UserSubscription.user_id == user.id)
         )
 
-    # Состояние подписки
-    if not sub or not sub.expires_at or sub.expires_at <= func.now():
+    # ===============================
+    #        БЕЗОПАСНАЯ ПРОВЕРКА ДАТЫ
+    # ===============================
+    now = datetime.now(timezone.utc)
+
+    if not sub or not sub.expires_at:
+        is_active = False
+    else:
+        expires_at = sub.expires_at
+        # Приведение даты к AWARE
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+        is_active = expires_at > now
+
+    # ===============================
+    #   ПОДГОТОВКА ДАННЫХ ДЛЯ ВЫВОДА
+    # ===============================
+    if not is_active:
         sub_status = "🔴 Не активна"
         sub_plan = "—"
         sub_expires = "—"
     else:
         sub_status = "🟢 Активна"
-        sub_plan = sub.plan_code
-        sub_expires = sub.expires_at.strftime("%d.%m.%Y %H:%M")
+        sub_plan = sub.plan_code or "—"
+        sub_expires = sub.expires_at.astimezone().strftime("%d.%m.%Y %H:%M")
 
     text = (
-        f"👤 <b>Карта пользователя</b>\n"
+        f"👤 <b>Карта пользователя</b>\n\n"
         f"<b>ID:</b> <code>{user.id}</code>\n"
         f"<b>Username:</b> @{user.username or '—'}\n"
         f"<b>Имя:</b> {user.first_name or ''} {user.last_name or ''}\n"
         f"<b>Регистрация:</b> {user.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-        f"<b>Реферер:</b> {user.referrer_id or '—'}\n"
-        f"\n"
+        f"<b>Реферер:</b> {user.referred_by or '—'}\n\n"
         f"💳 <b>Подписка</b>\n"
         f"<b>Статус:</b> {sub_status}\n"
         f"<b>Тариф:</b> {sub_plan}\n"
