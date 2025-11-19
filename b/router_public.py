@@ -327,6 +327,18 @@ async def cmd_admin(m: TgMessage):
 
 @router.callback_query(F.data == "panel:mode")
 async def panel_mode(cq: CallbackQuery):
+    user_id = cq.from_user.id
+
+    # получаем активный режим
+    async with AsyncSessionMaker() as session:
+        chat_session = await session.scalar(
+            select(ChatSession).where(
+                ChatSession.user_id == user_id,
+                ChatSession.is_active == True
+            )
+        )
+        active_mode = chat_session.mode if chat_session else "assistant"
+
     text = (
         "🎛 <b>Режимы работы</b>\n\n"
 
@@ -345,7 +357,7 @@ async def panel_mode(cq: CallbackQuery):
 
     await cq.message.edit_text(
         text,
-        reply_markup=keyboards_for_modes()
+        reply_markup=keyboards_for_modes(active_mode=active_mode)
     )
     await cq.answer()
 
@@ -410,7 +422,7 @@ async def switch_mode(cq: CallbackQuery):
             "Магическое добавление знаменитостей на ваше фото.\n\n"
             "<b>Как пользоваться:</b>\n"
             "Отправьте своё фото + имя звезды.\n"
-            "Пример: <i>«Селфи со Скарлетт Йоханссон»</i>"
+            "Пример: <i>«Скарлетт Йоханссон»</i>"
         ),
     }
 
