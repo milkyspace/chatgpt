@@ -372,16 +372,15 @@ async def on_photo(m: TgMessage):
         "🛠 Анализирую изображение…\n"
         "▰▱▱▱▱▱▱▱▱  0%"
     )
+    error_happened = False
 
     async def progress_updater():
-        """Обновление прогресс-бара"""
         total = 9
         progress = 0
 
         while not done_event.is_set():
-            await asyncio.sleep(0.4)
+            await asyncio.sleep(0.3)
             progress = min(progress + random.randint(1, 2), 85)
-
             filled = progress * total // 100
             bar = "▰" * filled + "▱" * (total - filled)
 
@@ -392,12 +391,13 @@ async def on_photo(m: TgMessage):
             except Exception:
                 pass
 
-        # Финальное обновление
-        try:
-            bar = "▰" * total
-            await progress_msg.edit_text(f"📸 Готово!\n{bar}  100%")
-        except Exception:
-            pass
+        # финальное обновление — ТОЛЬКО если не было ошибки
+        if not error_happened:
+            try:
+                bar = "▰" * total
+                await progress_msg.edit_text(f"📸 Готово!\n{bar}  100%")
+            except Exception:
+                pass
 
     async def job():
         instruction = m.caption or ""
@@ -419,6 +419,7 @@ async def on_photo(m: TgMessage):
                 celebrity_name = instruction.strip()
 
                 if not celebrity_name:
+                    error_happened = True
                     await progress_msg.edit_text("❗ Укажите имя знаменитости в подписи к фото.")
                     done_event.set()
                     return
@@ -427,6 +428,7 @@ async def on_photo(m: TgMessage):
                 done_event.set()
 
                 if err:
+                    error_happened = True
                     logger.error(f"Ошибка celebrity_selfie: {err}")
                     await progress_msg.edit_text(f"❗ {err}")
                     return
