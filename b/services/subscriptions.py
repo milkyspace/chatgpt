@@ -57,9 +57,8 @@ def _calculate_conversion(
 ) -> Dict[str, float]:
     """
     Единая функция конверсии:
-    - leftover → руб → converted_days
-    - bonus_req
-    - bonus_img
+    - leftover → конвертация стоимости (через price_per_day)
+    - бонусы считаются ТОЛЬКО если лимиты заданы (не None)
     """
     if not old_plan:
         return {
@@ -68,27 +67,38 @@ def _calculate_conversion(
             "bonus_img": 0.0
         }
 
-    new_price = new_plan.price_rub / new_plan.duration_days # цена одного дня новая
-    old_price = old_plan.price_rub / old_plan.duration_days # цена одного дня старая
+    new_price = new_plan.price_rub / new_plan.duration_days
+    old_price = old_plan.price_rub / old_plan.duration_days
 
-    # Конвертация остатка
-    leftover_rub = leftover_days * old_price # цена остатка дней в старой подписке
-    converted_days = (new_plan.price_rub / leftover_rub) * 0.3
+    # --- Основная конвертация ---
+    leftover_rub = leftover_days * old_price
+    converted_days = leftover_rub / new_price
 
+    # --- Бонусы ---
     bonus_req = 0.0
     bonus_img = 0.0
 
     if usage:
-        # запросы
-        if old_plan.max_requests:
-            unused = old_plan.max_requests - usage.used_requests
-            bonus_req = _calc_bonus_days(unused, old_plan.price_rub/old_plan.max_requests, new_plan.price_rub/new_plan.max_requests)
 
-        # изображения
-        if old_plan.max_image_generations:
-            unused = old_plan.max_image_generations - usage.used_images
-            bonus_img = _calc_bonus_days(unused, old_plan.price_rub/old_plan.max_image_generations, new_plan.price_rub/new_plan.max_image_generations)
+        # ---- Запросы ----
+        if old_plan.max_requests and new_plan.max_requests:
+            unused = max(old_plan.max_requests - usage.used_requests, 0)
 
+            price_item_old = old_plan.price_rub / old_plan.max_requests
+            price_item_new = new_plan.price_rub / new_plan.max_requests
+
+            bonus_req = _calc_bonus_days(unused, price_item_old, price_item_new)
+
+        # ---- Изображения ----
+        if old_plan.max_image_generations and new_plan.max_image_generations:
+            unused = max(old_plan.max_image_generations - usage.used_images, 0)
+
+            price_item_old = old_plan.price_rub / old_plan.max_image_generations
+            price_item_new = new_plan.price_rub / new_plan.max_image_generations
+
+            bonus_img = _calc_bonus_days(unused, price_item_old, price_item_new)
+
+    # Немного уменьшим бонусы, чтобы не было слишком жирно
     return {
         "converted": converted_days,
         "bonus_req": bonus_req * 0.2,
