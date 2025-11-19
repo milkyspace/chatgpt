@@ -55,7 +55,7 @@ class AppConfig(BaseModel):
     referral_bonus_days: int = 5
 
     # Разрешенные режимы
-    modes: tuple[str, ...] = ("assistant", "image", "editor", "celebrity_selfie", "add_people")
+    modes: tuple[str, ...] = ("assistant", "image", "editor", "celebrity_selfie")
 
     chat_model: str = field(default_factory=lambda: os.getenv("CHAT_MODEL", "gpt-4o"))
     image_model: str = field(default_factory=lambda: os.getenv("IMAGE_MODEL", "gemini-2.5-flash-image-preview"))

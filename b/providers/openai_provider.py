@@ -112,10 +112,6 @@ class OpenAIImageProvider:
             print(f"OpenAI API Error: {e}")
             raise
 
-    async def add_people(self, image_bytes: bytes, description: str) -> bytes:
-        prompt = f"На основе исходного фото, добавь людей: {description}. Сохрани стиль и реалистичность."
-        return await self.generate(prompt)
-
     async def celebrity_selfie(self, image_bytes: bytes, celebrity_name: str, style: str | None = None) -> bytes:
         # Для DALL-E нам нужно создать новый промпт, так как он не принимает исходное изображение
         prompt = f"Реалистичное селфи двух людей. Один выглядит как {celebrity_name}, второй - обычный человек. {style or ''} Фотография должна выглядеть как настоящее селфи, естественное освещение, высокое качество."

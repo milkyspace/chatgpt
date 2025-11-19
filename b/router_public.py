@@ -400,11 +400,11 @@ async def on_photo(m: TgMessage):
             pass
 
     async def job():
-        """Основная задача обработки изображения"""
-        instruction = m.caption or "Улучшить изображение."
+        instruction = m.caption or ""
+        img_service = ImageService()
 
         try:
-            # Определяем режим обработки на основе текущего чата
+            # определяем режим
             async with AsyncSessionMaker() as session:
                 chat_session = await session.scalar(
                     select(ChatSession).where(
@@ -414,35 +414,60 @@ async def on_photo(m: TgMessage):
                 )
                 mode = chat_session.mode if chat_session else "editor"
 
-            if mode == "editor":
-                img_service = ImageService()
-                img, err = await img_service.edit(img_bytes, instruction)
+            # --- CELEBRITY SELFIE ---
+            if mode == "celebrity_selfie":
+                celebrity_name = instruction.strip()
+
+                if not celebrity_name:
+                    await progress_msg.edit_text("❗ Укажите имя знаменитости в подписи к фото.")
+                    done_event.set()
+                    return
+
+                result_img, err = await img_service.celebrity_selfie(img_bytes, celebrity_name)
                 done_event.set()
 
                 if err:
-                    logger.error(f"❗ {err}")
+                    logger.error(f"Ошибка celebrity_selfie: {err}")
                     await progress_msg.edit_text(f"❗ {err}")
                     return
 
-                # Отправляем результат
-                file = BufferedInputFile(img, filename="generated.png")
-                await m.answer_photo(file, caption="Готово! 🎨")
-            else:
-                img_service = ImageService()
-                new_img, err = await img_service.edit(img_bytes, instruction)
+                await m.answer_photo(
+                    BufferedInputFile(result_img, filename="celebrity_selfie.png"),
+                    caption=f"Готово! 📸 Ваше селфи с {celebrity_name}"
+                )
 
-            if err:
-                logger.error(f"Ошибка обработки изображения: {err}")
-                await progress_msg.edit_text(f"❗ {err}")
+                async with AsyncSessionMaker() as session:
+                    await spend_image(session, m.from_user.id)
+
                 return
 
-            # Списание использования
-            async with AsyncSessionMaker() as session:
-                await spend_image(session, m.from_user.id)
+            # --- EDITOR (дефолт) ---
+            if mode == "editor":
+                result_img, err = await img_service.edit(img_bytes, instruction)
+                done_event.set()
+
+                if err:
+                    logger.error(f"Ошибка редактора: {err}")
+                    await progress_msg.edit_text(f"❗ {err}")
+                    return
+
+                await m.answer_photo(
+                    BufferedInputFile(result_img, filename="edited.png"),
+                    caption="Готово! ✨"
+                )
+
+                async with AsyncSessionMaker() as session:
+                    await spend_image(session, m.from_user.id)
+
+                return
+
+            # если режим неизвестен
+            await progress_msg.edit_text("❗ Этот режим ещё не реализован.")
+            done_event.set()
 
         except Exception as e:
             logger.error(f"Критическая ошибка: {e}")
-            await progress_msg.edit_text(f"❗ Произошла ошибка: {str(e)}")
+            await progress_msg.edit_text(f"❗ Произошла ошибка: {e}")
         finally:
             done_event.set()
 
@@ -481,7 +506,7 @@ async def on_text(m: TgMessage):
         mode = chat_session.mode if chat_session else "assistant"
 
         # Проверяем лимиты для режимов изображений
-        is_image_mode = mode in ("image", "editor", "add_people", "celebrity_selfie")
+        is_image_mode = mode in ("image", "editor", "celebrity_selfie")
         if is_image_mode and not await can_spend_image(session, user_id):
             await m.answer("❗ Лимит изображений исчерпан. Оформите подписку или дождитесь продления.")
             return

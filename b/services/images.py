@@ -89,24 +89,3 @@ class ImageService:
             return img_bytes, None
         except Exception as e:
             return None, f"Ошибка создания селфи: {str(e)}"
-
-    async def add_people(
-            self,
-            image_bytes: bytes,
-            description: str
-    ) -> Tuple[Optional[bytes], Optional[str]]:
-        """
-        Добавление людей на изображение.
-
-        Args:
-            image_bytes: Исходное изображение
-            description: Описание добавляемых людей
-
-        Returns:
-            Кортеж (байты изображения, ошибка)
-        """
-        try:
-            img_bytes = await self.provider.add_people(image_bytes, description)
-            return img_bytes, None
-        except Exception as e:
-            return None, f"Ошибка добавления людей: {str(e)}"
