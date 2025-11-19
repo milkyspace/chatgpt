@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message as TgMessage, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import func
-from sqlalchemy import select, update
+from sqlalchemy import select
 import asyncio
 import logging
 
 from config import cfg
 from db import AsyncSessionMaker
 from keyboards import admin_menu, admin_back_keyboard, broadcast_segments_keyboard, grant_plan_keyboard
-from models import Payment, User, UserSubscription
+from models import Payment, User, UserSubscription, ChatSession, Message
 from payments.yoomoney import YooMoneyProvider
 from services.subscriptions import activate_paid_plan
 from services.auth import is_admin
@@ -462,10 +462,39 @@ async def process_broadcast_text(m: TgMessage, state: FSMContext):
                 )).scalars().all()
 
             elif segment == "inactive3":
-                users = (await session.execute(
-                    select(User)
-                    .where(User.last_message_at < func.now() - func.cast("3 days", INTERVAL))
-                )).scalars().all()
+                three_days_ago = datetime.now(timezone.utc) - timedelta(days=3)
+
+                last_message_subq = (
+                    select(
+                        Message.session_id,
+                        func.max(Message.created_at).label("last_msg")
+                    )
+                    .group_by(Message.session_id)
+                    .subquery()
+                )
+
+                # join с chat_sessions → получаем user_id
+                user_last_msg_subq = (
+                    select(
+                        ChatSession.user_id,
+                        func.max(last_message_subq.c.last_msg).label("last_msg")
+                    )
+                    .join(last_message_subq, last_message_subq.c.session_id == ChatSession.id)
+                    .group_by(ChatSession.user_id)
+                    .subquery()
+                )
+
+                # Выборка:
+                users = (
+                    await session.execute(
+                        select(User)
+                        .outerjoin(user_last_msg_subq, user_last_msg_subq.c.user_id == User.id)
+                        .where(
+                            (user_last_msg_subq.c.last_msg == None) |
+                            (user_last_msg_subq.c.last_msg < three_days_ago)
+                        )
+                    )
+                ).scalars().all()
 
             elif segment == "admins":
                 users = (await session.execute(
