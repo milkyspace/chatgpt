@@ -2,6 +2,7 @@ from __future__ import annotations
 from aiogram import Bot
 from datetime import datetime
 from services.subscriptions import SubscriptionUpgradeResult
+from tools.utils import format_days_hours
 
 class NotificationService:
     """Сервис для отправки уведомлений пользователям"""
@@ -135,11 +136,11 @@ class NotificationService:
                 "🎉 <b>Подписка обновлена!</b>\n\n"
                 f"🔄 <b>Переход:</b> {old_plan.title} → {new_plan.title}\n\n"
                 "📊 <b>Расчёт:</b>\n"
-                f"• Остаток → <b>{int(result.converted_days)} {self._plural_days(result.converted_days)}</b>\n"
-                f"• Бонус за запросы → <b>{int(result.bonus_days_req)} {self._plural_days(result.bonus_days_req)}</b>\n"
-                f"• Бонус за изображения → <b>{int(result.bonus_days_img)} {self._plural_days(result.bonus_days_img)}</b>\n"
+                f"• Остаток → <b>{format_days_hours(result.converted_days)}</b>\n"
+                f"• Бонус за запросы → <b>{format_days_hours(result.bonus_days_req)}</b>\n"
+                f"• Бонус за изображения → <b>{format_days_hours(result.bonus_days_img)}</b>\n"
                 "——————————\n"
-                f"📅 <b>Итого: +{int(result.total_days)} {self._plural_days(result.total_days)}</b>\n\n"
+                f"📅 <b>Итого: +{format_days_hours(result.total_days)}</b>\n\n"
                 f"Новый срок действия: <b>{result.expires_at.strftime('%d.%m.%Y %H:%M')}</b>\n\n"
                 "Спасибо, что остаётесь с нами ❤️"
             )
@@ -151,16 +152,3 @@ class NotificationService:
             logging.getLogger(__name__).error(
                 f"Ошибка отправки upgrade-уведомления для {user_id}: {e}"
             )
-
-
-    # ————————————————
-    #  Вспомогательная функция
-    # ————————————————
-    def _plural_days(self, n: float) -> str:
-        """Правильное склонение слова 'день'."""
-        n = int(n)
-        if n % 10 == 1 and n % 100 != 11:
-            return "день"
-        if 2 <= n % 10 <= 4 and not (12 <= n % 100 <= 14):
-            return "дня"
-        return "дней"

@@ -16,7 +16,7 @@ from aiogram.types import CallbackQuery, User
 
 from config import cfg
 from db import AsyncSessionMaker
-from keyboards import top_panel, keyboards_for_modes, help_main_menu, plan_buy_keyboard, help_back_kb
+from keyboards import top_panel, keyboards_for_modes, help_main_menu, help_back_kb
 from models import (
     User,
     ChatSession,
@@ -30,6 +30,7 @@ from services.chat import ChatService
 from services.images import ImageService
 from services.subscriptions import ensure_user, preview_plan_change
 from services.usage import spend_request, can_spend_image, spend_image
+from tools.utils import format_days_hours
 from aiogram.fsm.state import default_state
 from aiogram.filters import StateFilter
 
@@ -522,18 +523,6 @@ async def show_subs(cq: CallbackQuery, is_edit: bool = True):
 
 
 # ============================
-#  ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ
-# ============================
-def plural_days(n: int) -> str:
-    n = abs(int(n))
-    if n % 10 == 1 and n % 100 != 11:
-        return f"{n} день"
-    if 2 <= n % 10 <= 4 and not (12 <= n % 100 <= 14):
-        return f"{n} дня"
-    return f"{n} дней"
-
-
-# ============================
 #  ОСНОВНОЙ ОБРАБОТЧИК /buy
 # ============================
 @router.callback_query(F.data.startswith("buy:"))
@@ -563,11 +552,11 @@ async def buy(cq: CallbackQuery):
     # --- Извлекаем данные ---
     old_plan_title = preview["old_plan"].title if preview["old_plan"] else "Нет"
 
-    leftover = int(preview["leftover_days"])
-    converted = int(preview["converted_days"])
-    bonus_req = int(preview["bonus_days_req"])
-    bonus_img = int(preview["bonus_days_img"])
-    final_days = int(preview["final_days"])
+    leftover = format_days_hours(preview["leftover_days"])
+    converted = format_days_hours(preview["converted_days"])
+    bonus_req = format_days_hours(preview["bonus_days_req"])
+    bonus_img = format_days_hours(preview["bonus_days_img"])
+    final_days = format_days_hours(preview["final_days"])
 
     # --- Шаг 1: мини-загрузка ---
     loading_msg = await cq.message.edit_text("⏳ Выполняем расчёт…")
@@ -581,11 +570,11 @@ async def buy(cq: CallbackQuery):
     analysis_text = (
         "🔍 <b>Анализ вашей подписки</b>\n\n"
         f"📦 <b>Текущий тариф:</b> {old_plan_title}\n"
-        f"📉 <b>Остаток:</b> {plural_days(leftover)}\n"
-        f"🔄 <b>Конвертация:</b> +{plural_days(converted)}\n"
-        f"⚡ <b>Бонус за запросы:</b> +{plural_days(bonus_req)}\n"
-        f"🖼 <b>Бонус за изображения:</b> +{plural_days(bonus_img)}\n\n"
-        f"📈 <b>Итог:</b> {plural_days(final_days)} по тарифу <b>{plan.title}</b>"
+        f"📉 <b>Остаток:</b> {leftover}\n"
+        f"🔄 <b>Конвертация:</b> +{converted}\n"
+        f"⚡ <b>Бонус за запросы:</b> +{bonus_req}\n"
+        f"🖼 <b>Бонус за изображения:</b> +{bonus_img}\n\n"
+        f"📈 <b>Итог:</b> {final_days} по тарифу <b>{plan.title}</b>"
     )
 
     await loading_msg.edit_text(
