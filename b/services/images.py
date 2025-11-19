@@ -16,32 +16,15 @@ class ImageService:
 
     async def edit(self, image_bytes: bytes, instruction: str):
         try:
-            b64_image = base64.b64encode(image_bytes).decode()
-            data_url = f"data:image/jpeg;base64,{b64_image}"
-
-            resp = await self.client.responses.create(
-                model="gpt-4.1-vision",  # <-- ВАЖНО! НЕ gpt-4.1
-                input=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "input_text", "text": instruction},
-                            {"type": "input_image", "image_url": data_url},
-                        ],
-                    }
-                ],
+            resp = await self.client.images.edits(
+                model="gpt-image-1",
+                prompt=instruction,
+                image=image_bytes,
+                size="1024x1024",
+                response_format="b64_json",
             )
 
-            # ---- Правильный парсинг ----
-            for block in resp.output:
-                if block.type != "message":
-                    continue
-
-                for item in block.content:
-                    if item.type == "output_image":
-                        return base64.b64decode(item.image.data), None
-
-            return None, "output_image не найден"
+            return base64.b64decode(resp.data[0].b64_json), None
 
         except Exception as e:
             return None, f"OpenAI editing error: {e}"
