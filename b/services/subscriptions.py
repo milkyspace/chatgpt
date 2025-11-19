@@ -43,7 +43,7 @@ def _calc_bonus_days(unused: int, max_limit: int, old_price: float, new_price: f
         return 0
     ratio = max(unused / max_limit, 0)
     bonus_rub = ratio * old_price
-    return (bonus_rub / new_price) * 0.3
+    return bonus_rub / new_price
 
 
 def _normalize_expires(sub: Optional[UserSubscription]):
