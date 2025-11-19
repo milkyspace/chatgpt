@@ -3,6 +3,7 @@ from typing import Sequence, AsyncGenerator
 from openai import AsyncOpenAI, OpenAI
 from config import cfg
 import httpx
+import io
 
 
 class OpenAIChatProvider:
