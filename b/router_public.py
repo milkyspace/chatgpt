@@ -358,75 +358,95 @@ async def buy(cq: CallbackQuery):
 
 @router.message(F.photo)
 async def on_photo(m: TgMessage):
+    """Обработка фотографий с анализом и редактированием через AITUNNEL"""
 
-    # --- загружаем файл ---
+    # Загружаем файл
     file_id = m.photo[-1].file_id
     file = await m.bot.get_file(file_id)
     photo_bytes = await m.bot.download_file(file.file_path)
-
-    img_bytes = photo_bytes.getvalue()  # <-- ВАЖНО: без .read()
+    img_bytes = photo_bytes.getvalue()
 
     img_service = ImageService()
 
-    # ---------- ПРОГРЕСС ----------
+    # Прогресс-бар
     done_event = asyncio.Event()
-
     progress_msg = await m.answer(
-        "🛠 Обрабатываю изображение…\n"
+        "🛠 Анализирую изображение…\n"
         "▰▱▱▱▱▱▱▱▱  0%"
     )
 
     async def progress_updater():
+        """Обновление прогресс-бара"""
         total = 9
-        prog = 0
+        progress = 0
+
         while not done_event.is_set():
             await asyncio.sleep(0.4)
-            prog = min(prog + random.randint(1, 2), 85)
+            progress = min(progress + random.randint(1, 2), 85)
 
-            filled = prog * total // 100
+            filled = progress * total // 100
             bar = "▰" * filled + "▱" * (total - filled)
 
             try:
                 await progress_msg.edit_text(
-                    f"🛠 Обрабатываю изображение…\n{bar}  {prog}%"
+                    f"🛠 Обрабатываю изображение…\n{bar}  {progress}%"
                 )
-            except:
+            except Exception:
                 pass
 
-        # финал
-        bar = "▰" * total
+        # Финальное обновление
         try:
+            bar = "▰" * total
             await progress_msg.edit_text(f"📸 Готово!\n{bar}  100%")
-        except:
+        except Exception:
             pass
 
-    # ---------- ОСНОВНАЯ ЛОГИКА ----------
     async def job():
+        """Основная задача обработки изображения"""
         instruction = m.caption or "Улучшить изображение."
 
         try:
-            new_img, err = await img_service.edit(img_bytes, instruction)
+            # Определяем режим обработки на основе текущего чата
+            async with AsyncSessionMaker() as session:
+                chat_session = await session.scalar(
+                    select(ChatSession).where(
+                        ChatSession.user_id == m.from_user.id,
+                        ChatSession.is_active == True
+                    )
+                )
+                mode = chat_session.mode if chat_session else "editor"
+
+            if mode == "editor":
+                new_img, err = await img_service.edit(img_bytes, instruction)
+            elif mode == "analyze":
+                analysis, err = await img_service.analyze(img_bytes, instruction)
+                if not err:
+                    await m.answer(f"📊 Анализ изображения:\n{analysis}")
+                    done_event.set()
+                    return
+            else:
+                new_img, err = await img_service.edit(img_bytes, instruction)
 
             if err:
-                logger.error(f"❗ Ошибка: {err}")
-                await progress_msg.edit_text(f"❗ Ошибка: {err}")
+                logger.error(f"Ошибка обработки изображения: {err}")
+                await progress_msg.edit_text(f"❗ {err}")
                 return
 
+            # Отправляем результат
             tg_file = BufferedInputFile(new_img, filename="result.png")
-            await m.answer_photo(tg_file, caption="Готово! Режим: editor")
+            await m.answer_photo(tg_file, caption="Готово! ✅")
 
+            # Списание использования
             async with AsyncSessionMaker() as session:
                 await spend_image(session, m.from_user.id)
 
         except Exception as e:
-            logger.error(f"❗ Ошибка: {e}")
-            await progress_msg.edit_text(f"❗ Ошибка: {e}")
-            return
-
+            logger.error(f"Критическая ошибка: {e}")
+            await progress_msg.edit_text(f"❗ Произошла ошибка: {str(e)}")
         finally:
-            # <-- ВАЖНО: ВСЕГДА завершаем прогресс
             done_event.set()
 
+    # Запускаем задачи
     asyncio.create_task(progress_updater())
     await img_pool.submit(job)
 
@@ -434,14 +454,15 @@ async def on_photo(m: TgMessage):
 @router.message(F.text & ~F.via_bot)
 async def on_text(m: TgMessage):
     """
-    Обрабатывает текстовые запросы в зависимости от текущего режима чата.
+    Обработка текстовых запросов через AITUNNEL.
 
     Режимы:
-    - assistant: потоковый чат с GPT
-    - image: генерация изображения по тексту
-    - editor: правка изображения на основе текстовой инструкции (без фото)
-    - add_people: генерация изображения с добавлением людей
-    - celebrity_selfie: создание селфи с селебой
+    - assistant: потоковый чат
+    - image: генерация изображения
+    - editor: инструкции для редактирования
+    - analyze: анализ изображений (требует загрузки изображения)
+    - add_people: добавление людей
+    - celebrity_selfie: селфи со знаменитостью
     """
 
     # Игнорируем команды
@@ -461,17 +482,13 @@ async def on_text(m: TgMessage):
         )
         mode = chat_session.mode if chat_session else "assistant"
 
-        # Получаем лимиты
-        max_req, max_img, max_text_len = await get_limits(session, user_id)
-
-        # Проверка лимитов только для режимов-изображений
+        # Проверяем лимиты для режимов изображений
         is_image_mode = mode in ("image", "editor", "add_people", "celebrity_selfie")
-        if is_image_mode:
-            if not await can_spend_image(session, user_id):
-                await m.answer("❗ Лимит изображений исчерпан. Оформите подписку или дождитесь продления.")
-                return
+        if is_image_mode and not await can_spend_image(session, user_id):
+            await m.answer("❗ Лимит изображений исчерпан. Оформите подписку или дождитесь продления.")
+            return
 
-    # Режим assistant → GPT-текст
+    # Режим assistant - чат с GPT
     if mode == "assistant":
         chat_service = ChatService()
         await chat_service.handle_user_message(text, m.bot, m.chat.id)
@@ -479,69 +496,59 @@ async def on_text(m: TgMessage):
             await spend_request(session, user_id)
         return
 
-    # image — генерация изображения по тексту
+    # Режим image - генерация изображения
     if mode == "image":
-        img_service = ImageService(OpenAIImageProvider())
+        img_service = ImageService()
         done_event = asyncio.Event()
 
-        # начальное сообщение
-        progress_msg = await m.answer(
-            "🎨 Генерирую изображение…\n"
-            "▰▱▱▱▱▱▱▱▱  0%"
-        )
+        progress_msg = await m.answer("🎨 Генерирую изображение…\n▰▱▱▱▱▱▱▱▱  0%")
 
         async def progress_updater():
+            """Обновление прогресс-бара для генерации"""
             total_blocks = 9
             progress = 0
 
             while not done_event.is_set():
                 await asyncio.sleep(0.3)
                 progress = min(progress + random.randint(1, 2), 85)
-
                 bar = "▰" * (progress * total_blocks // 100)
                 bar += "▱" * (total_blocks - len(bar))
 
                 try:
-                    await progress_msg.edit_text(f"🛠 Обрабатываю изображение…\n{bar}  {progress}%")
-                except:
+                    await progress_msg.edit_text(f"🎨 Генерирую изображение…\n{bar}  {progress}%")
+                except Exception:
                     pass
 
-            # финальное обновление
+            # Финальное обновление
             try:
                 bar = "▰" * total_blocks
                 await progress_msg.edit_text(f"📸 Готово!\n{bar}  100%")
-            except:
+            except Exception:
                 pass
 
         async def generate_job():
+            """Задача генерации изображения"""
             img, err = await img_service.generate(text)
-            done_event.set()  # останов прогресса
+            done_event.set()
 
             if err:
-                await progress_msg.edit_text(f"❗ Ошибка: {err}")
+                await progress_msg.edit_text(f"❗ {err}")
                 return
 
+            # Отправляем результат
             file = BufferedInputFile(img, filename="generated.png")
-            await m.answer_photo(file, caption="Готово!")
+            await m.answer_photo(file, caption="Готово! 🎨")
 
+            # Списание использования
             async with AsyncSessionMaker() as session:
                 await spend_image(session, user_id)
 
         asyncio.create_task(progress_updater())
         await img_pool.submit(generate_job)
-
         return
 
-    # editor — создаём изображение с текстовой инструкцией
-    if mode == "editor":
-        return
-
-    # celebrity_selfie — селфи с селебой по тексту
-    if mode == "celebrity_selfie":
-        return
-
-    # fallback
-    await m.answer(f"⚙️ Режим '{mode}' пока недоступен для текстовых запросов.")
+    # Другие режимы требуют загрузки изображения
+    await m.answer(f"⚙️ Для режима '{mode}' необходимо загрузить изображение. Отправьте фото с текстовой инструкцией.")
 
 
 @router.callback_query(F.data == "chat:new")

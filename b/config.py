@@ -1,4 +1,5 @@
 from __future__ import annotations
+from dataclasses import dataclass, field
 
 from typing import List
 
@@ -29,6 +30,10 @@ class AppConfig(BaseModel):
     # OpenAI
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_api_base: str | None = os.getenv("OPENAI_API_BASE")
+
+    # AITUNNEL API настройки
+    aitunnel_api_key: str = field(default_factory=lambda: os.getenv("AITUNNEL_API_KEY", ""))
+    aitunnel_api_base: str = field(default_factory=lambda: os.getenv("AITUNNEL_API_BASE", "https://api.aitunnel.ru/v1"))
 
     # Платежи (YooMoney/ЮKassa)
     payment_check_interval_min: float = float(os.getenv("PAYMENT_CHECK_INTERVAL_MIN", "1"))
