@@ -20,9 +20,13 @@ class PlanConfig(BaseModel):
 
 class AppConfig(BaseModel):
     # Telegram
-    admins: List[int] = [os.getenv("ADMIN_IDS", "")]
+    admins: List[int] = field(default_factory=lambda: [
+        int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x
+    ])
     bot_token: str = os.getenv("BOT_TOKEN", "")
-    admin_ids: set[int] = set(map(int, os.getenv("ADMIN_IDS", "0").split(","))) if os.getenv("ADMIN_IDS") else set()
+    admin_ids: set[int] = field(default_factory=lambda: {
+        int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x
+    })
     support_username: str = os.getenv("SUPPORT_USERNAME", "")
 
     # DB
@@ -33,8 +37,8 @@ class AppConfig(BaseModel):
     openai_api_base: str | None = os.getenv("OPENAI_API_BASE")
 
     # AITUNNEL API настройки
-    aitunnel_api_key: str = field(default_factory=lambda: os.getenv("AITUNNEL_API_KEY", ""))
-    aitunnel_api_base: str = field(default_factory=lambda: os.getenv("AITUNNEL_API_BASE", "https://api.aitunnel.ru/v1"))
+    aitunnel_api_key: str = os.getenv("AITUNNEL_API_KEY", "")
+    aitunnel_api_base: str = os.getenv("AITUNNEL_API_BASE", "https://api.aitunnel.ru/v1")
 
     # Платежи (YooMoney/ЮKassa)
     payment_check_interval_min: float = float(os.getenv("PAYMENT_CHECK_INTERVAL_MIN", "1"))

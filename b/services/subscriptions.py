@@ -71,51 +71,103 @@ async def get_limits(session: AsyncSession, user_id: int) -> tuple[int | None, i
     return (plan.max_requests, plan.max_image_generations, plan.max_text_len)
 
 
-async def activate_paid_plan(session: AsyncSession, user_id: int, plan_code: str) -> UserSubscription:
+async def activate_paid_plan(session: AsyncSession, user_id: int, new_code: str) -> UserSubscription:
     """
-    Активация платного плана (вызывается после оплаты).
-    Продлевает время и сбрасывает usage.
-
-    Args:
-        session: Асинхронная сессия БД
-        user_id: ID пользователя
-        plan_code: Код плана
-
-    Returns:
-        UserSubscription: Обновленная подписка
+    Модель 4 (вариант А):
+    - конвертация оставшихся дней → в дни нового тарифа
+    - конвертация неиспользованных лимитов → в дни нового тарифа
+    - затем начинается новый период нового тарифа
     """
-    sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
+
     now = datetime.now(timezone.utc)
+    new_plan = cfg.plans[new_code]
+    new_price_per_day = new_plan.price_rub / new_plan.duration_days
 
+    # Текущая подписка
+    sub = await session.scalar(
+        select(UserSubscription)
+        .where(UserSubscription.user_id == user_id)
+    )
+
+    # Usage
+    usage = await session.scalar(select(Usage).where(Usage.user_id == user_id))
+
+    # Если нет подписки (trial или пусто)
     if not sub:
-        sub = UserSubscription(user_id=user_id)
+        sub = UserSubscription(
+            user_id=user_id,
+            plan_code=new_code,
+            is_trial=False,
+            expires_at=now + timedelta(days=new_plan.duration_days)
+        )
         session.add(sub)
 
-    plan = cfg.plans[plan_code]
+        # сброс лимитов
+        if usage:
+            usage.used_requests = 0
+            usage.used_images = 0
 
-    # Приводим expires_at к UTC для корректного сравнения
-    if sub.expires_at:
-        expires_at = sub.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        else:
-            expires_at = expires_at.astimezone(timezone.utc)
+        await session.commit()
+        return sub
 
-        if expires_at > now:
-            sub.expires_at = expires_at + timedelta(days=plan.duration_days)
-        else:
-            sub.expires_at = now + timedelta(days=plan.duration_days)
-    else:
-        sub.expires_at = now + timedelta(days=plan.duration_days)
+    # ================================
+    # 1. Остаток дней старого тарифа
+    # ================================
+    leftover_days_converted = 0.0
 
-    sub.plan_code = plan_code
+    if sub.expires_at and sub.expires_at > now and sub.plan_code:
+        old_plan = cfg.plans.get(sub.plan_code)
+
+        if old_plan:
+            old_price_per_day = old_plan.price_rub / old_plan.duration_days
+            leftover_days = (sub.expires_at - now).total_seconds() / 86400.0
+            leftover_value_rub = leftover_days * old_price_per_day
+            leftover_days_converted = leftover_value_rub / new_price_per_day
+
+    # ============================================
+    # 2. Конвертация неиспользованных лимитов в дни
+    # ============================================
+
+    bonus_days_req = 0.0
+    bonus_days_img = 0.0
+
+    if usage and sub.plan_code:
+        old_plan = cfg.plans.get(sub.plan_code)
+
+        if old_plan:
+            # запросы
+            max_req_old = old_plan.max_requests
+            if max_req_old > 0:
+                unused_req = max(max_req_old - usage.used_requests, 0)
+                unused_ratio_req = unused_req / max_req_old
+                bonus_days_req = unused_ratio_req * new_plan.duration_days
+
+            # изображения
+            max_img_old = old_plan.max_image_generations
+            if max_img_old > 0:
+                unused_img = max(max_img_old - usage.used_images, 0)
+                unused_ratio_img = unused_img / max_img_old
+                bonus_days_img = unused_ratio_img * new_plan.duration_days
+
+    # ==========================
+    # 3. Общие дни новой подписки
+    # ==========================
+
+    total_days = (
+        new_plan.duration_days +
+        leftover_days_converted +
+        bonus_days_req +
+        bonus_days_img
+    )
+
+    sub.plan_code = new_code
     sub.is_trial = False
+    sub.expires_at = now + timedelta(days=total_days)
 
-    # Сброс usage под новый период
-    usage = await session.scalar(select(Usage).where(Usage.user_id == user_id))
+    # сброс лимитов
     if usage:
         usage.used_requests = 0
         usage.used_images = 0
 
     await session.commit()
-    return sub  # Возвращаем подписку для использования в уведомлениях
+    return sub
