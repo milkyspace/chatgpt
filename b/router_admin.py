@@ -35,9 +35,13 @@ router.callback_query.filter(admin_filter)
 class BroadcastStates(StatesGroup):
     waiting_for_broadcast_text = State()
 
+class LookupStates(StatesGroup):
+    waiting_for_query = State()
+
 @router.message(Command("lookup"))
 async def lookup_user(m: TgMessage):
     args = m.text.split(maxsplit=1)
+
     if len(args) < 2:
         await m.answer("❗ Укажите TG ID или @username\nПример: /lookup 123456789")
         return
@@ -45,7 +49,6 @@ async def lookup_user(m: TgMessage):
     query = args[1].strip()
 
     async with AsyncSessionMaker() as session:
-        # Поиск пользователя
         if query.startswith("@"):
             username = query[1:].lower()
             user = await session.scalar(
@@ -53,39 +56,50 @@ async def lookup_user(m: TgMessage):
             )
         else:
             try:
-                tg_id = int(query)
+                user_id = int(query)
             except ValueError:
-                await m.answer("❗ Укажите корректный TG ID")
+                await m.answer("❗ Неверный TG ID")
                 return
-            user = await session.get(User, tg_id)
+            user = await session.get(User, user_id)
+
+    if not user:
+        await m.answer("❌ Пользователь не найден.")
+        return
+
+    await show_lookup_card(m, user.id)
+
+@router.callback_query(F.data.startswith("lookup:"))
+async def lookup_back(cq: CallbackQuery):
+    user_id = int(cq.data.split(":")[1])
+
+    # просто вызываем lookup_user как ФУНКЦИЮ, без Message
+    await show_lookup_card(cq.message, user_id)
+
+    await cq.answer()
+
+async def show_lookup_card(target_message: TgMessage, user_id: int):
+    async with AsyncSessionMaker() as session:
+        user = await session.get(User, user_id)
 
         if not user:
-            await m.answer("❌ Пользователь не найден.")
+            await target_message.edit_text("❌ Пользователь не найден.")
             return
 
-        # Получаем подписку
         sub = await session.scalar(
             select(UserSubscription).where(UserSubscription.user_id == user.id)
         )
 
-    # ===============================
-    #        БЕЗОПАСНАЯ ПРОВЕРКА ДАТЫ
-    # ===============================
     now = datetime.now(timezone.utc)
 
+    # === проверка подписки безопасно ===
     if not sub or not sub.expires_at:
         is_active = False
     else:
-        expires_at = sub.expires_at
-        # Приведение даты к AWARE
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        expires = sub.expires_at
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        is_active = expires > now
 
-        is_active = expires_at > now
-
-    # ===============================
-    #   ПОДГОТОВКА ДАННЫХ ДЛЯ ВЫВОДА
-    # ===============================
     if not is_active:
         sub_status = "🔴 Не активна"
         sub_plan = "—"
@@ -95,6 +109,7 @@ async def lookup_user(m: TgMessage):
         sub_plan = sub.plan_code or "—"
         sub_expires = sub.expires_at.astimezone().strftime("%d.%m.%Y %H:%M")
 
+    # === текст карточки ===
     text = (
         f"👤 <b>Карта пользователя</b>\n\n"
         f"<b>ID:</b> <code>{user.id}</code>\n"
@@ -109,13 +124,61 @@ async def lookup_user(m: TgMessage):
     )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⛔ Забанить", callback_data=f"user:ban:{user.id}")],
-        [InlineKeyboardButton(text="♻ Разбанить", callback_data=f"user:unban:{user.id}")],
-        [InlineKeyboardButton(text="🌟 Выдать подписку", callback_data=f"user:grant:{user.id}")],
+        [InlineKeyboardButton(text="⛔ Забанить", callback_data=f"user:ban:{user_id}")],
+        [InlineKeyboardButton(text="♻ Разбанить", callback_data=f"user:unban:{user_id}")],
+        [InlineKeyboardButton(text="🌟 Выдать подписку", callback_data=f"user:grant:{user_id}")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin:main")],
     ])
 
-    await m.answer(text, reply_markup=kb)
+    # ключевой момент: мы не меняем Message; мы редактируем текст
+    await target_message.edit_text(text, reply_markup=kb)
+
+async def lookup_render(target_message: TgMessage, query: str):
+    async with AsyncSessionMaker() as session:
+        if query.startswith("@"):
+            username = query[1:].lower()
+            user = await session.scalar(
+                select(User).where(func.lower(User.username) == username)
+            )
+        else:
+            try:
+                tg_id = int(query)
+            except ValueError:
+                await target_message.edit_text("❗ Неверный TG ID", reply_markup=admin_back_keyboard())
+                return
+            user = await session.get(User, tg_id)
+
+        if not user:
+            await target_message.edit_text("❌ Пользователь не найден.", reply_markup=admin_back_keyboard())
+            return
+
+    # Показываем карточку
+    await show_lookup_card(target_message, user.id)
+
+@router.callback_query(F.data == "admin:lookup")
+async def admin_lookup_start(cq: CallbackQuery, state: FSMContext):
+    await state.set_state(LookupStates.waiting_for_query)
+
+    await cq.message.edit_text(
+        "🔍 <b>Проверка пользователя</b>\n\n"
+        "Введите TG ID или @username:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin:main")]
+        ])
+    )
+    await cq.answer()
+
+@router.message(LookupStates.waiting_for_query)
+async def admin_lookup_process(m: TgMessage, state: FSMContext):
+    query = m.text.strip()
+
+    # Завершаем FSM
+    await state.clear()
+
+    # Создаём "виртуальное" сообщение, чтобы редактировать ответ в том же чате
+    sent = await m.answer("⏳ Ищу пользователя…")
+
+    await lookup_render(sent, query)
 
 @router.callback_query(F.data.startswith("user:ban:"))
 async def user_ban(cq: CallbackQuery):

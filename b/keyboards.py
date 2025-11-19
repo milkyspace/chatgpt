@@ -2,6 +2,7 @@ from __future__ import annotations
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from config import cfg
 
+
 def subscriptions_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для выбора подписки"""
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -14,6 +15,7 @@ def subscriptions_keyboard() -> InlineKeyboardMarkup:
 def admin_menu() -> InlineKeyboardMarkup:
     """Главное меню админ-панели"""
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔍 Проверить пользователя", callback_data="admin:lookup"),],
         [InlineKeyboardButton(text="👤 Пользователи", callback_data="admin:users"),
          InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")],
         [InlineKeyboardButton(text="💳 Платежи", callback_data="admin:payments"),
@@ -92,6 +94,7 @@ def grant_plan_keyboard(user_id: int):
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
+
 def help_main_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💬 Возможности бота", callback_data="help:features")],
@@ -101,6 +104,7 @@ def help_main_menu():
         [InlineKeyboardButton(text="🆘 Поддержка", callback_data="help:support")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")],
     ])
+
 
 def help_back_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
