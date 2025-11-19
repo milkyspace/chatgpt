@@ -404,7 +404,7 @@ async def panel_help(cq: CallbackQuery):
         "👇 Выберите действие в меню ниже."
     )
 
-    await cq.message.edit_text(text, reply_markup=help_main_menu)
+    await cq.message.edit_text(text, reply_markup=help_main_menu())
     await cq.answer()
 
 
