@@ -114,15 +114,23 @@ async def _render_status_line(session, user_id: int) -> str:
     Улучшенный статус подписки:
     - цветовой статус (зел/жел/кр)
     - тариф
-    - оставшиеся дни
-    - лимиты + прогресс бары (20 сег)
+    - оставшееся время (дни + часы)
+    - лимиты + прогресс бары
     - личный ID
     """
 
+    from tools.utils import format_days_hours
+
     # --- Загружаем ---
-    sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
-    usage = await session.scalar(select(Usage).where(Usage.user_id == user_id))
-    user = await session.scalar(select(User).where(User.id == user_id))
+    sub = await session.scalar(
+        select(UserSubscription).where(UserSubscription.user_id == user_id)
+    )
+    usage = await session.scalar(
+        select(Usage).where(Usage.user_id == user_id)
+    )
+    user = await session.scalar(
+        select(User).where(User.id == user_id)
+    )
 
     now = datetime.now(timezone.utc)
 
@@ -133,13 +141,16 @@ async def _render_status_line(session, user_id: int) -> str:
     status_icon = "🔴"
     status_text = "Неактивна"
     expires_str = "—"
-    days_left_str = "—"
+    time_left_str = "—"
     plan_name = "Нет"
     max_req = 0
     max_img = 0
 
+    # Если есть подписка
     if sub:
         expires_at = sub.expires_at
+
+        # нормализация tz
         if expires_at:
             if expires_at.tzinfo is None:
                 expires_at = expires_at.replace(tzinfo=timezone.utc)
@@ -147,13 +158,16 @@ async def _render_status_line(session, user_id: int) -> str:
 
         # Активна?
         if expires_at and expires_at > now:
-            # Days left
-            days_left = (expires_at - now).days
-            days_left_str = str(days_left)
+            delta = expires_at - now
+
+            # float-дни
+            days_float = delta.total_seconds() / 86400.0
+            time_left_str = format_days_hours(days_float)
+
             expires_str = expires_at.astimezone().strftime("%d.%m.%Y %H:%M")
 
             # Цветовая индикация
-            if days_left <= 3:
+            if delta.days < 3:
                 status_icon = "🟡"
                 status_text = "Скоро заканчивается"
             else:
@@ -170,6 +184,7 @@ async def _render_status_line(session, user_id: int) -> str:
                 plan_name = plan.title if plan else sub.plan_code
                 max_req = plan.max_requests
                 max_img = plan.max_image_generations
+
         else:
             status_icon = "🔴"
             status_text = "Истекла"
@@ -178,7 +193,6 @@ async def _render_status_line(session, user_id: int) -> str:
     req_bar = build_progress_bar(used_req, max_req)
     img_bar = build_progress_bar(used_img, max_img)
 
-    # Значения для лимитов
     def fmt(v):
         return "∞" if v is None else v
 
@@ -195,7 +209,7 @@ async def _render_status_line(session, user_id: int) -> str:
         f"<b>Статус:</b> {status_icon} {status_text}\n"
         f"<b>Тариф:</b> {plan_name}\n"
         f"<b>Действует до:</b> {expires_str}\n"
-        f"<b>Осталось дней:</b> {days_left_str}\n"
+        f"<b>Осталось:</b> {time_left_str}\n"
         "\n"
         "📈 <b>Лимиты</b>\n"
         f"{limits_text}\n"
