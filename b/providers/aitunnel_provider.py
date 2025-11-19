@@ -173,7 +173,7 @@ class AITunnelChatProvider:
 class AITunnelImageProvider:
     """
     Провайдер для работы с изображениями через AITUNNEL.
-    Поддерживает генерацию, редактирование и анализ изображений.
+    Поддерживает генерацию и редактирование.
     """
 
     def __init__(self, model: str = None):
