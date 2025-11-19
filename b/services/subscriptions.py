@@ -13,12 +13,12 @@ from tools.utils import normalize_to_utc, format_days_hours
 
 
 async def ensure_user(
-    session: AsyncSession,
-    tg_user_id: int,
-    username: str | None,
-    first_name: str | None,
-    last_name: str | None,
-    referred_by_code: str | None = None,
+        session: AsyncSession,
+        tg_user_id: int,
+        username: str | None,
+        first_name: str | None,
+        last_name: str | None,
+        referred_by_code: str | None = None,
 ) -> User:
     """Создаёт пользователя, подписку trial и usage при первом входе."""
     user = await session.scalar(select(User).where(User.id == tg_user_id))
@@ -113,21 +113,21 @@ class SubscriptionUpgradeResult:
     """
     old_plan: PlanConfig | None
     new_plan: PlanConfig
-    leftover_days: float          # сколько условно "осталось" по старому тарифу (по времени)
-    converted_days: float         # сколько дней новой подписки даёт конвертация остатка
-    bonus_days_req: float         # "вклад" неиспользованных запросов в эти дни
-    bonus_days_img: float         # "вклад" неиспользованных изображений
-    total_days: float             # общий срок действия новой подписки (в днях)
-    expires_at: datetime          # новая дата окончания
+    leftover_days: float  # сколько условно "осталось" по старому тарифу (по времени)
+    converted_days: float  # сколько дней новой подписки даёт конвертация остатка
+    bonus_days_req: float  # "вклад" неиспользованных запросов в эти дни
+    bonus_days_img: float  # "вклад" неиспользованных изображений
+    total_days: float  # общий срок действия новой подписки (в днях)
+    expires_at: datetime  # новая дата окончания
 
 
 def _compute_plan_change_preview(
-    *,
-    old_plan: PlanConfig | None,
-    expires_at: datetime | None,
-    usage: Usage | None,
-    new_plan: PlanConfig,
-    now: datetime,
+        *,
+        old_plan: PlanConfig | None,
+        expires_at: datetime | None,
+        usage: Usage | None,
+        new_plan: PlanConfig,
+        now: datetime,
 ) -> SubscriptionUpgradeResult:
     """
     Честный финансовый пересчёт подписки.
@@ -310,6 +310,7 @@ async def activate_paid_plan(session: AsyncSession, user_id: int, new_code: str)
         return SubscriptionUpgradeResult(
             old_plan=None,
             new_plan=new_plan,
+            leftover_days=0,
             converted_days=0,
             bonus_days_req=0,
             bonus_days_img=0,
@@ -363,6 +364,7 @@ async def activate_paid_plan(session: AsyncSession, user_id: int, new_code: str)
     return SubscriptionUpgradeResult(
         old_plan=old_plan,
         new_plan=new_plan,
+        leftover_days=leftover_days,
         converted_days=converted_days,
         bonus_days_req=bonus_req,
         bonus_days_img=bonus_img,
