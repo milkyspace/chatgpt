@@ -407,6 +407,7 @@ async def on_photo(m: TgMessage):
             new_img, err = await img_service.edit(img_bytes, instruction)
 
             if err:
+                logger.error(f"❗ Ошибка: {err}")
                 await progress_msg.edit_text(f"❗ Ошибка: {err}")
                 return
 
@@ -418,7 +419,6 @@ async def on_photo(m: TgMessage):
 
         except Exception as e:
             logger.error(f"❗ Ошибка: {e}")
-            print(f"❗ Ошибка: {e}")
             await progress_msg.edit_text(f"❗ Ошибка: {e}")
             return
 
