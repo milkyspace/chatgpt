@@ -521,47 +521,100 @@ async def show_subs(cq: CallbackQuery, is_edit: bool = True):
         await cq.message.answer(text=text, reply_markup=kb)
 
 
+# ============================
+#  ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ
+# ============================
+def plural_days(n: int) -> str:
+    n = abs(int(n))
+    if n % 10 == 1 and n % 100 != 11:
+        return f"{n} день"
+    if 2 <= n % 10 <= 4 and not (12 <= n % 100 <= 14):
+        return f"{n} дня"
+    return f"{n} дней"
+
+
+# ============================
+#  ОСНОВНОЙ ОБРАБОТЧИК /buy
+# ============================
 @router.callback_query(F.data.startswith("buy:"))
 async def buy(cq: CallbackQuery):
     plan_code = cq.data.split(":", 1)[1]
     plan = cfg.plans[plan_code]
 
     async with AsyncSessionMaker() as session:
+        sub = await session.scalar(
+            select(UserSubscription).where(UserSubscription.user_id == cq.from_user.id)
+        )
+
+        # 1) Trial → сразу к оплате
+        if sub and sub.is_trial:
+            await confirm_pay_instant(cq, plan_code)
+            return
+
+        # 2) Такой же тариф → сразу к оплате
+        if sub and not sub.is_trial and sub.plan_code == plan_code:
+            await confirm_pay_instant(cq, plan_code)
+            return
+
+        # 3) Делаем превью
         preview = await preview_plan_change(session, cq.from_user.id, plan_code)
 
-    old_plan_title = preview["old_plan"].title if preview["old_plan"] else "Нет"
-    final_days = preview["final_days"]
 
-    text = (
-        "💳 <b>Перед оплатой — расчёт новой подписки</b>\n\n"
-        f"<b>Ваш текущий тариф:</b> {old_plan_title}\n"
-        f"<b>Осталось дней:</b> {preview['leftover_days']:.1f}\n"
-        f"<b>Конвертация остатка:</b> +{preview['converted_days']:.1f} дня\n"
-        f"<b>Бонус за запросы:</b> +{preview['bonus_days_req']:.1f} дня\n"
-        f"<b>Бонус за изображения:</b> +{preview['bonus_days_img']:.1f} дня\n\n"
-        f"📈 <b>После оплаты {plan.title} будет действовать:</b>\n"
-        f"<b>{final_days:.1f} дня</b>\n\n"
-        f"Стоимость: <b>{plan.price_rub} ₽</b> за {plan.duration_days} дней."
+    # --- Извлекаем данные ---
+    old_plan_title = preview["old_plan"].title if preview["old_plan"] else "Нет"
+
+    leftover = int(preview["leftover_days"])
+    converted = int(preview["converted_days"])
+    bonus_req = int(preview["bonus_days_req"])
+    bonus_img = int(preview["bonus_days_img"])
+    final_days = int(preview["final_days"])
+
+    # --- Шаг 1: мини-загрузка ---
+    loading_msg = await cq.message.edit_text("⏳ Выполняем расчёт…")
+    await asyncio.sleep(0.3)
+    await loading_msg.edit_text("⏳⏳ Выполняем расчёт…")
+    await asyncio.sleep(0.3)
+    await loading_msg.edit_text("⏳⏳⏳ Выполняем расчёт…")
+    await asyncio.sleep(0.3)
+
+    # --- Шаг 2: красивый прогресс-анализ ---
+    analysis_text = (
+        "🔍 <b>Анализ вашей подписки</b>\n\n"
+        f"📦 <b>Текущий тариф:</b> {old_plan_title}\n"
+        f"📉 <b>Остаток:</b> {plural_days(leftover)}\n"
+        f"🔄 <b>Конвертация:</b> +{plural_days(converted)}\n"
+        f"⚡ <b>Бонус за запросы:</b> +{plural_days(bonus_req)}\n"
+        f"🖼 <b>Бонус за изображения:</b> +{plural_days(bonus_img)}\n\n"
+        f"📈 <b>Итог:</b> {plural_days(final_days)} по тарифу <b>{plan.title}</b>"
     )
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Продолжить", callback_data=f"confirm_pay:{plan_code}")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="subs:show")]
-    ])
+    await loading_msg.edit_text(
+        analysis_text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Перейти к оплате", callback_data=f"confirm_pay:{plan_code}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="subs:show")]
+        ])
+    )
 
-    await cq.message.edit_text(text, reply_markup=keyboard)
     await cq.answer()
 
+
+# ============================
+#  УПРОЩЁННЫЙ ПУТЬ — без расчётов
+# ============================
 @router.callback_query(F.data.startswith("confirm_pay:"))
 async def confirm_pay(cq: CallbackQuery):
-    plan = cq.data.split(":")[1]
-    plan_conf = cfg.plans[plan]
+    plan_code = cq.data.split(":")[1]
+    await confirm_pay_instant(cq, plan_code)
 
+
+async def confirm_pay_instant(cq: CallbackQuery, plan_code: str):
+    plan_conf = cfg.plans[plan_code]
     provider = YooMoneyProvider()
-    description = f"Оплата плана {plan_conf.title}"
 
+    description = f"Оплата плана {plan_conf.title}"
     pay_url, payment_id = await provider.create_invoice(
-        cq.from_user.id, plan, plan_conf.price_rub, description
+        cq.from_user.id, plan_code, plan_conf.price_rub, description
     )
 
     async with AsyncSessionMaker() as session:
@@ -569,7 +622,7 @@ async def confirm_pay(cq: CallbackQuery):
             user_id=cq.from_user.id,
             provider=cfg.payment_provider,
             provider_payment_id=payment_id,
-            plan_code=plan,
+            plan_code=plan_code,
             amount_rub=plan_conf.price_rub,
             status="pending"
         )
@@ -577,16 +630,15 @@ async def confirm_pay(cq: CallbackQuery):
         await session.commit()
 
     await cq.message.edit_text(
-        f"🧾 <b>Счёт на оплату создан</b>\n\n"
+        f"🧾 <b>Счёт на оплату готов</b>\n\n"
         f"Тариф: <b>{plan_conf.title}</b>\n"
         f"Цена: <b>{plan_conf.price_rub} ₽</b>\n\n"
-        f"Нажмите кнопку, чтобы перейти к оплате:",
+        "Нажмите на кнопку ниже:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💳 Перейти к оплате", url=pay_url)],
-            [InlineKeyboardButton(text="⬅ Назад", callback_data="subs:show")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="subs:show")],
         ])
     )
-
     await cq.answer()
 
 
