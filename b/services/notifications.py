@@ -1,7 +1,7 @@
 from __future__ import annotations
 from aiogram import Bot
 from datetime import datetime
-from subscriptions import SubscriptionUpgradeResult
+from services.subscriptions import SubscriptionUpgradeResult
 
 class NotificationService:
     """Сервис для отправки уведомлений пользователям"""
