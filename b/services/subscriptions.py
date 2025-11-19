@@ -100,7 +100,7 @@ def _calculate_conversion(
 
     # Немного уменьшим бонусы, чтобы не было слишком жирно
     return {
-        "converted": converted_days,
+        "converted": converted_days * 0.2,
         "bonus_req": bonus_req * 0.2,
         "bonus_img": bonus_img * 0.2
     }
