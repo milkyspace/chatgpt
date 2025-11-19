@@ -1069,13 +1069,14 @@ async def help_support(cq: CallbackQuery):
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncConnection
+from db import engine
 
-@event.listens_for(AsyncConnection, "checkout")
+@event.listens_for(engine.sync_engine.pool, "checkout")
 def validate_checkout(dbapi_connection, connection_record, connection_proxy):
     if getattr(dbapi_connection, "_in_use", False):
         raise Exception("Connection leak detected!")
     dbapi_connection._in_use = True
 
-@event.listens_for(AsyncConnection, "checkin")
+@event.listens_for(engine.sync_engine.pool, "checkin")
 def validate_checkin(dbapi_connection, connection_record):
     dbapi_connection._in_use = False
