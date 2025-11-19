@@ -213,31 +213,43 @@ class AITunnelImageProvider:
 
     async def edit_image(self, image_bytes: bytes, instruction: str) -> bytes:
         """
-        Редактирование изображения по текстовой инструкции.
+        Редактирование изображения через AITunnel с использованием multipart/form-data.
         """
-        try:
-            self.model = cfg.edit_model
-            # base64_image = base64.b64encode(image_bytes).decode("utf-8")
-            # img_url = f"data:image/jpeg;base64,{base64_image}"
 
-            response = await self.client.images.edit(
-                model=self.model,
-                image=image_bytes,
-                prompt=instruction,
-                timeout=30
+        url = f"{cfg.aitunnel_api_base}/images/edits"
+
+        files = {
+            "image": ("image.png", image_bytes, "image/png"),
+        }
+
+        data = {
+            "model": self.model,
+            "prompt": instruction,
+            "size": "1024x1024",
+        }
+
+        try:
+            resp = await self.http_client.post(
+                url,
+                headers={"Authorization": f"Bearer {cfg.aitunnel_api_key}"},
+                data=data,
+                files=files,
+                timeout=60
             )
 
-            msg = response.choices[0].message
-            img_bytes = extract_image_from_ai_tunnel(msg)
+            resp.raise_for_status()
+            payload = resp.json()
 
-            if img_bytes:
-                return img_bytes
+            # OpenAI / AITunnel формат: data[0].b64_json
+            b64 = payload.get("data", [{}])[0].get("b64_json")
+            if not b64:
+                raise RuntimeError("Модель не вернула изображение")
 
-            raise RuntimeError("Модель не вернула отредактированное изображение")
+            return base64.b64decode(b64)
 
         except Exception as e:
-            logger.error(f"Ошибка обработки edit_image: {e}")
-            raise
+            logger.error(f"edit_image error: {e}")
+            raise RuntimeError(f"Ошибка обработки edit_image: {e}")
 
     async def celebrity_selfie(self, image_bytes: bytes, celebrity_name: str, style: str = None) -> bytes:
         """
