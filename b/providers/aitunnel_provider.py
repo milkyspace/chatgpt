@@ -10,50 +10,51 @@ from config import cfg
 
 logger = logging.getLogger(__name__)
 
-def extract_image_from_choices(choices: list[Any]) -> Optional[bytes]:
+def extract_image_from_message(message: Any) -> Optional[bytes]:
     """
-    Универсальный парсер изображений из ответа AITunnel.
-
-    Args:
-        choices: response["choices"]
-
-    Returns:
-        Байты изображения или None
+    Универсальное извлечение изображения из ChatCompletionMessage.
+    Работает с любым форматом AITunnel / OpenAI multimodal.
     """
-    if not choices:
+
+    if message is None:
         return None
 
-    msg = choices[0].get("message")
-    if not msg:
-        return None
+    content = getattr(message, "content", None)
 
-    images = msg.get("images")
-    if not images:
-        return None
+    # --- Вариант 1: модель вернула строку: "data:image/png;base64,AAAA..."
+    if isinstance(content, str) and content.startswith("data:image"):
+        return base64.b64decode(content.split(",", 1)[1])
 
-    img = images[0]
+    # --- Вариант 2: content = [{"type": "...", ...}, ...]
+    if isinstance(content, list):
+        for part in content:
 
-    # 1) image_url: {"url": "data:image/..."} (как у OpenAI)
-    if isinstance(img, dict):
-        # Вариант: {"image_url": {"url": "..."}}
-        if "image_url" in img and isinstance(img["image_url"], dict):
-            url = img["image_url"].get("url")
-            if url and url.startswith("data:image"):
-                return base64.b64decode(url.split(",", 1)[1])
+            # 2.1 {"type": "output_image", "image_url": {"url": "data:image/..."}}
+            if isinstance(part, dict):
+                img_url = (
+                    part.get("image_url", {}) or
+                    part.get("url") or
+                    None
+                )
 
-        # Вариант: {"url": "data:image/..."}
-        if "url" in img:
-            url = img["url"]
-            if url and url.startswith("data:image"):
-                return base64.b64decode(url.split(",", 1)[1])
+                # {"image_url": {"url": "..."}}
+                if isinstance(img_url, dict) and "url" in img_url:
+                    url = img_url["url"]
+                    if url.startswith("data:image"):
+                        return base64.b64decode(url.split(",", 1)[1])
 
-        # Вариант: {"data": "<base64>"}
-        if "data" in img:
-            try:
-                return base64.b64decode(img["data"])
-            except Exception:
-                pass
+                # {"url": "data:image/png;base64,..."}
+                if isinstance(img_url, str) and img_url.startswith("data:image"):
+                    return base64.b64decode(img_url.split(",", 1)[1])
 
+                # {"data": "<base64>"}
+                if "data" in part:
+                    try:
+                        return base64.b64decode(part["data"])
+                    except Exception:
+                        pass
+
+    # Ничего не нашли
     return None
 
 class AITunnelChatProvider:
@@ -183,7 +184,7 @@ class AITunnelImageProvider:
 
     async def generate(self, prompt: str, aspect_ratio: str = "1:1") -> bytes:
         """
-        Генерация изображения через AITunnel с универсальным разбором ответа.
+        Генерация изображения (универсальный формат ответа).
         """
         try:
             response = await self.client.chat.completions.create(
@@ -192,14 +193,15 @@ class AITunnelImageProvider:
                 modalities=["image", "text"]
             )
 
-            # !!! AITunnel возвращает обычный dict
-            data = response  # уже dict
+            msg = response.choices[0].message
+            img_bytes = extract_image_from_message(msg)
 
-            img_bytes = extract_image_from_choices(data.get("choices", []))
             if img_bytes:
                 return img_bytes
 
-            raise RuntimeError("AITunnel не вернул изображение")
+            raise RuntimeError(
+                "Модель не вернула изображение. Проверь формат ответа AITunnel."
+            )
 
         except Exception as e:
             logger.error(f"Ошибка обработки generate: {e}")
@@ -207,7 +209,7 @@ class AITunnelImageProvider:
 
     async def edit_image(self, image_bytes: bytes, instruction: str) -> bytes:
         """
-        Редактирование изображения через AITunnel.
+        Редактирование изображения по текстовой инструкции.
         """
         try:
             base64_image = base64.b64encode(image_bytes).decode("utf-8")
@@ -229,12 +231,13 @@ class AITunnelImageProvider:
                 modalities=["image", "text"]
             )
 
-            data = response
-            img_bytes = extract_image_from_choices(data.get("choices", []))
+            msg = response.choices[0].message
+            img_bytes = extract_image_from_message(msg)
+
             if img_bytes:
                 return img_bytes
 
-            raise RuntimeError("AITunnel не вернул отредактированное изображение")
+            raise RuntimeError("Модель не вернула отредактированное изображение")
 
         except Exception as e:
             logger.error(f"Ошибка обработки edit_image: {e}")
@@ -242,43 +245,31 @@ class AITunnelImageProvider:
 
     async def analyze_image(self, image_bytes: bytes, question: str) -> str:
         """
-        Анализ изображения с задаванием вопросов.
-
-        Args:
-            image_bytes: Байты изображения для анализа
-            question: Вопрос об изображении
-
-        Returns:
-            Текстовый ответ модели
+        Анализ изображения возвращает ТОЛЬКО текст.
         """
         try:
-            # Кодируем изображение в base64
-            base64_image = base64.b64encode(image_bytes).decode('utf-8')
-            data_url = f"data:image/jpeg;base64,{base64_image}"
+            base64_image = base64.b64encode(image_bytes).decode("utf-8")
+            img_url = f"data:image/jpeg;base64,{base64_image}"
 
-            # Создаем мультимодальное сообщение
             messages = [
                 {
                     "role": "user",
                     "content": [
                         {"type": "text", "text": question},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": data_url, "detail": "high"}
-                        }
+                        {"type": "image_url", "image_url": {"url": img_url}}
                     ]
                 }
             ]
 
             response = await self.client.chat.completions.create(
-                model=cfg.chat_model,  # Используем чатовую модель для анализа
+                model=cfg.chat_model,
                 messages=messages
             )
 
             return response.choices[0].message.content
 
         except Exception as e:
-            print(f"AITUNNEL Image Analysis Error: {e}")
+            logger.error(f"Ошибка анализа изображения: {e}")
             raise
 
     async def add_people(self, image_bytes: bytes, description: str) -> bytes:
