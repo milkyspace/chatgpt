@@ -1,12 +1,12 @@
 from typing import Optional
-from providers.openai_vision_edit import OpenAIVisionEditProvider
+from providers.openai_provider import OpenAIImageProvider
 from services.safety import SafetyGuard, SafetyDecision
 
 
 class ImageService:
 
-    def __init__(self, provider: OpenAIVisionEditProvider | None = None):
-        self.provider = provider or OpenAIVisionEditProvider()
+    def __init__(self, provider: OpenAIImageProvider | None = None):
+        self.provider = provider or OpenAIImageProvider()
 
     async def generate(self, prompt: str) -> tuple[Optional[bytes], Optional[str]]:
         try:
