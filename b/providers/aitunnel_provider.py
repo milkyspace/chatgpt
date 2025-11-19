@@ -214,38 +214,49 @@ class AITunnelImageProvider:
     async def edit_image(self, image_bytes: bytes, instruction: str) -> bytes:
         """
         Редактирование изображения по текстовой инструкции.
+        Делает до 3 попыток, если модель не вернула изображение.
         """
-        try:
-            base64_image = base64.b64encode(image_bytes).decode("utf-8")
-            img_url = f"data:image/jpeg;base64,{base64_image}"
+        base64_image = base64.b64encode(image_bytes).decode("utf-8")
+        img_url = f"data:image/jpeg;base64,{base64_image}"
 
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": instruction},
-                        {"type": "image_url", "image_url": {"url": img_url}}
-                    ]
-                }
-            ]
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": instruction},
+                    {"type": "image_url", "image_url": {"url": img_url}}
+                ]
+            }
+        ]
 
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                modalities=["image", "text"]
-            )
+        last_error = None
 
-            msg = response.choices[0].message
-            img_bytes = extract_image_from_ai_tunnel(msg)
+        for attempt in range(1, 4):  # 1,2,3
+            try:
+                logger.debug(f"[edit_image] Попытка {attempt}/3")
 
-            if img_bytes:
-                return img_bytes
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    modalities=["image", "text"],
+                    timeout=60
+                )
 
-            raise RuntimeError("Модель не вернула отредактированное изображение")
+                msg = response.choices[0].message
+                img_bytes = extract_image_from_ai_tunnel(msg)
 
-        except Exception as e:
-            logger.error(f"Ошибка обработки edit_image: {e}")
-            raise
+                if img_bytes:
+                    return img_bytes  # успех
+
+                last_error = RuntimeError("Модель не вернула отредактированное изображение")
+
+            except Exception as e:
+                last_error = e
+                logger.warning(f"[edit_image] Ошибка в попытке {attempt}/3: {e}")
+
+        # Если все 3 попытки исчерпаны
+        logger.error("[edit_image] Все 3 попытки завершились неудачей")
+        raise last_error
 
     async def celebrity_selfie(self, image_bytes: bytes, celebrity_name: str, style: str = None) -> bytes:
         """
