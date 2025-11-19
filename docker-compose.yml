@@ -1,4 +1,3 @@
-version: "3.9"
 services:
   mariadb:
     image: mariadb:latest
@@ -14,7 +13,7 @@ services:
     volumes:
       - ./mariadb_data:/var/lib/mysql
     healthcheck:
-      test: [ "CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u${DB_USER} -p${DB_PASS} --silent" ]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u${MARIADB_USER} -p${MARIADB_PASSWORD} --silent"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -32,4 +31,4 @@ services:
       mariadb:
         condition: service_healthy
     environment:
-      - DATABASE_URL=mysql+aiomysql://${MARIADB_USER:-ai_bot}:${MARIADB_PASSWORD:-password}@mariadb:3306/${MARIADB_DATABASE:-ai_bot_db}
+      DATABASE_URL: "mysql+aiomysql://${MARIADB_USER:-ai_bot}:${MARIADB_PASSWORD:-password}@mariadb:3306/${MARIADB_DATABASE:-ai_bot_db}"
