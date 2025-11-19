@@ -199,7 +199,7 @@ async def _render_status_line(session, user_id: int) -> str:
         "📈 <b>Лимиты</b>\n"
         f"{limits_text}\n"
         "\n"
-        f"🆔 <b>ID:</b> <code>{user_id}</code>"
+        f"🆔 <code>{user_id}</code>"
     )
 
 
