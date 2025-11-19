@@ -17,11 +17,11 @@ services:
 
     # ✔️ Правильный healthcheck для MariaDB
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-uroot", "-p${MARIADB_ROOT_PASSWORD}"]
-      interval: 10s         # проверять каждые 10 секунд
-      timeout: 5s
-      retries: 30           # MariaDB иногда стартует 20–25 сек
-      start_period: 20s     # время на прогрев базы (очень важно!)
+      test: [ "CMD-SHELL", "mariadb-admin ping -uroot -p$MARIADB_ROOT_PASSWORD || exit 1" ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
 
   chatgpt_telegram_bot:
     container_name: chatgpt_telegram_bot
