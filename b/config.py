@@ -59,7 +59,7 @@ class AppConfig(BaseModel):
 
     chat_model: str = field(default_factory=lambda: os.getenv("CHAT_MODEL", "gpt-4o"))
     image_model: str = field(default_factory=lambda: os.getenv("IMAGE_MODEL", "gemini-2.5-flash-image-preview"))
-    edit_model: str = field(default_factory=lambda: os.getenv("EDIT_MODEL", "gpt-image-1"))
+    edit_model: str = field(default_factory=lambda: os.getenv("EDIT_MODEL", "gemini-2.5-flash-image"))
 
     # Планы (легко менять)
     plans: dict[str, PlanConfig] = {
