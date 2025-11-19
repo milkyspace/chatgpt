@@ -419,7 +419,11 @@ async def on_photo(m: TgMessage):
 
         # универсальный редактор
         if mode == "editor":
-            new_img, err = await img_service.edit(photo_bytes.read(), instruction)
+            new_img, err = await img_service.edit(
+                photo_bytes.read(),
+                instruction,
+                provider="openai"  # или вынести в конфиг
+            )
 
         elif mode == "add_people":
             desc = m.caption or "Добавить людей на фон."
