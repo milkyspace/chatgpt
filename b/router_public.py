@@ -419,10 +419,11 @@ async def on_photo(m: TgMessage):
         except Exception as e:
             logger.error(f"❗ Ошибка: {e}")
             await progress_msg.edit_text(f"❗ Ошибка: {e}")
+            return
 
-        # finally:
+        finally:
             # <-- ВАЖНО: ВСЕГДА завершаем прогресс
-            # done_event.set()
+            done_event.set()
 
     asyncio.create_task(progress_updater())
     await img_pool.submit(job)
