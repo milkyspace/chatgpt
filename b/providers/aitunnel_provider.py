@@ -195,7 +195,7 @@ class AITunnelImageProvider:
                 model=self.model,
                 image=("image.png", image_bytes, "image/png"),
                 prompt=instruction,
-                timeout=30
+                timeout=60
             )
 
             logger.debug("response: %s", response)
