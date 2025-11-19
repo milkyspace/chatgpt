@@ -161,7 +161,7 @@ async def _render_status_line(session, user_id: int) -> str:
 
             # Тариф
             if sub.is_trial:
-                plan_name = "Trial"
+                plan_name = "Пробная подписка"
                 max_req = cfg.trial_max_requests
                 max_img = cfg.trial_max_images
             else:
