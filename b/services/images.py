@@ -20,7 +20,7 @@ class ImageService:
             data_url = f"data:image/jpeg;base64,{b64_image}"
 
             resp = await self.client.responses.create(
-                model="gpt-4.1",
+                model="gpt-4.1-vision",  # <-- ВАЖНО! НЕ gpt-4.1
                 input=[
                     {
                         "role": "user",
@@ -32,18 +32,14 @@ class ImageService:
                 ],
             )
 
-            # ------- ПАРСИНГ НОВОГО ОТВЕТА -------
+            # ---- Правильный парсинг ----
             for block in resp.output:
-                # block — это объект, а НЕ dict!
                 if block.type != "message":
                     continue
 
-                # block.content — список объектов
                 for item in block.content:
-                    # item тоже объект
                     if item.type == "output_image":
-                        b64 = item.image.data
-                        return base64.b64decode(b64), None
+                        return base64.b64decode(item.image.data), None
 
             return None, "output_image не найден"
 
