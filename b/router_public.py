@@ -436,10 +436,6 @@ async def on_photo(m: TgMessage):
                 await progress_msg.edit_text(f"❗ {err}")
                 return
 
-            # Отправляем результат
-            tg_file = BufferedInputFile(new_img, filename="result.png")
-            await m.answer_photo(tg_file, caption="Готово! ✅")
-
             # Списание использования
             async with AsyncSessionMaker() as session:
                 await spend_image(session, m.from_user.id)
