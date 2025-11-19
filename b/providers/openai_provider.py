@@ -84,7 +84,7 @@ class OpenAIImageProvider:
         import base64
         prompt = f"Отредактируй изображение согласно инструкции: {instruction}"
         try:
-            response = self.client.images.edit(
+            response = self.clientSync.images.edit(
                 model="gpt-image-1",
                 image=image_bytes,
                 mask=None,  # type: ignore[arg-type]
