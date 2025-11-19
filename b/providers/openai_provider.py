@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Sequence, AsyncGenerator
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAI
 from config import cfg
 import httpx
 
@@ -62,6 +62,7 @@ class OpenAIImageProvider:
             base_url=cfg.openai_api_base,
             http_client=self.http_client,
         )
+        self.clientSync = OpenAI()
 
     async def generate(self, prompt: str) -> bytes:
         import base64
@@ -80,8 +81,29 @@ class OpenAIImageProvider:
             raise
 
     async def edit(self, image_bytes: bytes, instruction: str) -> bytes:
+        import base64
         prompt = f"Отредактируй изображение согласно инструкции: {instruction}"
-        return await self.generate(prompt)
+        try:
+            response = self.client.images.edit(
+                model="gpt-image-1",
+                image=image_bytes,
+                mask=None,  # type: ignore[arg-type]
+                prompt=prompt,
+                size="auto",
+                n=1,
+            )
+
+            for item in response.data:
+                if getattr(item, "b64_json", None):
+                    b64 = "data:image/png;base64," + item.b64_json  # type: ignore[attr-defined]
+                    return base64.b64decode(b64)
+                else:
+                    raise RuntimeError("No image URLs returned from API.")
+
+            return base64.b64decode("")
+        except Exception as e:
+            print(f"OpenAI API Error: {e}")
+            raise
 
     async def add_people(self, image_bytes: bytes, description: str) -> bytes:
         prompt = f"На основе исходного фото, добавь людей: {description}. Сохрани стиль и реалистичность."
