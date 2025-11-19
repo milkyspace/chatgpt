@@ -35,21 +35,6 @@ router.callback_query.filter(admin_filter)
 class BroadcastStates(StatesGroup):
     waiting_for_broadcast_text = State()
 
-
-@router.message(Command("admin"))
-async def admin_entry(m: TgMessage):
-    """Главное меню админ-панели"""
-    await m.answer(
-        "🛡 <b>Админ-панель</b>\n\n"
-        "Доступные функции:\n"
-        "• 👤 Просмотр пользователей\n"
-        "• 📊 Статистика\n"
-        "• 💳 Платежи\n"
-        "• 📣 Рассылка сообщений\n"
-        "• 🔄 Проверка платежей",
-        reply_markup=admin_menu()
-    )
-
 @router.message(Command("lookup"))
 async def lookup_user(m: TgMessage):
     args = m.text.split(maxsplit=1)
