@@ -10,7 +10,7 @@ class ImageService:
         """
         Vision Editing via /responses — OpenAI >=1.59
         """
-
+        print("EDIT START", len(image_bytes), instruction)
         try:
             b64_image = base64.b64encode(image_bytes).decode("utf-8")
             data_url = f"data:image/jpeg;base64,{b64_image}"
@@ -43,6 +43,7 @@ class ImageService:
             return None, "API не вернул изображение"
 
         except Exception as e:
+            print("EDIT ERROR", e)
             return None, f"OpenAI editing error: {e}"
 
 

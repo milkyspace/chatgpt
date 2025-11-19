@@ -517,31 +517,25 @@ async def on_text(m: TgMessage):
 
         async def progress_updater():
             total_blocks = 9
-            progress = 0  # проценты 0–100
+            progress = 0
 
             while not done_event.is_set():
                 await asyncio.sleep(0.3)
+                progress = min(progress + random.randint(1, 2), 85)
 
-                # медленный прогресс — 1–2% за шаг
-                progress = min(progress + random.randint(1, 2), 80)
-
-                filled = progress * total_blocks // 100
-                bar = "▰" * filled + "▱" * (total_blocks - filled)
+                bar = "▰" * (progress * total_blocks // 100)
+                bar += "▱" * (total_blocks - len(bar))
 
                 try:
-                    await progress_msg.edit_text(
-                        f"🎨 Генерирую изображение…\n{bar}  {progress}%"
-                    )
-                except Exception:
+                    await progress_msg.edit_text(f"🛠 Обрабатываю изображение…\n{bar}  {progress}%")
+                except:
                     pass
 
-            # закончили — ставим 100%
+            # финальное обновление
             try:
                 bar = "▰" * total_blocks
-                await progress_msg.edit_text(
-                    f"📸 Готово!\n{bar}  100%"
-                )
-            except Exception:
+                await progress_msg.edit_text(f"📸 Готово!\n{bar}  100%")
+            except:
                 pass
 
         async def generate_job():
@@ -603,22 +597,29 @@ async def on_text(m: TgMessage):
                 pass
 
         async def edit_job():
-            # ВНИМАНИЕ — ТЕПЕРЬ ИСПОЛЬЗУЕМ ПРАВИЛЬНО
-            img_bytes = photo_bytes.read()
+            try:
+                new_img, err = await img_service.edit(img_bytes, instruction)
+            except Exception as e:
+                done_event.set()
+                await progress_msg.edit_text(f"❗ Ошибка: {e}")
+                return
 
-            instruction = m.caption or "Слегка улучшить качество и цвет."
-
-            new_img, err = await img_service.edit(img_bytes, instruction)
             done_event.set()
 
             if err:
-                await progress_msg.edit_text(f"❗ Ошибка: {err}")
+                try:
+                    await progress_msg.edit_text(f"❗ Ошибка: {err}")
+                except:
+                    pass
                 return
 
-            # Telegram-файл
-            file = BufferedInputFile(new_img, filename="edit.png")
-
-            await m.answer_photo(file, caption="Готово! Режим: editor")
+            # Отправка фото
+            try:
+                file = BufferedInputFile(new_img, filename="edit.png")
+                await m.answer_photo(file, caption="Готово! Режим: editor")
+            except Exception as e:
+                await m.answer(f"Ошибка отправки результата: {e}")
+                return
 
             async with AsyncSessionMaker() as session:
                 await spend_image(session, m.from_user.id)
