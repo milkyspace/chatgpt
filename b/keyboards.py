@@ -91,3 +91,18 @@ def grant_plan_keyboard(user_id: int):
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"lookup:{user_id}")])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def help_main_menu():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Возможности бота", callback_data="help:features")],
+        [InlineKeyboardButton(text="❓ FAQ по лимитам", callback_data="help:limits")],
+        [InlineKeyboardButton(text="🧠 Как формулировать запросы", callback_data="help:guide")],
+        [InlineKeyboardButton(text="🔥 Примеры лучших запросов", callback_data="help:examples")],
+        [InlineKeyboardButton(text="🆘 Поддержка", callback_data="help:support")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")],
+    ])
+
+def help_back_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="help:main")]
+    ])

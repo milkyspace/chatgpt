@@ -16,8 +16,7 @@ from aiogram.types import CallbackQuery, User
 
 from config import cfg
 from db import AsyncSessionMaker
-from keyboards import plan_buy_keyboard
-from keyboards import top_panel, keyboards_for_modes
+from keyboards import top_panel, keyboards_for_modes, help_main_menu, plan_buy_keyboard, help_back_kb
 from models import (
     User,
     ChatSession,
@@ -391,18 +390,29 @@ async def panel_mode(cq: CallbackQuery):
 @router.callback_query(F.data == "panel:help")
 async def panel_help(cq: CallbackQuery):
     text = (
-            "ℹ️ <b>Помощь</b>\n\n"
-            "Доступные команды:\n"
-            "• /start — главное меню\n"
-            "• /new — новый чат\n"
-            "• /mode — выбрать режим\n"
-            "• /subscription — информация о подписке\n"
-            "• Просто отправьте текст — и получите ответ\n\n"
-            "Поддержка: " + cfg.support_username
+        "ℹ️ <b>Помощь и быстрый старт</b>\n\n"
+
+        "💬 <b>Ассистент</b>\n"
+        "Общение с GPT: ответы, идеи, помощь, код.\n\n"
+
+        "🎨 <b>Генерация изображений</b>\n"
+        "Создание картинок по вашему описанию.\n\n"
+
+        "🛠 <b>Редактор фото</b>\n"
+        "Улучшение качества, изменение объектов.\n\n"
+
+        "🤳 <b>Селфи со звездой</b>\n"
+        "Добавление знаменитостей на ваши фото.\n\n"
+
+        "🆘 <b>Поддержка:</b> " + cfg.support_username + "\n\n"
+        "👇 Выберите действие в меню ниже."
     )
-    await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")]
-    ]))
+    ])
+
+    await cq.message.edit_text(text, reply_markup=kb)
     await cq.answer()
 
 
@@ -964,4 +974,114 @@ async def panel_main(cq: CallbackQuery):
         )).scalars().first()
     me = await cq.bot.get_me()
     await cq.message.edit_text(status, reply_markup=top_panel(me.username, user_row.referral_code))
+    await cq.answer()
+
+# Меню "Помощь"
+@router.callback_query(F.data == "panel:help")
+async def help_main(cq: CallbackQuery):
+    await cq.message.edit_text(
+        "ℹ️ <b>Помощь и обучение</b>\n\nВыберите раздел:",
+        reply_markup=help_main_menu()
+    )
+    await cq.answer()
+
+
+@router.callback_query(F.data == "help:main")
+async def help_back_to_main(cq: CallbackQuery):
+    await cq.message.edit_text(
+        "ℹ️ <b>Помощь и обучение</b>\n\nВыберите раздел:",
+        reply_markup=help_main_menu()
+    )
+    await cq.answer()
+
+
+@router.callback_query(F.data == "help:features")
+async def help_features(cq: CallbackQuery):
+    await cq.message.edit_text(
+        (
+            "💬 <b>Возможности бота</b>\n\n"
+            "• Ассистент — ответы, идеи, код, обучение.\n"
+            "• Генерация изображений — арты, фото, сцены.\n"
+            "• Редактор фото — улучшение, ретушь, замена объектов.\n"
+            "• Селфи со звездами — добавляет знаменитостей на фото.\n"
+            "• Анализ изображений — понимание содержания снимков.\n\n"
+            "👇 Выберите следующий раздел."
+        ),
+        reply_markup=help_back_kb()
+    )
+    await cq.answer()
+
+
+@router.callback_query(F.data == "help:limits")
+async def help_limits(cq: CallbackQuery):
+    await cq.message.edit_text(
+        (
+            "❓ <b>FAQ по лимитам</b>\n\n"
+            "<b>Зачем лимиты?</b>\n"
+            "Чтобы бот работал стабильно и быстро.\n\n"
+            "<b>Что считается запросом?</b>\n"
+            "Любой текст, на который бот отвечает.\n\n"
+            "<b>Что считается генерацией изображения?</b>\n"
+            "Создание или редактирование фото.\n\n"
+            "<b>Когда обновляются лимиты?</b>\n"
+            "При активации подписки или начале нового периода.\n"
+        ),
+        reply_markup=help_back_kb()
+    )
+    await cq.answer()
+
+
+@router.callback_query(F.data == "help:guide")
+async def help_guide(cq: CallbackQuery):
+    await cq.message.edit_text(
+        (
+            "🧠 <b>Как правильно формулировать запросы</b>\n\n"
+            "1) Будьте конкретны.\n"
+            "2) Указывайте стиль или формат.\n"
+            "3) Формулируйте цель.\n"
+            "4) Используйте структуру.\n"
+            "5) Приводите примеры.\n\n"
+            "Пример:\n"
+            "<i>«Напиши пост в стиле Apple: 3 пункта + призыв»</i>"
+        ),
+        reply_markup=help_back_kb()
+    )
+    await cq.answer()
+
+
+@router.callback_query(F.data == "help:examples")
+async def help_examples(cq: CallbackQuery):
+    await cq.message.edit_text(
+        (
+            "🔥 <b>Примеры лучших запросов</b>\n\n"
+            "<b>Тексты:</b>\n"
+            "• «Напиши продающий текст о VPN в стиле Apple»\n"
+            "• «Сделай пост для Telegram с 5 пунктами»\n\n"
+            "<b>Код:</b>\n"
+            "• «Объясни этот Python-код простыми словами»\n"
+            "• «Оптимизируй SQL-запрос»\n\n"
+            "<b>Изображения:</b>\n"
+            "• «Кот-астронавт в стиле пиксель-арт»\n"
+            "• «Логотип буквы D в минимализме»\n\n"
+            "<b>Редактор:</b>\n"
+            "• «Осветли лицо, убери шум»\n"
+            "• «Добавь солнце на задний план»\n\n"
+            "<b>Селфи со звездой:</b>\n"
+            "• «Сделай селфи с Ди Каприо»\n"
+        ),
+        reply_markup=help_back_kb()
+    )
+    await cq.answer()
+
+
+@router.callback_query(F.data == "help:support")
+async def help_support(cq: CallbackQuery):
+    await cq.message.edit_text(
+        (
+            f"🆘 <b>Поддержка</b>\n\n"
+            f"Если что-то не работает или есть вопросы — мы рядом.\n\n"
+            f"<b>Свяжитесь с нами:</b> {cfg.support_username}\n"
+        ),
+        reply_markup=help_back_kb()
+    )
     await cq.answer()
