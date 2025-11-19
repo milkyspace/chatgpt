@@ -60,7 +60,7 @@ async def _shutdown(bot):
     await img_pool.stop()
 
 
-def build_progress_bar(used: int, max_val: int | None, segments: int = 20) -> str:
+def build_progress_bar(used: int, max_val: int | None, segments: int = 8) -> str:
     """
     Адаптивный прогресс-бар:
     - 20 сегментов
@@ -89,7 +89,7 @@ def build_progress_bar(used: int, max_val: int | None, segments: int = 20) -> st
     else:
         color = "🟩"
 
-    bar = color * filled + "⬛" * (segments - filled)
+    bar = color * filled + "⬜️" * (segments - filled)
     return bar
 
 
