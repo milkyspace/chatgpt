@@ -2,29 +2,8 @@ from __future__ import annotations
 from typing import Sequence, AsyncGenerator
 from openai import AsyncOpenAI
 from config import cfg
-import os
 import httpx
-import base64
-from io import BytesIO
-from openai import OpenAI
-from PIL import Image # For image manipulation if handling b64_json
 
-# Recommended: Use response_format='b64_json' for direct handling
-# Helper function (optional) to process b64_json data:
-def process_b64_json(b64_json_data, output_path):
-    try:
-        image_bytes = base64.b64decode(b64_json_data)
-        image = Image.open(BytesIO(image_bytes))
-        # Optional: Resize or other processing
-        # image = image.resize((512, 512), Image.LANCZOS)
-        image.save(output_path)  # Saves in format inferred from extension
-        print(f"Image saved to {output_path}")
-    except Exception as e:
-        print(f"Error processing image: {e}")
-
-# Create output directory
-os.makedirs("generated_images", exist_ok=True)
-output_dir = "generated_images"
 
 class OpenAIChatProvider:
     """
@@ -73,90 +52,42 @@ class OpenAIChatProvider:
 
 
 class OpenAIImageProvider:
-    """Провайдер изображений через GPT-Image-1 (4o-based)."""
+    """Провайдер изображений через DALL-E с кастомным httpx-клиентом."""
 
-    def __init__(self, model: str = "gpt-image-1"):
+    def __init__(self, model: str = "dall-e-3"):
         self.model = model
-
-        # Настройки из статьи — обычный httpx клиент
-        self.http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(180.0, connect=15.0)
-        )
-
+        self.http_client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
         self.client = AsyncOpenAI(
             api_key=cfg.openai_api_key,
             base_url=cfg.openai_api_base,
             http_client=self.http_client,
         )
 
-    # -----------------------------
-    # 1. Генерация изображения
-    # -----------------------------
-    async def generate(self, prompt: str, size: str = "1024x1024") -> bytes:
-        """
-        Генерация изображения по текстовому описанию (GPT-Image-1).
-        """
-
+    async def generate(self, prompt: str) -> bytes:
+        import base64
         try:
             response = await self.client.images.generate(
                 model=self.model,
                 prompt=prompt,
-                size=size,
+                size="1024x1024",
                 n=1,
-                response_format="b64_json",
+                response_format="b64_json"  # ← ДОБАВЬТЕ ЭТО
             )
-
             b64 = response.data[0].b64_json
             return base64.b64decode(b64)
-
         except Exception as e:
-            print(f"[OpenAIImageProvider] Generate error: {e}")
+            print(f"OpenAI API Error: {e}")
             raise
 
-    # -----------------------------
-    # 2. Редактирование (inpainting)
-    # -----------------------------
-    async def edit(self, image_bytes: bytes, mask_bytes: bytes, prompt: str, size: str = "1024x1024") -> bytes:
-        """
-        Редактирование изображения через GPT-Image-1.
-        Требует mask (область, которую нужно изменить).
-        """
+    async def edit(self, image_bytes: bytes, instruction: str) -> bytes:
+        prompt = f"Отредактируй изображение согласно инструкции: {instruction}"
+        return await self.generate(prompt)
 
-        try:
-            response = await self.client.images.edit(
-                model=self.model,
-                image=image_bytes,
-                mask=mask_bytes,
-                prompt=prompt,
-                size=size,
-                n=1,
-                response_format="b64_json",
-            )
+    async def add_people(self, image_bytes: bytes, description: str) -> bytes:
+        prompt = f"На основе исходного фото, добавь людей: {description}. Сохрани стиль и реалистичность."
+        return await self.generate(prompt)
 
-            b64 = response.data[0].b64_json
-            return base64.b64decode(b64)
-
-        except Exception as e:
-            print(f"[OpenAIImageProvider] Edit error: {e}")
-            raise
-
-    # -----------------------------
-    # 3. "Селфи со знаменитостью"
-    # -----------------------------
-    async def celebrity_selfie(
-        self,
-        celebrity_name: str,
-        style: str | None = None,
-        size: str = "1024x1024"
-    ) -> bytes:
-        """
-        GPT-Image-1 НЕ принимает исходное фото → создаём новый промпт.
-        """
-
-        prompt = (
-            f"Realistic selfie of two people. One looks like {celebrity_name}, "
-            f"the other looks like an ordinary person. Natural lighting, "
-            f"high detail, ultra realistic. {style or ''}"
-        )
-
-        return await self.generate(prompt, size=size)
+    async def celebrity_selfie(self, image_bytes: bytes, celebrity_name: str, style: str | None = None) -> bytes:
+        # Для DALL-E нам нужно создать новый промпт, так как он не принимает исходное изображение
+        prompt = f"Реалистичное селфи двух людей. Один выглядит как {celebrity_name}, второй - обычный человек. {style or ''} Фотография должна выглядеть как настоящее селфи, естественное освещение, высокое качество."
+        return await self.generate(prompt)
