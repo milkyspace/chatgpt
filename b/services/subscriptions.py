@@ -226,7 +226,7 @@ def _compute_plan_change_preview(
     leftover_value_rub = leftover_fraction * price_old
 
     # Сколько дней нового плана даёт эта ценность
-    extra_total_days = leftover_value_rub / price_per_day_new
+    extra_total_days = (leftover_value_rub / price_per_day_new) * 0.3
 
     # ----- 6. Разбиваем extra_total_days между "остатком" / "запросами" / "картинками"
     # (для красивой аналитики, сумма компонент = extra_total_days)
@@ -237,9 +237,9 @@ def _compute_plan_change_preview(
     comp_sum = comp_time + comp_req + comp_img
 
     if comp_sum > 0 and extra_total_days > 0:
-        converted_days = extra_total_days * (comp_time / comp_sum)  # как бы "за время"
-        bonus_days_req = extra_total_days * (comp_req / comp_sum)
-        bonus_days_img = extra_total_days * (comp_img / comp_sum)
+        converted_days = extra_total_days * (comp_time / comp_sum) * 0.3  # как бы "за время"
+        bonus_days_req = extra_total_days * (comp_req / comp_sum) * 0.3
+        bonus_days_img = extra_total_days * (comp_img / comp_sum) * 0.3
     else:
         converted_days = 0.0
         bonus_days_req = 0.0
