@@ -486,7 +486,7 @@ async def process_broadcast_text(m: TgMessage, state: FSMContext):
         blocked_count = 0
 
         # Отправляем сообщения с обработкой ошибок
-        for i, user in enumerate(user_list):
+        for i, user in enumerate(users):
             try:
                 await m.bot.send_message(
                     chat_id=user.id,
@@ -512,7 +512,7 @@ async def process_broadcast_text(m: TgMessage, state: FSMContext):
         # Формируем отчет
         report_text = (
             f"✅ <b>Рассылка завершена</b>\n\n"
-            f"• 📊 Всего пользователей: <b>{len(user_list)}</b>\n"
+            f"• 📊 Всего пользователей: <b>{len(users)}</b>\n"
             f"• ✅ Успешно отправлено: <b>{success_count}</b>\n"
             f"• ❌ Не удалось отправить: <b>{fail_count}</b>\n"
             f"• 🚫 Заблокировали бота: <b>{blocked_count}</b>"
