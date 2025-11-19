@@ -17,11 +17,10 @@ services:
 
     # ✔️ Правильный healthcheck для MariaDB
     healthcheck:
-      test: [ "CMD-SHELL", "mariadb-admin ping --socket=/run/mysqld/mysqld.sock -uroot -p$MARIADB_ROOT_PASSWORD --silent" ]
+      test: [ "CMD-SHELL", "mysqladmin ping --silent" ]
       interval: 5s
       timeout: 5s
-      retries: 20
-      start_period: 5s
+      retries: 10
 
   chatgpt_telegram_bot:
     container_name: chatgpt_telegram_bot
