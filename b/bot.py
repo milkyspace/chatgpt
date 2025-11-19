@@ -10,6 +10,7 @@ from config import cfg
 from router_public import router as public_router
 from router_admin import router as admin_router
 from services.payments_monitor import PaymentMonitor
+from tools.init_db import init_db
 
 import logging
 
@@ -30,8 +31,9 @@ async def _set_commands(bot):
         BotCommand(command="help", description="Помощь"),
     ])
 
-
 async def main():
+    await init_db()
+
     logging.basicConfig(level=logging.INFO)
     logging.info(f"✅ BOT_TOKEN: {cfg.bot_token[:10]}…")
 
