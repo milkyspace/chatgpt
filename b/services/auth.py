@@ -17,7 +17,9 @@ def is_admin(user_id: int) -> bool:
     Returns:
         bool: True если пользователь администратор
     """
+    logger.debug("user_id: %s", user_id)
     logger.debug("is_admin: %s", user_id in cfg.admin_ids)
+    logger.debug("admin_ids: %s", cfg.admin_ids)
     return user_id in cfg.admin_ids
 
 
