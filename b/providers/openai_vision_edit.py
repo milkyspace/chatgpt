@@ -1,83 +1,66 @@
 from __future__ import annotations
+import asyncio
 import base64
+import io
 from openai import AsyncOpenAI
 from config import cfg
-import httpx
 
 
 class OpenAIVisionEditProvider:
-    """
-    Provider для настоящего редактирования изображений через Assistants API.
-    Использует модель gpt-4.1 (или gpt-4o) для vision editing.
-    """
-
     def __init__(self, model: str = "gpt-4.1"):
         self.model = model
-        self.http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(120.0, connect=10.0)
-        )
-        self.client = AsyncOpenAI(
-            api_key=cfg.openai_api_key,
-            base_url=cfg.openai_api_base,
-            http_client=self.http_client,
-        )
+        self.client = AsyncOpenAI(api_key=cfg.openai_api_key)
 
-    async def edit_image(self, image_bytes: bytes, instruction: str) -> bytes:
-        """
-        Редактирует переданное изображение согласно инструкции.
-        Возвращает байты отредактированного изображения.
-        """
-
-        # 1) Загружаем изображение как file в ассистента
-        file = await self.client.files.create(
-            file=image_bytes,
+    async def _upload_image(self, image_bytes: bytes):
+        buf = io.BytesIO(image_bytes)
+        buf.name = "image.jpg"               # обязательно!
+        return await self.client.files.create(
+            file=buf,
             purpose="input"
         )
 
-        # 2) Создаём thread
+    async def edit_image(self, image_bytes: bytes, instruction: str) -> bytes:
+        # 1) upload
+        image_file = await self._upload_image(image_bytes)
+
+        # 2) thread
         thread = await self.client.threads.create()
 
-        # 3) Добавляем в thread изображение + инструкцию
+        # 3) message
         await self.client.threads.messages.create(
             thread_id=thread.id,
             role="user",
             content=[
-                {
-                    "type": "input_image",
-                    "image_file_id": file.id
-                },
-                {
-                    "type": "text",
-                    "text": instruction
-                }
+                {"type": "input_image", "image_file_id": image_file.id},
+                {"type": "text", "text": instruction}
             ]
         )
 
-        # 4) Запускаем ассистента
+        # 4) run
         run = await self.client.threads.runs.create(
             thread_id=thread.id,
             model=self.model
         )
 
-        # 5) Ждём завершения
+        # 5) wait
         while True:
-            run_status = await self.client.threads.runs.retrieve(
-                thread_id=thread.id, run_id=run.id
+            status = await self.client.threads.runs.retrieve(
+                thread_id=thread.id,
+                run_id=run.id
             )
-            if run_status.status in ("completed", "failed"):
+            if status.status in ("completed", "failed"):
                 break
             await asyncio.sleep(0.4)
 
-        if run_status.status == "failed":
-            raise RuntimeError("OpenAI failed to edit image")
+        if status.status == "failed":
+            raise RuntimeError("Vision editing failed")
 
-        # 6) Получаем результат
+        # 6) extract output image
         messages = await self.client.threads.messages.list(thread_id=thread.id)
 
-        for message in messages.data:
-            for item in message.content:
+        for msg in messages.data:
+            for item in msg.content:
                 if item.type == "output_image":
-                    b64 = item.data
-                    return base64.b64decode(b64)
+                    return base64.b64decode(item.data)
 
-        raise RuntimeError("No output_image returned by OpenAI")
+        raise RuntimeError("No output_image returned")
