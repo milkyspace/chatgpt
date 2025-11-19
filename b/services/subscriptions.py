@@ -260,38 +260,32 @@ def _compute_plan_change_preview(
     )
 
 
-async def activate_paid_plan(
-    session: AsyncSession,
-    user_id: int,
-    new_code: str,
-) -> UserSubscription:
+async def activate_paid_plan(session: AsyncSession, user_id: int, new_code: str) -> SubscriptionUpgradeResult:
     """
-    Активация платного плана (вызывается после оплаты).
-
-    Вариант A: честная финансовая модель.
-    - Если не было платного плана / триал / истёк → просто выдаём новый срок.
-    - Если был активный платный план → считаем, какая ЧАСТЬ ЕГО ЦЕНЫ
-      ещё не "потрачена", и переводим её в дни нового плана.
+    Вариант A — честный апгрейд/даунгрейд.
     """
     now = datetime.now(timezone.utc)
     new_plan = cfg.plans[new_code]
+    new_price_per_day = new_plan.price_rub / new_plan.duration_days
 
-    # Текущая подписка и usage
-    sub = await session.scalar(
-        select(UserSubscription).where(UserSubscription.user_id == user_id)
-    )
-    usage = await session.scalar(
-        select(Usage).where(Usage.user_id == user_id)
-    )
+    sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
+    usage = await session.scalar(select(Usage).where(Usage.user_id == user_id))
 
-    # ----- Случай 1: платного плана ещё не было / триал / истёк -----
-    if (
-        not sub
-        or not sub.expires_at
-        or sub.expires_at <= now
-        or sub.is_trial
-        or not sub.plan_code
-    ):
+    # --- FIX: приводим expires_at к TZ-aware (UTC) ---
+    def normalize(dt):
+        if not dt:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    if sub:
+        sub.expires_at = normalize(sub.expires_at)
+
+    # -------------------------------------------------------
+    # 1) Если подписки нет, expired или trial → чистое начало
+    # -------------------------------------------------------
+    if (not sub) or (not sub.expires_at) or (sub.expires_at <= now) or (sub.is_trial):
         expires_at = now + timedelta(days=new_plan.duration_days)
 
         if not sub:
@@ -299,7 +293,7 @@ async def activate_paid_plan(
                 user_id=user_id,
                 plan_code=new_code,
                 is_trial=False,
-                expires_at=expires_at,
+                expires_at=expires_at
             )
             session.add(sub)
         else:
@@ -307,36 +301,74 @@ async def activate_paid_plan(
             sub.is_trial = False
             sub.expires_at = expires_at
 
-        # Сбрасываем usage
         if usage:
             usage.used_requests = 0
             usage.used_images = 0
 
         await session.commit()
-        return sub
 
-    # ----- Случай 2: есть активный платный тариф → делаем конвертацию -----
+        return SubscriptionUpgradeResult(
+            old_plan=None,
+            new_plan=new_plan,
+            converted_days=0,
+            bonus_days_req=0,
+            bonus_days_img=0,
+            total_days=new_plan.duration_days,
+            expires_at=expires_at
+        )
+
+    # -----------------------------------------------------------
+    # 2) Полная конвертация существующей подписки
+    # -----------------------------------------------------------
     old_plan = cfg.plans.get(sub.plan_code)
-    result = _compute_plan_change_preview(
-        old_plan=old_plan,
-        expires_at=sub.expires_at,
-        usage=usage,
-        new_plan=new_plan,
-        now=now,
-    )
+    old_price_per_day = old_plan.price_rub / old_plan.duration_days
 
-    # Обновляем подписку по расчёту
+    # Остаток
+    leftover_days = max((sub.expires_at - now).total_seconds() / 86400, 0)
+    leftover_value_rub = leftover_days * old_price_per_day
+    converted_days = leftover_value_rub / new_price_per_day
+
+    # Бонусы
+    bonus_req = 0
+    bonus_img = 0
+
+    if usage:
+        if old_plan.max_requests:
+            unused = max(old_plan.max_requests - usage.used_requests, 0)
+            ratio = unused / old_plan.max_requests
+            bonus_value_rub = ratio * old_plan.price_rub
+            bonus_req = bonus_value_rub / new_price_per_day
+
+        if old_plan.max_image_generations:
+            unused = max(old_plan.max_image_generations - usage.used_images, 0)
+            ratio = unused / old_plan.max_image_generations
+            bonus_value_rub = ratio * old_plan.price_rub
+            bonus_img = bonus_value_rub / new_price_per_day
+
+    # Итог
+    total_days = new_plan.duration_days + converted_days + bonus_req + bonus_img
+    new_expires_at = now + timedelta(days=total_days)
+
+    # Записываем
     sub.plan_code = new_code
     sub.is_trial = False
-    sub.expires_at = result.expires_at
+    sub.expires_at = new_expires_at
 
-    # Сброс usage под новый период
     if usage:
-        usage.used_requexpires_at = ests = 0
+        usage.used_requests = 0
         usage.used_images = 0
 
     await session.commit()
-    return sub
+
+    return SubscriptionUpgradeResult(
+        old_plan=old_plan,
+        new_plan=new_plan,
+        converted_days=converted_days,
+        bonus_days_req=bonus_req,
+        bonus_days_img=bonus_img,
+        total_days=total_days,
+        expires_at=new_expires_at
+    )
 
 
 async def preview_plan_change(session: AsyncSession, user_id: int, new_plan_code: str):
