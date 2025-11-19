@@ -83,25 +83,31 @@ class OpenAIImageProvider:
 
     async def edit_image(self, image_bytes: bytes, instruction: str) -> bytes:
         import base64
+        import io
+
         prompt = f"Отредактируй изображение согласно инструкции: {instruction}"
+
+        # Оборачиваем байты в файлоподобный объект и задаём имя файла
+        img_file = io.BytesIO(image_bytes)
+        img_file.name = "image.jpg"  # важно: расширение, чтобы SDK понял, что это JPEG
+
         try:
             response = self.clientSync.images.edit(
                 model="gpt-image-1",
-                image=image_bytes,
-                mask=io.BytesIO(),
+                image=img_file,
+                # mask не передаём, если она не нужна
                 prompt=prompt,
-                size="auto",
+                size="1024x1024",  # можно 1024x1024 / 2048x2048 / 512x512
                 n=1,
             )
 
-            for item in response.data:
-                if getattr(item, "b64_json", None):
-                    b64 = "data:image/png;base64," + item.b64_json  # type: ignore[attr-defined]
-                    return base64.b64decode(b64)
-                else:
-                    raise RuntimeError("No image URLs returned from API.")
+            # тут тоже лучше без data: префикса
+            item = response.data[0]
+            if getattr(item, "b64_json", None):
+                return base64.b64decode(item.b64_json)  # type: ignore[attr-defined]
+            else:
+                raise RuntimeError("gpt-image-1 не вернул b64_json")
 
-            return base64.b64decode("")
         except Exception as e:
             print(f"OpenAI API Error: {e}")
             raise
