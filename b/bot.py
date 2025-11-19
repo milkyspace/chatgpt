@@ -47,8 +47,8 @@ async def main():
     dp = Dispatcher(storage=storage)
 
     # Включаем роутеры
-    dp.include_router(public_router)
     dp.include_router(admin_router)
+    dp.include_router(public_router)
 
     # Создаем монитор платежей с передачей бота для уведомлений
     monitor = PaymentMonitor(
