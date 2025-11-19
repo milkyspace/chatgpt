@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import logging
 
 from datetime import datetime, timezone
 
@@ -39,6 +40,7 @@ router = Router()
 chat_pool = AsyncWorkerPool(cfg.workers_chat)
 img_pool = AsyncWorkerPool(cfg.workers_images)
 
+logger = logging.getLogger(__name__)
 
 @router.startup()
 async def _startup(bot):
@@ -415,6 +417,7 @@ async def on_photo(m: TgMessage):
                 await spend_image(session, m.from_user.id)
 
         except Exception as e:
+            logger.error(f"❗ Ошибка: {e}")
             await progress_msg.edit_text(f"❗ Ошибка: {e}")
 
         finally:
