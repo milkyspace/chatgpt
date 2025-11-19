@@ -14,40 +14,30 @@ class ImageService:
     def __init__(self):
         self.client = AsyncOpenAI()
 
-    async def edit(self, image_bytes: bytes, instruction: str, provider="openai"):
-        """
-        Vision Editing via /responses
-        """
-        try:
-            b64_image = base64.b64encode(image_bytes).decode()
-            data_url = f"data:image/jpeg;base64,{b64_image}"
+    async def edit(self, image_bytes: bytes, instruction: str):
+        b64 = base64.b64encode(image_bytes).decode()
+        data_url = f"data:image/jpeg;base64,{b64}"
 
-            resp = await ProviderService.responses_async(
-                provider,
-                model="gpt-4.1",
-                input=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "input_text", "text": instruction},
-                            {"type": "input_image", "image_url": data_url},
-                        ],
-                    }
-                ],
-            )
+        resp = await self.client.responses.create(
+            model="gpt-4.1",
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": instruction},
+                        {"type": "input_image", "image_url": data_url},
+                    ],
+                }
+            ]
+        )
 
-            # ---- Правильный парсинг выхода /responses ----
-            for msg in resp.output:
-                if msg["type"] == "message":
-                    for c in msg["content"]:
-                        if c["type"] == "output_image":
-                            img_b64 = c["image"]["data"]
-                            return base64.b64decode(img_b64), None
+        for msg in resp.output:
+            if msg["type"] == "message":
+                for c in msg["content"]:
+                    if c["type"] == "output_image":
+                        return base64.b64decode(c["image"]["data"]), None
 
-            return None, "API не вернул output_image"
-
-        except Exception as e:
-            return None, f"OpenAI editing error: {e}"
+        return None, "API не вернул изображение"
 
     async def generate(self, prompt: str, provider="openai"):
         """Генерация нового изображения через Images API"""

@@ -378,7 +378,6 @@ async def on_photo(m: TgMessage):
     # загружаем фото
     file = await m.bot.get_file(file_id)
     photo_bytes = await m.bot.download_file(file.file_path)
-    img_bytes = photo_bytes.read()
 
     img_service = ImageService()
 
@@ -421,7 +420,7 @@ async def on_photo(m: TgMessage):
         # универсальный редактор
         if mode == "editor":
             try:
-                new_img, err = await img_service.edit(img_bytes, instruction)
+                new_img, err = await img_service.edit(photo_bytes.read(), instruction)
             except Exception as e:
                 await progress_msg.edit_text(f"❗ Ошибка: {e}")
                 done_event.set()
