@@ -1,63 +1,63 @@
-import base64
-from .providers import ProviderService
-from openai import OpenAI
+# services/images.py
 
-client = OpenAI()
+import base64
+from openai import AsyncOpenAI
+from .providers import ProviderService
+
 
 class ImageService:
+    """
+    Отвечает только за работу с изображениями.
+    Не знает о Telegram или БД.
+    """
 
-    async def edit(self, image_bytes: bytes, instruction: str):
+    def __init__(self):
+        self.client = AsyncOpenAI()
+
+    async def edit(self, image_bytes: bytes, instruction: str, provider="openai"):
         """
-        Vision Editing via /responses — OpenAI >=1.59
+        Vision Editing via /responses
         """
-        print("EDIT START", len(image_bytes), instruction)
         try:
-            b64_image = base64.b64encode(image_bytes).decode("utf-8")
+            b64_image = base64.b64encode(image_bytes).decode()
             data_url = f"data:image/jpeg;base64,{b64_image}"
 
-            resp = client.responses.create(
+            resp = await ProviderService.responses_async(
+                provider,
                 model="gpt-4.1",
                 input=[
                     {
                         "role": "user",
                         "content": [
-                            {
-                                "type": "input_text",
-                                "text": instruction
-                            },
-                            {
-                                "type": "input_image",
-                                "image_url": data_url
-                            }
-                        ]
+                            {"type": "input_text", "text": instruction},
+                            {"type": "input_image", "image_url": data_url},
+                        ],
                     }
-                ]
+                ],
             )
 
-            # ищем output_image
-            for item in resp.output:
-                if item["type"] == "output_image":
-                    out_b64 = item["image"]["data"]
-                    return base64.b64decode(out_b64), None
+            # ---- Правильный парсинг выхода /responses ----
+            for msg in resp.output:
+                if msg["type"] == "message":
+                    for c in msg["content"]:
+                        if c["type"] == "output_image":
+                            img_b64 = c["image"]["data"]
+                            return base64.b64decode(img_b64), None
 
-            return None, "API не вернул изображение"
+            return None, "API не вернул output_image"
 
         except Exception as e:
-            print("EDIT ERROR", e)
             return None, f"OpenAI editing error: {e}"
 
-
     async def generate(self, prompt: str, provider="openai"):
-        """
-        Генерация нового изображения — через Images API.
-        """
+        """Генерация нового изображения через Images API"""
         try:
-            resp = ProviderService.images(
-                provider=provider,
+            resp = await ProviderService.images_async(
+                provider,
                 model="gpt-image-1",
                 prompt=prompt,
                 size="1024x1024",
-                response_format="b64_json"
+                response_format="b64_json",
             )
 
             return base64.b64decode(resp.data[0].b64_json), None

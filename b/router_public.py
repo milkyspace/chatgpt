@@ -378,6 +378,7 @@ async def on_photo(m: TgMessage):
     # загружаем фото
     file = await m.bot.get_file(file_id)
     photo_bytes = await m.bot.download_file(file.file_path)
+    img_bytes = photo_bytes.read()
 
     img_service = ImageService()
 
@@ -419,15 +420,15 @@ async def on_photo(m: TgMessage):
 
         # универсальный редактор
         if mode == "editor":
-            new_img, err = await img_service.edit(
-                photo_bytes.read(),
-                instruction,
-                provider="openai"  # или вынести в конфиг
-            )
+            try:
+                new_img, err = await img_service.edit(img_bytes, instruction)
+            except Exception as e:
+                await progress_msg.edit_text(f"❗ Ошибка: {e}")
+                done_event.set()
+                return
 
-        elif mode == "add_people":
-            desc = m.caption or "Добавить людей на фон."
-            new_img, err = await img_service.add_people(photo_bytes.read(), desc)
+            done_event.set()
+
 
         elif mode == "celebrity_selfie":
             name = m.caption or "Известная личность"
@@ -559,109 +560,10 @@ async def on_text(m: TgMessage):
 
     # editor — создаём изображение с текстовой инструкцией
     if mode == "editor":
-
-        done_event = asyncio.Event()
-
-        # показываем прогресс
-        progress_msg = await m.answer(
-            "🛠 Редактирую изображение…\n"
-            "▰▱▱▱▱▱▱▱▱  0%"
-        )
-
-        async def progress_updater():
-            total_blocks = 9
-            progress = 0
-
-            while not done_event.is_set():
-                await asyncio.sleep(0.3)
-
-                progress = min(progress + random.randint(1, 2), 80)
-
-                filled = progress * total_blocks // 100
-                bar = "▰" * filled + "▱" * (total_blocks - filled)
-
-                try:
-                    await progress_msg.edit_text(
-                        f"🛠 Редактирую изображение…\n{bar}  {progress}%"
-                    )
-                except:
-                    pass
-
-            # финальный рывок
-            try:
-                bar = "▰" * total_blocks
-                await progress_msg.edit_text(
-                    f"📸 Готово!\n{bar}  100%"
-                )
-            except:
-                pass
-
-        async def edit_job():
-            try:
-                new_img, err = await img_service.edit(img_bytes, instruction)
-            except Exception as e:
-                done_event.set()
-                await progress_msg.edit_text(f"❗ Ошибка: {e}")
-                return
-
-            done_event.set()
-
-            if err:
-                try:
-                    await progress_msg.edit_text(f"❗ Ошибка: {err}")
-                except:
-                    pass
-                return
-
-            # Отправка фото
-            try:
-                file = BufferedInputFile(new_img, filename="edit.png")
-                await m.answer_photo(file, caption="Готово! Режим: editor")
-            except Exception as e:
-                await m.answer(f"Ошибка отправки результата: {e}")
-                return
-
-            async with AsyncSessionMaker() as session:
-                await spend_image(session, m.from_user.id)
-
-        asyncio.create_task(progress_updater())
-        await img_pool.submit(edit_job)
-
-        return
-
-    # add_people — текстовое описание → картинка
-    if mode == "add_people":
-        async def job():
-            img, err = await img_service.add_people(b"", text)
-            if err:
-                await m.answer(f"❗ {err}")
-                return
-
-            file = BufferedInputFile(img, filename="result.png")
-            await m.answer_photo(file, caption="Готово!")
-
-            async with AsyncSessionMaker() as session:
-                await spend_image(session, user_id)
-
-        await img_pool.submit(job)
         return
 
     # celebrity_selfie — селфи с селебой по тексту
     if mode == "celebrity_selfie":
-        async def job():
-            celeb = text.strip()
-            img, err = await img_service.celebrity_selfie(b"", celeb)
-            if err:
-                await m.answer(f"❗ {err}")
-                return
-
-            file = BufferedInputFile(img, filename="result.png")
-            await m.answer_photo(file, caption="Готово!")
-
-            async with AsyncSessionMaker() as session:
-                await spend_image(session, user_id)
-
-        await img_pool.submit(job)
         return
 
     # fallback
