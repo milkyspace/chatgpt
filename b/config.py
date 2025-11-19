@@ -46,7 +46,7 @@ class AppConfig(BaseModel):
     # Тестовый период
     trial_days: int = 3
     trial_max_requests: int = 15
-    trial_max_images: int = 3
+    trial_max_images: int = 2
 
     # Очереди
     workers_chat: int = 4
