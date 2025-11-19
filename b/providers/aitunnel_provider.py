@@ -9,55 +9,61 @@ from config import cfg
 
 logger = logging.getLogger(__name__)
 
-def extract_image_from_message(message: Any) -> Optional[bytes]:
+def extract_image_from_ai_tunnel(message: Any) -> Optional[bytes]:
     """
-    Универсальное извлечение изображения из ChatCompletionMessage.
-    Работает с любым форматом AITunnel / OpenAI multimodal.
+    Универсальный извлекатель изображения из AITunnel ChatCompletionMessage.
+
+    Поддерживает два формата:
+    1) message.content[...]  (OpenAI style)
+    2) message.images[...]   (AITunnel style)
     """
 
-    logger.debug("message: %s", message)
-
-    if message is None:
+    if not message:
         return None
 
+    # ======= 1) AITunnel уникальный формат: message.images =======
+    images = getattr(message, "images", None)
+    if isinstance(images, list) and images:
+        img = images[0]
+
+        # Формат: {"type": "...", "image_url": {"url": "data:image/..."}}
+        if isinstance(img, dict):
+            iu = img.get("image_url")
+            if isinstance(iu, dict):
+                url = iu.get("url")
+                if isinstance(url, str) and url.startswith("data:image"):
+                    return base64.b64decode(url.split(",", 1)[1])
+
+    # ======= 2) OpenAI формат: message.content =======
     content = getattr(message, "content", None)
-    logger.debug("content: %s", content)
 
-
-    # --- Вариант 1: модель вернула строку: "data:image/png;base64,AAAA..."
+    # content == string?
     if isinstance(content, str) and content.startswith("data:image"):
         return base64.b64decode(content.split(",", 1)[1])
 
-    # --- Вариант 2: content = [{"type": "...", ...}, ...]
+    # content == list?
     if isinstance(content, list):
         for part in content:
+            if not isinstance(part, dict):
+                continue
 
-            # 2.1 {"type": "output_image", "image_url": {"url": "data:image/..."}}
-            if isinstance(part, dict):
-                img_url = (
-                    part.get("image_url", {}) or
-                    part.get("url") or
-                    None
-                )
+            # {"image_url": {"url": "..."}}
+            if "image_url" in part and isinstance(part["image_url"], dict):
+                url = part["image_url"].get("url")
+                if isinstance(url, str) and url.startswith("data:image"):
+                    return base64.b64decode(url.split(",", 1)[1])
 
-                # {"image_url": {"url": "..."}}
-                if isinstance(img_url, dict) and "url" in img_url:
-                    url = img_url["url"]
-                    if url.startswith("data:image"):
-                        return base64.b64decode(url.split(",", 1)[1])
+            # {"url": "data:image..."}
+            if "url" in part and isinstance(part["url"], str) and part["url"].startswith("data:image"):
+                return base64.b64decode(part["url"].split(",", 1)[1])
 
-                # {"url": "data:image/png;base64,..."}
-                if isinstance(img_url, str) and img_url.startswith("data:image"):
-                    return base64.b64decode(img_url.split(",", 1)[1])
+            # {"data": "<base64>"}
+            if "data" in part and isinstance(part["data"], str):
+                try:
+                    return base64.b64decode(part["data"])
+                except Exception:
+                    pass
 
-                # {"data": "<base64>"}
-                if "data" in part:
-                    try:
-                        return base64.b64decode(part["data"])
-                    except Exception:
-                        pass
-
-    # Ничего не нашли
     return None
 
 class AITunnelChatProvider:
@@ -186,9 +192,6 @@ class AITunnelImageProvider:
         )
 
     async def generate(self, prompt: str, aspect_ratio: str = "1:1") -> bytes:
-        """
-        Генерация изображения (универсальный формат ответа).
-        """
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
@@ -197,14 +200,15 @@ class AITunnelImageProvider:
             )
 
             msg = response.choices[0].message
-            img_bytes = extract_image_from_message(msg)
 
+            logger.debug("AITunnel response.message.images = %r", getattr(msg, "images", None))
+            logger.debug("AITunnel response.message.content = %r", getattr(msg, "content", None))
+
+            img_bytes = extract_image_from_ai_tunnel(msg)
             if img_bytes:
                 return img_bytes
 
-            raise RuntimeError(
-                "Модель не вернула изображение. Проверь формат ответа AITunnel."
-            )
+            raise RuntimeError("Модель не вернула изображение")
 
         except Exception as e:
             logger.error(f"Ошибка обработки generate: {e}")
