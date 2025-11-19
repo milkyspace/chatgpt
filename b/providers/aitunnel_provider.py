@@ -225,6 +225,7 @@ class AITunnelImageProvider:
                 timeout=30
             )
 
+            logger.debug("response: %s", response)
             msg = response.choices[0].message
             img_bytes = extract_image_from_ai_tunnel(msg)
 
