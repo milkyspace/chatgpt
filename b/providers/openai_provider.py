@@ -80,7 +80,7 @@ class OpenAIImageProvider:
             print(f"OpenAI API Error: {e}")
             raise
 
-    async def edit(self, image_bytes: bytes, instruction: str) -> bytes:
+    async def edit_image(self, image_bytes: bytes, instruction: str) -> bytes:
         import base64
         prompt = f"Отредактируй изображение согласно инструкции: {instruction}"
         try:
