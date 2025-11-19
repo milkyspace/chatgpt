@@ -28,7 +28,7 @@ from payments.yoomoney import YooMoneyProvider
 from queue_bg import AsyncWorkerPool
 from services.chat import ChatService
 from services.images import ImageService
-from services.subscriptions import ensure_user
+from services.subscriptions import ensure_user, preview_plan_change
 from services.usage import spend_request, can_spend_image, spend_image
 from aiogram.fsm.state import default_state
 from aiogram.filters import StateFilter
@@ -523,15 +523,47 @@ async def show_subs(cq: CallbackQuery, is_edit: bool = True):
 
 @router.callback_query(F.data.startswith("buy:"))
 async def buy(cq: CallbackQuery):
-    plan = cq.data.split(":", 1)[1]
+    plan_code = cq.data.split(":", 1)[1]
+    plan = cfg.plans[plan_code]
+
+    async with AsyncSessionMaker() as session:
+        preview = await preview_plan_change(session, cq.from_user.id, plan_code)
+
+    old_plan_title = preview["old_plan"].title if preview["old_plan"] else "Нет"
+    final_days = preview["final_days"]
+
+    text = (
+        "💳 <b>Перед оплатой — расчёт новой подписки</b>\n\n"
+        f"<b>Ваш текущий тариф:</b> {old_plan_title}\n"
+        f"<b>Осталось дней:</b> {preview['leftover_days']:.1f}\n"
+        f"<b>Конвертация остатка:</b> +{preview['converted_days']:.1f} дня\n"
+        f"<b>Бонус за запросы:</b> +{preview['bonus_days_req']:.1f} дня\n"
+        f"<b>Бонус за изображения:</b> +{preview['bonus_days_img']:.1f} дня\n\n"
+        f"📈 <b>После оплаты {plan.title} будет действовать:</b>\n"
+        f"<b>{final_days:.1f} дня</b>\n\n"
+        f"Стоимость: <b>{plan.price_rub} ₽</b> за {plan.duration_days} дней."
+    )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Продолжить", callback_data=f"confirm_pay:{plan_code}")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="subs:show")]
+    ])
+
+    await cq.message.edit_text(text, reply_markup=keyboard)
+    await cq.answer()
+
+@router.callback_query(F.data.startswith("confirm_pay:"))
+async def confirm_pay(cq: CallbackQuery):
+    plan = cq.data.split(":")[1]
     plan_conf = cfg.plans[plan]
-    provider = YooMoneyProvider() if cfg.payment_provider == "yoomoney" else None
+
+    provider = YooMoneyProvider()
     description = f"Оплата плана {plan_conf.title}"
 
-    # создаем платёж и получаем URL и ID платежа
-    pay_url, payment_id = await provider.create_invoice(cq.from_user.id, plan, plan_conf.price_rub, description)
+    pay_url, payment_id = await provider.create_invoice(
+        cq.from_user.id, plan, plan_conf.price_rub, description
+    )
 
-    # Сохраняем информацию о платеже в базу данных
     async with AsyncSessionMaker() as session:
         payment = Payment(
             user_id=cq.from_user.id,
@@ -544,18 +576,17 @@ async def buy(cq: CallbackQuery):
         session.add(payment)
         await session.commit()
 
-    # красивый текст + красивая кнопка
-    text = (
-        f"🧾 <b>Счёт на оплату</b>\n\n"
-        f"<b>Тариф:</b> {plan_conf.title}\n"
-        f"<b>Стоимость:</b> {plan_conf.price_rub} ₽ за {plan_conf.duration_days} дней\n"
-        f"<b>Что входит:</b>\n"
-        f"• Запросы: {'∞' if plan_conf.max_requests is None else plan_conf.max_requests}\n"
-        f"• Генерации изображений: {'∞' if plan_conf.max_image_generations is None else plan_conf.max_image_generations}\n"
-        f"• Длина запроса: до {plan_conf.max_text_len} символов\n\n"
-        f"Нажмите кнопку ниже, чтобы перейти к оплате 👇"
+    await cq.message.edit_text(
+        f"🧾 <b>Счёт на оплату создан</b>\n\n"
+        f"Тариф: <b>{plan_conf.title}</b>\n"
+        f"Цена: <b>{plan_conf.price_rub} ₽</b>\n\n"
+        f"Нажмите кнопку, чтобы перейти к оплате:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Перейти к оплате", url=pay_url)],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="subs:show")],
+        ])
     )
-    await cq.message.answer(text, reply_markup=plan_buy_keyboard(plan, pay_url))
+
     await cq.answer()
 
 

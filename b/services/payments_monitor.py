@@ -75,7 +75,8 @@ class PaymentMonitor:
         logger.info(f"Платеж {payment.id} ({payment.plan_code}) подтвержден.")
 
         # Активируем подписку
-        subscription = await activate_paid_plan(session, payment.user_id, payment.plan_code)
+        # subscription = await activate_paid_plan(session, payment.user_id, payment.plan_code)
+        upgrade = await activate_paid_plan(session, payment.user_id, payment.plan_code)
 
         # Начисляем бонус рефереру
         user = await session.get(User, payment.user_id)
@@ -89,6 +90,13 @@ class PaymentMonitor:
             .values(status="succeeded")
         )
         await session.commit()
+
+        # Отправляем детализацию апгрейда/даунгрейда
+        if self.notification_service:
+            await self.notification_service.send_subscription_upgrade_info(
+                user_id=payment.user_id,
+                result=upgrade
+            )
 
         # Отправляем уведомление пользователю
         if self.notification_service and subscription:

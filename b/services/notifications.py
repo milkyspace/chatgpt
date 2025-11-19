@@ -1,8 +1,7 @@
 from __future__ import annotations
 from aiogram import Bot
 from datetime import datetime
-from config import cfg
-
+from subscriptions import SubscriptionUpgradeResult
 
 class NotificationService:
     """Сервис для отправки уведомлений пользователям"""
@@ -87,3 +86,39 @@ class NotificationService:
             import logging
             logger = logging.getLogger(__name__)
             logger.error(f"Ошибка отправки уведомления об ошибке платежа пользователю {user_id}: {e}")
+
+    async def send_subscription_upgrade_info(
+            self,
+            user_id: int,
+            result: SubscriptionUpgradeResult
+    ):
+        """Подробное уведомление об апгрейде/даунгрейде."""
+        try:
+            old_name = result.old_plan.title if result.old_plan else "—"
+            new_name = result.new_plan.title
+
+            msg = (
+                "🎉 <b>Подписка обновлена!</b>\n\n"
+                f"🔄 Переход: <b>{old_name} → {new_name}</b>\n\n"
+
+                "📊 <b>Расчёт:</b>\n"
+                f"• Остаток старого тарифа → <b>{result.converted_days:.2f} дня</b>\n"
+                f"• Бонус за экономию запросов → <b>{result.bonus_days_req:.2f} дня</b>\n"
+                f"• Бонус за экономию изображений → <b>{result.bonus_days_img:.2f} дня</b>\n"
+                "——————————\n"
+                f"📅 <b>Итого: +{result.total_days:.2f} дня</b>\n\n"
+                f"Новый срок действия подписки: <b>{result.expires_at.strftime('%d.%m.%Y %H:%M')}</b>\n\n"
+
+                "Спасибо, что остаётесь с нами ❤️"
+            )
+
+            await self.bot.send_message(
+                chat_id=user_id,
+                text=msg,
+                parse_mode="HTML"
+            )
+
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Ошибка отправки upgrade-уведомления для {user_id}: {e}")

@@ -233,8 +233,14 @@ async def user_grant_plan(cq: CallbackQuery):
         return
 
     async with AsyncSessionMaker() as session:
-        await activate_paid_plan(session, user_id, plan_code)
+        upgrade = await activate_paid_plan(session, user_id, plan_code)
         await session.commit()
+
+        # Отправляем уведомление пользователю
+        if cq.bot:
+            from services.notifications import NotificationService
+            ns = NotificationService(cq.bot)
+            await ns.send_subscription_upgrade_info(user_id, upgrade)
 
     await cq.answer("Подписка успешно назначена", show_alert=True)
     await cq.message.edit_text(f"🌟 Подписка <b>{plan.title}</b> назначена пользователю {user_id}")
