@@ -77,7 +77,7 @@ def _calculate_conversion(
 
     # Конвертация остатка
     leftover_rub = leftover_days * old_price
-    converted_days = leftover_rub / new_price * 0.2
+    converted_days = leftover_rub / new_price
 
     bonus_req = 0.0
     bonus_img = 0.0
@@ -94,7 +94,7 @@ def _calculate_conversion(
             bonus_img = _calc_bonus_days(unused, old_plan.max_image_generations, old_plan.price_rub, new_price)
 
     return {
-        "converted": converted_days,
+        "converted": converted_days * 0.2,
         "bonus_req": bonus_req * 0.1,
         "bonus_img": bonus_img * 0.1
     }
