@@ -15,13 +15,6 @@ services:
     volumes:
       - ./mariadb_data:/var/lib/mysql
 
-    # ✔️ Правильный healthcheck для MariaDB
-    healthcheck:
-      test: [ "CMD-SHELL", "mysqladmin ping --silent" ]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   chatgpt_telegram_bot:
     container_name: chatgpt_telegram_bot
     build:
@@ -34,8 +27,7 @@ services:
 
     # Бот стартует только после healthcheck=healthy
     depends_on:
-      mariadb:
-        condition: service_healthy
+      - mariadb
 
     environment:
       DATABASE_URL: >-
