@@ -31,13 +31,23 @@ def admin_back_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def keyboards_for_modes() -> InlineKeyboardMarkup:
-    """Клавиатура для выбора режимов"""
+def keyboards_for_modes(active_mode: str | None = None) -> InlineKeyboardMarkup:
+    def btn(mode, title, icon):
+        if mode == active_mode:
+            return InlineKeyboardButton(
+                text=f"{icon} {title} ⭐",
+                callback_data="noop"
+            )
+        return InlineKeyboardButton(
+            text=f"{icon} {title}",
+            callback_data=f"mode:{mode}"
+        )
+
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Ассистент", callback_data="mode:assistant"),
-         InlineKeyboardButton(text="🎨 Генерация", callback_data="mode:image")],
-        [InlineKeyboardButton(text="🛠 Редактор фото", callback_data="mode:editor"),
-         InlineKeyboardButton(text="🤳 Селфи со звёздой", callback_data="mode:celebrity_selfie")],
+        [btn("assistant", "Ассистент", "💬"),
+         btn("image", "Генерация", "🎨")],
+        [btn("editor", "Редактор фото", "🛠"),
+         btn("celebrity_selfie", "Селфи со звездой", "🤳")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")],
     ])
 

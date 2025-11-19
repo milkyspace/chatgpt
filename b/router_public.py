@@ -59,6 +59,22 @@ async def _shutdown(bot):
     await chat_pool.stop()
     await img_pool.stop()
 
+async def animate_panel_change(message, new_text: str, new_markup=None):
+    """
+    Делает плавную анимацию смены текста:
+    - убирает старый текст
+    - затем плавно показывает новый
+    """
+    try:
+        # шаг 1: очистить
+        await message.edit_text("…")
+        await asyncio.sleep(0.05)
+
+        # шаг 2: показываем новый текст
+        await message.edit_text(new_text, reply_markup=new_markup)
+    except Exception:
+        # На случай Telegram flood / race
+        await message.edit_text(new_text, reply_markup=new_markup)
 
 def build_progress_bar(used: int, max_val: int | None, segments: int = 8) -> str:
     """
@@ -354,38 +370,54 @@ async def panel_help(cq: CallbackQuery):
 @router.callback_query(F.data.startswith("mode:"))
 async def switch_mode(cq: CallbackQuery):
     mode = cq.data.split(":", 1)[1]
-    if mode not in cfg.modes:
-        await cq.answer("Неизвестный режим")
-        return
 
-    # Проверяем доступ к режиму
     async with AsyncSessionMaker() as session:
-        has_access = await has_active_subscription(session, cq.from_user.id)
-
-        if not has_access:
-            # Показываем окно с предложением подписки
-            text = (
-                f"🚫 <b>Доступ ограничен</b>\n\n"
-                f"💎 <b>Оформите подписку</b> чтобы получить доступ ко всем функциям:"
+        # Деактивируем старый активный режим
+        chat_session = await session.scalar(
+            select(ChatSession).where(
+                ChatSession.user_id == cq.from_user.id,
+                ChatSession.is_active == True
             )
-            await cq.message.edit_text(text)
-            await cq.answer()
+        )
+        if chat_session:
+            chat_session.mode = mode
+            await session.commit()
 
-            await show_subs(cq, False)
+    DESCRIPTIONS = {
+        "assistant": (
+            "💬 <b>Ассистент</b>\n"
+            "GPT-чат для любых задач: вопросы, идеи, код, советы.\n\n"
+            "<b>Как пользоваться:</b>\n"
+            "Просто напишите сообщение — получите ответ."
+        ),
+        "image": (
+            "🎨 <b>Генерация изображений</b>\n"
+            "Создаёт картинки по вашему тексту.\n\n"
+            "<b>Как пользоваться:</b>\n"
+            "Напишите, что должно быть на изображении.\n"
+            "Пример: <i>«кот в космосе»</i>"
+        ),
+        "editor": (
+            "🛠 <b>Редактор фото</b>\n"
+            "Улучшение, ретушь, изменение содержимого фото.\n\n"
+            "<b>Как пользоваться:</b>\n"
+            "Отправьте фото + инструкцию.\n"
+            "Пример: <i>«сделай ярче», «удали лишние объекты»</i>"
+        ),
+        "celebrity_selfie": (
+            "🤳 <b>Селфи со звездой</b>\n"
+            "Магическое добавление знаменитостей на ваше фото.\n\n"
+            "<b>Как пользоваться:</b>\n"
+            "Отправьте своё фото + имя звезды.\n"
+            "Пример: <i>«Селфи со Скарлетт Йоханссон»</i>"
+        ),
+    }
 
-            return
+    new_text = DESCRIPTIONS.get(mode, "Режим переключён.")
+    markup = keyboards_for_modes(active_mode=mode)
 
-    async with AsyncSessionMaker() as session:
-        # создаем новую сессию чата в выбранном режиме
-        res = await session.execute(select(ChatSession).where(
-            ChatSession.user_id == cq.from_user.id, ChatSession.is_active == True))
-        active = res.scalars().first()
-        if active:
-            active.is_active = False
-        session.add(ChatSession(user_id=cq.from_user.id, title=f"{mode.capitalize()} чат", mode=mode, is_active=True))
-        await session.commit()
-    await cq.message.answer(f"Режим переключен: {mode}")
-    await cq.answer()
+    await animate_panel_change(cq.message, new_text, markup)
+    await cq.answer("Режим переключён")
 
 
 def format_plan_info(code: str) -> str:
