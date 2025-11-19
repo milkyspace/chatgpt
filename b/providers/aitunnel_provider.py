@@ -148,7 +148,6 @@ class AITunnelImageProvider:
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 modalities=["image", "text"],
-                image_config={"aspect_ratio": aspect_ratio}
             )
 
             # Извлекаем изображение из ответа
