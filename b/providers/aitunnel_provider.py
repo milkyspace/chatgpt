@@ -217,12 +217,10 @@ class AITunnelImageProvider:
         """
         try:
             self.model = cfg.edit_model
-            base64_image = base64.b64encode(image_bytes).decode("utf-8")
-            img = f"data:image/jpeg;base64,{base64_image}"
 
             response = await self.client.images.edit(
                 model=self.model,
-                image=img,
+                image=("image.png", image_bytes, "image/png"),
                 prompt=instruction,
                 timeout=30
             )
