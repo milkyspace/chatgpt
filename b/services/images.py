@@ -26,22 +26,26 @@ class ImageService:
                         "role": "user",
                         "content": [
                             {"type": "input_text", "text": instruction},
-                            {"type": "input_image", "image_url": data_url}
-                        ]
+                            {"type": "input_image", "image_url": data_url},
+                        ],
                     }
-                ]
+                ],
             )
 
-            # --- ВАЖНО: ПРАВИЛЬНЫЙ ПАРСИНГ ---
+            # ------- ПАРСИНГ НОВОГО ОТВЕТА -------
             for block in resp.output:
-                if block["type"] != "message":
+                # block — это объект, а НЕ dict!
+                if block.type != "message":
                     continue
 
-                for c in block["content"]:
-                    if c["type"] == "output_image":
-                        return base64.b64decode(c["image"]["data"]), None
+                # block.content — список объектов
+                for item in block.content:
+                    # item тоже объект
+                    if item.type == "output_image":
+                        b64 = item.image.data
+                        return base64.b64decode(b64), None
 
-            return None, "output_image не найден в ответе"
+            return None, "output_image не найден"
 
         except Exception as e:
             return None, f"OpenAI editing error: {e}"
