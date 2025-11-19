@@ -358,22 +358,31 @@ async def buy(cq: CallbackQuery):
 
 @router.message(F.photo)
 async def on_photo(m: TgMessage):
-    """Обработка фотографий с анализом и редактированием через AITUNNEL"""
+    """
+    Обработка изображений:
+    - editor — редактирование
+    - celebrity_selfie — селфи со знаменитостью
+    """
 
-    # Загружаем файл
+    # Загружаем файл из Telegram
     file_id = m.photo[-1].file_id
     file = await m.bot.get_file(file_id)
     photo_bytes = await m.bot.download_file(file.file_path)
     img_bytes = photo_bytes.getvalue()
 
-    # Прогресс-бар
+    img_service = ImageService()
+
+    # Флаг ошибки — чтобы progress_updater не рисовал "Готово!"
+    error_happened = False
     done_event = asyncio.Event()
+
+    # Стартовый прогресс
     progress_msg = await m.answer(
-        "🛠 Анализирую изображение…\n"
-        "▰▱▱▱▱▱▱▱▱  0%"
+        "🛠 Обрабатываю изображение…\n▰▱▱▱▱▱▱▱▱  0%"
     )
 
     async def progress_updater():
+        """Прогресс-бар, который стопается при done_event."""
         total = 9
         progress = 0
 
@@ -390,7 +399,7 @@ async def on_photo(m: TgMessage):
             except Exception:
                 pass
 
-        # финальное обновление — ТОЛЬКО если не было ошибки
+        # финальный вывод — только если не было ошибки
         if not error_happened:
             try:
                 bar = "▰" * total
@@ -398,13 +407,12 @@ async def on_photo(m: TgMessage):
             except Exception:
                 pass
 
-    error_happened = False
     async def job():
-        instruction = m.caption or ""
-        img_service = ImageService()
+        """Основная логика обработки фотографии."""
+        nonlocal error_happened
 
         try:
-            # определяем режим
+            # Получаем активный режим
             async with AsyncSessionMaker() as session:
                 chat_session = await session.scalar(
                     select(ChatSession).where(
@@ -414,48 +422,24 @@ async def on_photo(m: TgMessage):
                 )
                 mode = chat_session.mode if chat_session else "editor"
 
-            # --- CELEBRITY SELFIE ---
-            if mode == "celebrity_selfie":
-                celebrity_name = instruction.strip()
+            instruction = m.caption or ""
 
-                if not celebrity_name:
-                    error_happened = True
-                    await progress_msg.edit_text("❗ Укажите имя знаменитости в подписи к фото.")
-                    done_event.set()
-                    return
-
-                result_img, err = await img_service.celebrity_selfie(img_bytes, celebrity_name)
-                done_event.set()
-
-                if err:
-                    error_happened = True
-                    logger.error(f"Ошибка celebrity_selfie: {err}")
-                    await progress_msg.edit_text(f"❗ {err}")
-                    return
-
-                await m.answer_photo(
-                    BufferedInputFile(result_img, filename="celebrity_selfie.png"),
-                    caption=f"Готово! 📸 Ваше селфи с {celebrity_name}"
-                )
-
-                async with AsyncSessionMaker() as session:
-                    await spend_image(session, m.from_user.id)
-
-                return
-
-            # --- EDITOR (дефолт) ---
+            # ----------------------
+            #        editor
+            # ----------------------
             if mode == "editor":
-                result_img, err = await img_service.edit(img_bytes, instruction)
+                instruction = instruction or "Улучшить изображение."
+                new_img, err = await img_service.edit(img_bytes, instruction)
                 done_event.set()
 
                 if err:
-                    logger.error(f"Ошибка редактора: {err}")
+                    error_happened = True
                     await progress_msg.edit_text(f"❗ {err}")
                     return
 
                 await m.answer_photo(
-                    BufferedInputFile(result_img, filename="edited.png"),
-                    caption="Готово! ✨"
+                    BufferedInputFile(new_img, filename="result.png"),
+                    caption="Готово! 🎨"
                 )
 
                 async with AsyncSessionMaker() as session:
@@ -463,17 +447,52 @@ async def on_photo(m: TgMessage):
 
                 return
 
-            # если режим неизвестен
-            await progress_msg.edit_text("❗ Этот режим ещё не реализован.")
+            # ----------------------
+            #     celebrity_selfie
+            # ----------------------
+            if mode == "celebrity_selfie":
+                if not instruction.strip():
+                    error_happened = True
+                    done_event.set()
+                    await progress_msg.edit_text("❗ Укажите имя знаменитости в подписи к фото.")
+                    return
+
+                new_img, err = await img_service.celebrity_selfie(
+                    img_bytes, instruction.strip()
+                )
+
+                done_event.set()
+
+                if err:
+                    error_happened = True
+                    await progress_msg.edit_text(f"❗ {err}")
+                    return
+
+                await m.answer_photo(
+                    BufferedInputFile(new_img, filename="celebrity_selfie.png"),
+                    caption="Готово! ⭐"
+                )
+
+                async with AsyncSessionMaker() as session:
+                    await spend_image(session, m.from_user.id)
+
+                return
+
+            # ----------------------
+            #   fallback / unknown
+            # ----------------------
+            error_happened = True
             done_event.set()
+            await progress_msg.edit_text(f"⚙️ Режим '{mode}' требует загрузки изображения с подписью.")
+            return
 
         except Exception as e:
-            logger.error(f"Критическая ошибка: {e}")
-            await progress_msg.edit_text(f"❗ Произошла ошибка: {e}")
-        finally:
+            error_happened = True
             done_event.set()
+            logger.error(f"Критическая ошибка: {e}")
+            await progress_msg.edit_text(f"❗ Произошла ошибка: {str(e)}")
 
-    # Запускаем задачи
+    # Запуск задач
     asyncio.create_task(progress_updater())
     await img_pool.submit(job)
 
