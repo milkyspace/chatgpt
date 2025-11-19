@@ -3,9 +3,11 @@ from typing import Sequence, AsyncGenerator, Optional, List, Dict, Any
 from openai import AsyncOpenAI
 import httpx
 import base64
+import logging
 import json
 from config import cfg
 
+logger = logging.getLogger(__name__)
 
 class AITunnelChatProvider:
     """
@@ -167,6 +169,7 @@ class AITunnelImageProvider:
                 raise RuntimeError("Модель не вернула изображение")
 
         except Exception as e:
+            logger.error(f"Ошибка обработки generate: {e}")
             print(f"AITUNNEL Image Generation Error: {e}")
             raise
 
@@ -218,6 +221,7 @@ class AITunnelImageProvider:
                 raise RuntimeError("Модель не вернула отредактированное изображение")
 
         except Exception as e:
+            logger.error(f"Ошибка обработки edit_image: {e}")
             print(f"AITUNNEL Image Edit Error: {e}")
             raise
 
