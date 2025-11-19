@@ -371,6 +371,11 @@ async def on_photo(m: TgMessage):
     - celebrity_selfie: селфи со знаменитостью
     """
 
+    from services.auth import is_user_blocked
+    if await is_user_blocked(m.from_user.id):
+        await m.answer("🚫 Вы не можете отправлять изображения. Поддержка: @support")
+        return
+
     # Загружаем файл из Telegram
     file_id = m.photo[-1].file_id
     file = await m.bot.get_file(file_id)
@@ -596,6 +601,11 @@ async def on_text(m: TgMessage):
 
     # Игнорируем команды
     if m.text and m.text.startswith("/"):
+        return
+
+    from services.auth import is_user_blocked
+    if await is_user_blocked(m.from_user.id):
+        await m.answer("🚫 Ваш доступ ограничен. Свяжитесь с поддержкой.")
         return
 
     user_id = m.from_user.id

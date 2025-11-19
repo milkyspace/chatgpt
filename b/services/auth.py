@@ -1,5 +1,8 @@
 from __future__ import annotations
 from config import cfg
+from db import AsyncSessionMaker
+from sqlalchemy import select
+from models import User
 
 
 def is_admin(user_id: int) -> bool:
@@ -26,3 +29,8 @@ async def admin_required(user_id: int) -> bool:
         bool: True если пользователь администратор
     """
     return is_admin(user_id)
+
+async def is_user_blocked(user_id: int) -> bool:
+    async with AsyncSessionMaker() as session:
+        user = await session.scalar(select(User).where(User.id == user_id))
+        return bool(user and user.is_blocked)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from config import cfg
 
 def subscriptions_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для выбора подписки"""
@@ -57,3 +58,22 @@ def plan_buy_keyboard(plan_code: str, pay_url: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💳 Оплатить", url=pay_url)],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="subs:show")]
     ])
+
+def broadcast_segments_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🟢 Активные", callback_data="broadcast:active")],
+        [InlineKeyboardButton(text="🔴 Неактивные", callback_data="broadcast:inactive")],
+        [InlineKeyboardButton(text="⏳ Неактивны > 3 дней", callback_data="broadcast:inactive3")],
+        [InlineKeyboardButton(text="🛡 Админы", callback_data="broadcast:admins")],
+        [InlineKeyboardButton(text="📤 Всем", callback_data="broadcast:all")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin:main")],
+    ])
+
+def grant_plan_keyboard(user_id: int):
+    rows = []
+    for code, p in cfg.plans.items():
+        rows.append([InlineKeyboardButton(text=p.title, callback_data=f"grant:{user_id}:{code}")])
+
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"lookup:{user_id}")])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
