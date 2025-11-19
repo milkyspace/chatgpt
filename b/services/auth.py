@@ -3,7 +3,9 @@ from config import cfg
 from db import AsyncSessionMaker
 from sqlalchemy import select
 from models import User
+import logging
 
+logger = logging.getLogger(__name__)
 
 def is_admin(user_id: int) -> bool:
     """
@@ -15,6 +17,7 @@ def is_admin(user_id: int) -> bool:
     Returns:
         bool: True если пользователь администратор
     """
+    logger.debug("is_admin: %s", user_id in cfg.admin_ids)
     return user_id in cfg.admin_ids
 
 
