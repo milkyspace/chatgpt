@@ -9,60 +9,33 @@ from config import cfg
 
 logger = logging.getLogger(__name__)
 
-def extract_image_from_ai_tunnel(message: Any) -> Optional[bytes]:
+def extract_image_from_ai_tunnel_images_response(response) -> Optional[bytes]:
     """
-    Универсальный извлекатель изображения из AITunnel ChatCompletionMessage.
+    Корректно извлекает изображение из ImagesResponse (AITunnel/OpenAI Images API).
 
-    Поддерживает два формата:
-    1) message.content[...]  (OpenAI style)
-    2) message.images[...]   (AITunnel style)
+    Поддерживается:
+    - data[n].b64_json
+    - data[n].url = "data:image/...;base64,..."
     """
+    try:
+        data_list = getattr(response, "data", None)
+        if not data_list or not isinstance(data_list, list):
+            return None
 
-    if not message:
-        return None
+        item = data_list[0]
 
-    # ======= 1) AITunnel уникальный формат: message.images =======
-    images = getattr(message, "images", None)
-    if isinstance(images, list) and images:
-        img = images[0]
+        # Попробуем b64_json
+        b64_val = getattr(item, "b64_json", None)
+        if b64_val:
+            return base64.b64decode(b64_val)
 
-        # Формат: {"type": "...", "image_url": {"url": "data:image/..."}}
-        if isinstance(img, dict):
-            iu = img.get("image_url")
-            if isinstance(iu, dict):
-                url = iu.get("url")
-                if isinstance(url, str) and url.startswith("data:image"):
-                    return base64.b64decode(url.split(",", 1)[1])
+        # Попробуем url="data:image/png;base64,...."
+        url = getattr(item, "url", None)
+        if url and isinstance(url, str) and url.startswith("data:image"):
+            return base64.b64decode(url.split(",", 1)[1])
 
-    # ======= 2) OpenAI формат: message.content =======
-    content = getattr(message, "content", None)
-
-    # content == string?
-    if isinstance(content, str) and content.startswith("data:image"):
-        return base64.b64decode(content.split(",", 1)[1])
-
-    # content == list?
-    if isinstance(content, list):
-        for part in content:
-            if not isinstance(part, dict):
-                continue
-
-            # {"image_url": {"url": "..."}}
-            if "image_url" in part and isinstance(part["image_url"], dict):
-                url = part["image_url"].get("url")
-                if isinstance(url, str) and url.startswith("data:image"):
-                    return base64.b64decode(url.split(",", 1)[1])
-
-            # {"url": "data:image..."}
-            if "url" in part and isinstance(part["url"], str) and part["url"].startswith("data:image"):
-                return base64.b64decode(part["url"].split(",", 1)[1])
-
-            # {"data": "<base64>"}
-            if "data" in part and isinstance(part["data"], str):
-                try:
-                    return base64.b64decode(part["data"])
-                except Exception:
-                    pass
+    except Exception as e:
+        logger.error(f"Ошибка парсинга ImagesResponse: {e}")
 
     return None
 
@@ -213,11 +186,11 @@ class AITunnelImageProvider:
 
     async def edit_image(self, image_bytes: bytes, instruction: str) -> bytes:
         """
-        Редактирование изображения по текстовой инструкции.
+        Редактирование изображения через OpenAI Images API (AITunnel proxy).
         """
-        try:
-            self.model = cfg.edit_model
 
+        try:
+            # Важно: image= должен быть tuple("name", bytes, mime)
             response = await self.client.images.edit(
                 model=self.model,
                 image=("image.png", image_bytes, "image/png"),
@@ -226,13 +199,12 @@ class AITunnelImageProvider:
             )
 
             logger.debug("response: %s", response)
-            msg = response.choices[0].message
-            img_bytes = extract_image_from_ai_tunnel(msg)
 
-            if img_bytes:
-                return img_bytes
+            img_bytes = extract_image_from_ai_tunnel_images_response(response)
+            if not img_bytes:
+                raise RuntimeError("Модель не вернула отредактированное изображение")
 
-            raise RuntimeError("Модель не вернула отредактированное изображение")
+            return img_bytes
 
         except Exception as e:
             logger.error(f"Ошибка обработки edit_image: {e}")
