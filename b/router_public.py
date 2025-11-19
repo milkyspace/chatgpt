@@ -60,114 +60,132 @@ async def _shutdown(bot):
     await img_pool.stop()
 
 
+def build_progress_bar(used: int, max_val: int | None, segments: int = 20) -> str:
+    """
+    Адаптивный прогресс-бар:
+    - 20 сегментов
+    - цветовая индикация (красный/желтый/зелёный)
+    - поддержка безлимита
+
+    Вернёт строку вида:
+    🟩🟩🟩🟨🟨🟥⬛⬛⬛⬛ ...
+    """
+
+    # Безлимит
+    if max_val is None:
+        return "🟩" * segments
+
+    # Защита от деления
+    max_val = max_val or 1
+
+    pct = min(100, int((used / max_val) * 100))
+    filled = pct * segments // 100
+
+    # Цветовая схема
+    if pct <= 30:
+        color = "🟥"
+    elif pct <= 70:
+        color = "🟨"
+    else:
+        color = "🟩"
+
+    bar = color * filled + "⬛" * (segments - filled)
+    return bar
+
+
 async def _render_status_line(session, user_id: int) -> str:
     """
-    Формирует статус пользователя:
-    - цветовой статус
+    Улучшенный статус подписки:
+    - цветовой статус (зел/жел/кр)
     - тариф
-    - дата окончания
-    - дни до окончания
-    - лимиты + прогресс-бары
+    - оставшиеся дни
+    - лимиты + прогресс бары (20 сег)
     - личный ID
     """
 
-    # --- Загружаем сущности ---
+    # --- Загружаем ---
     sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
     usage = await session.scalar(select(Usage).where(Usage.user_id == user_id))
     user = await session.scalar(select(User).where(User.id == user_id))
 
-    now_utc = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
 
-    # Удобные значения
     used_req = usage.used_requests if usage else 0
     used_img = usage.used_images if usage else 0
 
-    # Базовые переменные
-    plan_name = "Нет"
+    # Значения по умолчанию
+    status_icon = "🔴"
+    status_text = "Неактивна"
     expires_str = "—"
-    left_days_str = "—"
+    days_left_str = "—"
+    plan_name = "Нет"
+    max_req = 0
+    max_img = 0
 
-    # Защита от отсутствия подписки
-    if not sub:
-        status_icon = "🔴"
-        status_text = "Неактивна"
-        limits_str = "Запросы: 0 / 0\nИзображения: 0 / 0"
-        progress_req = "░░░░░░░░░░ 0%"
-        progress_img = "░░░░░░░░░░ 0%"
-    else:
-        # Приводим дату
+    if sub:
         expires_at = sub.expires_at
         if expires_at:
             if expires_at.tzinfo is None:
                 expires_at = expires_at.replace(tzinfo=timezone.utc)
-            else:
-                expires_at = expires_at.astimezone(timezone.utc)
+            expires_at = expires_at.astimezone(timezone.utc)
 
-        # Активность
-        is_active = expires_at and expires_at > now_utc
+        # Активна?
+        if expires_at and expires_at > now:
+            # Days left
+            days_left = (expires_at - now).days
+            days_left_str = str(days_left)
+            expires_str = expires_at.astimezone().strftime("%d.%m.%Y %H:%M")
 
-        # --- Статус цвета ---
-        if not is_active:
-            status_icon = "🔴"
-            status_text = "Истекла"
-        else:
-            # Остаток дней
-            left_days = (expires_at - now_utc).days
-            if left_days <= 3:
+            # Цветовая индикация
+            if days_left <= 3:
                 status_icon = "🟡"
                 status_text = "Скоро заканчивается"
             else:
                 status_icon = "🟢"
                 status_text = "Активна"
 
-            expires_str = expires_at.astimezone().strftime("%d.%m.%Y %H:%M")
-            left_days_str = f"{left_days}"
-
-        # --- Тариф ---
-        if sub.is_trial:
-            plan_name = "Trial"
-            max_req, max_img = cfg.trial_max_requests, cfg.trial_max_images
+            # Тариф
+            if sub.is_trial:
+                plan_name = "Trial"
+                max_req = cfg.trial_max_requests
+                max_img = cfg.trial_max_images
+            else:
+                plan = cfg.plans.get(sub.plan_code)
+                plan_name = plan.title if plan else sub.plan_code
+                max_req = plan.max_requests
+                max_img = plan.max_image_generations
         else:
-            plan = cfg.plans.get(sub.plan_code)
-            plan_name = plan.title if plan else sub.plan_code
-            max_req = plan.max_requests
-            max_img = plan.max_image_generations
+            status_icon = "🔴"
+            status_text = "Истекла"
 
-        # --- Лимиты ---
-        def make_progress(used: int, max_val: int | None) -> tuple[str, str]:
-            """Возвращает прогресс-бар (10 сегментов) и процент."""
-            if max_val is None:
-                return ("██████████", "∞")
-            pct = min(100, int((used / max_val) * 100)) if max_val else 0
-            filled = pct * 10 // 100
-            bar = "█" * filled + "░" * (10 - filled)
-            return bar, f"{pct}%"
+    # --- Прогресс-бары ---
+    req_bar = build_progress_bar(used_req, max_req)
+    img_bar = build_progress_bar(used_img, max_img)
 
-        req_bar, req_pct = make_progress(used_req, max_req)
-        img_bar, img_pct = make_progress(used_img, max_img)
+    # Значения для лимитов
+    def fmt(v):
+        return "∞" if v is None else v
 
-        limits_str = (
-            f"Запросы: {used_req}/{max_req if max_req else '∞'}  ({req_pct})\n"
-            f"{req_bar}\n"
-            f"Изображения: {used_img}/{max_img if max_img else '∞'}  ({img_pct})\n"
-            f"{img_bar}"
-        )
+    limits_text = (
+        f"Запросы: {used_req}/{fmt(max_req)}\n"
+        f"{req_bar}\n\n"
+        f"Изображения: {used_img}/{fmt(max_img)}\n"
+        f"{img_bar}"
+    )
 
-    # --- Формируем текст ---
-    text = (
-        f"📊 <b>Статус подписки</b>\n"
+    # --- Финальный текст ---
+    return (
+        "📊 <b>Статус подписки</b>\n"
         f"<b>Статус:</b> {status_icon} {status_text}\n"
         f"<b>Тариф:</b> {plan_name}\n"
         f"<b>Действует до:</b> {expires_str}\n"
-        f"<b>Осталось дней:</b> {left_days_str}\n"
-        f"\n"
-        f"📈 <b>Лимиты</b>\n"
-        f"{limits_str}\n"
-        f"\n"
-        f"🆔 <b>Ваш ID:</b> {user_id}"
+        f"<b>Осталось дней:</b> {days_left_str}\n"
+        "\n"
+        "📈 <b>Лимиты</b>\n"
+        f"{limits_text}\n"
+        "\n"
+        f"🆔 <b>ID:</b> {user_id}"
     )
-
-    return text
 
 
 @router.message(CommandStart())
