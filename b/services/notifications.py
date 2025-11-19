@@ -105,14 +105,6 @@ class NotificationService:
             # 1. Не было подписки раньше
             # -----------------------------
             if old_plan is None:
-                msg = (
-                    "🎉 <b>Подписка активирована!</b>\n\n"
-                    f"Тариф: <b>{new_plan.title}</b>\n"
-                    f"Действует до: <b>{result.expires_at.strftime('%d.%m.%Y %H:%M')}</b>\n\n"
-                    "Спасибо, что выбрали нас ❤️"
-                )
-
-                await self.bot.send_message(user_id, msg, parse_mode="HTML")
                 return
 
             # -----------------------------
