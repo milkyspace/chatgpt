@@ -2,6 +2,7 @@ from __future__ import annotations
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from config import cfg
 
+
 def subscriptions_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для выбора подписки"""
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -9,6 +10,7 @@ def subscriptions_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Pro Plus — 1290₽ / 30 дней", callback_data="buy:pro_plus")],
         [InlineKeyboardButton(text="Pro Premium — 2990₽ / 90 дней", callback_data="buy:pro_premium")],
     ])
+
 
 def admin_menu() -> InlineKeyboardMarkup:
     """Главное меню админ-панели"""
@@ -21,11 +23,13 @@ def admin_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")]
     ])
 
+
 def admin_back_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для возврата в админ-панель"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ В админ-панель", callback_data="admin:main")]
     ])
+
 
 def keyboards_for_modes() -> InlineKeyboardMarkup:
     """Клавиатура для выбора режимов"""
@@ -37,20 +41,19 @@ def keyboards_for_modes() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")],
     ])
 
+
 def top_panel(bot_username: str, ref_code: str) -> InlineKeyboardMarkup:
     """Верхняя панель управления"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Продлить подписку", callback_data="subs:show"),
-         InlineKeyboardButton(text="🎛 Режим", callback_data="panel:mode")],
+        [InlineKeyboardButton(text="💳 Продлить подписку", callback_data="subs:show")],
         [
-            InlineKeyboardButton(
-                text="👥 Пригласить",
-                switch_inline_query=f"Переходи в https://t.me/{bot_username}?start={ref_code} — получи бонус!"
-            )
+            InlineKeyboardButton(text="🎛 Режим", callback_data="panel:mode"),
+            InlineKeyboardButton(text="👥 Пригласить", callback_data="panel:referral")
         ],
         [InlineKeyboardButton(text="❓ Помощь", callback_data="panel:help"),
          InlineKeyboardButton(text="🛡 Админ-панель", callback_data="panel:admin")],
     ])
+
 
 def plan_buy_keyboard(plan_code: str, pay_url: str) -> InlineKeyboardMarkup:
     """Клавиатура для оплаты плана"""
@@ -58,6 +61,7 @@ def plan_buy_keyboard(plan_code: str, pay_url: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💳 Оплатить", url=pay_url)],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="subs:show")]
     ])
+
 
 def broadcast_segments_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -68,6 +72,7 @@ def broadcast_segments_keyboard():
         [InlineKeyboardButton(text="📤 Всем", callback_data="broadcast:all")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin:main")],
     ])
+
 
 def grant_plan_keyboard(user_id: int):
     rows = []
