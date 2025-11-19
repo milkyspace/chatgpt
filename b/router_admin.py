@@ -479,7 +479,7 @@ async def process_broadcast_text(m: TgMessage, state: FSMContext):
             await m.answer("❌ В базе данных нет пользователей для рассылки")
             return
 
-        processing_msg = await m.answer(f"🔄 Начинаю рассылку для {len(user_list)} пользователей...")
+        processing_msg = await m.answer(f"🔄 Начинаю рассылку для {len(users)} пользователей...")
 
         success_count = 0
         fail_count = 0
