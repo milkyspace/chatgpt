@@ -4,6 +4,7 @@ from sqlalchemy import select
 from models import User, UserSubscription, Usage, ChatSession, Message
 from services.subscriptions import get_limits
 from typing import Iterable
+from datetime import datetime, timezone
 
 async def require_active_subscription(session: AsyncSession, user_id: int) -> bool:
     """Возвращает True, если подписка активна и не истёк trial."""
@@ -35,3 +36,24 @@ def trim_messages(tokens_est: int, messages: list[dict[str, str]], max_len: int)
         out.append(m)
         total += l
     return list(reversed(out))
+
+async def get_subscription_button_text(session, user_id: int) -> str:
+    sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
+    now = datetime.now(timezone.utc)
+
+    if not sub or not sub.expires_at or sub.expires_at <= now:
+        return "🔴 Подписка: неактивна"
+
+    # активная
+    expires = sub.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+
+    days_left = (expires - now).days
+
+    if days_left <= 3:
+        icon = "🟡"
+    else:
+        icon = "🟢"
+
+    return f"{icon} Подписка: {days_left} дн."

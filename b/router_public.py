@@ -17,7 +17,7 @@ from aiogram.types import CallbackQuery, User, Chat
 from config import cfg
 from db import AsyncSessionMaker
 from keyboards import plan_buy_keyboard
-from keyboards import top_panel, keyboards_for_modes
+from keyboards import top_panel, keyboards_for_modes, main_reply_keyboard
 from models import (
     User,
     ChatSession,
@@ -32,7 +32,7 @@ from services.images import ImageService
 from services.subscriptions import ensure_user, get_limits
 from services.usage import can_spend_request, spend_request, can_spend_image, spend_image
 from services.subscriptions import has_active_subscription
-from utils import store_message, get_history, trim_messages
+from utils import store_message, get_history, trim_messages, get_subscription_button_text
 from providers.openai_provider import OpenAIImageProvider
 from aiogram.fsm.state import default_state
 from aiogram.fsm.context import FSMContext
@@ -108,7 +108,6 @@ def build_progress_bar(used: int, max_val: int | None, segments: int = 8) -> str
 
     bar = color * filled + "⬜️" * (segments - filled)
     return bar
-
 
 async def _render_status_line(session, user_id: int) -> str:
     """
@@ -214,12 +213,20 @@ async def start(m: TgMessage):
     async with AsyncSessionMaker() as session:
         user = await ensure_user(session, m.from_user.id, m.from_user.username,
                                  m.from_user.first_name, m.from_user.last_name, ref_code)
-        status = await _render_status_line(session, m.from_user.id)
 
-    me = await m.bot.get_me()  # ← вот здесь получаем имя бота
+        status_panel = await _render_status_line(session, m.from_user.id)
+        sub_btn_text = await get_subscription_button_text(session, m.from_user.id)
+
+    me = await m.bot.get_me()
+
     await m.answer(
-        status,
-        reply_markup=top_panel(me.username, user.referral_code)  # ← передаём его сюда
+        status_panel,
+        reply_markup=main_reply_keyboard(sub_btn_text)
+    )
+
+    await m.answer(
+        "⬆️ Меню управления:",
+        reply_markup=top_panel(me.username, user.referral_code)
     )
 
 
@@ -271,6 +278,30 @@ async def cmd_new_chat(m: TgMessage):
 
     await m.answer("✅ Создан новый чат. Теперь можно отправлять сообщения.")
 
+
+@router.message(F.text.contains("Подписка"))
+async def reply_subscription_status(m: TgMessage):
+    async with AsyncSessionMaker() as session:
+        # получаем статус
+        sub = await session.scalar(
+            select(UserSubscription).where(UserSubscription.user_id == m.from_user.id)
+        )
+        now = datetime.now(timezone.utc)
+
+        # неактивна → сразу открываем меню подписок
+        if not sub or not sub.expires_at or sub.expires_at <= now:
+            await show_subs(m, is_edit=False)  # выводим меню подписок
+            return
+
+        # активна → показываем панель как при /start
+        status = await _render_status_line(session, m.from_user.id)
+        user = await session.scalar(select(User).where(User.id == m.from_user.id))
+
+    me = await m.bot.get_me()
+    await m.answer(
+        status,
+        reply_markup=top_panel(me.username, user.referral_code)
+    )
 
 @router.callback_query(F.data == "panel:referral")
 async def panel_referral(cq: CallbackQuery):
