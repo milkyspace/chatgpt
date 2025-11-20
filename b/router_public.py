@@ -12,7 +12,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import Message as TgMessage, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select
 from sqlalchemy import update
-from aiogram.types import CallbackQuery, User
+from aiogram.types import CallbackQuery
 
 from config import cfg
 from db import AsyncSessionMaker
