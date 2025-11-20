@@ -233,6 +233,23 @@ async def start(m: TgMessage):
             ref_code
         )
 
+        async with AsyncSessionMaker() as session:
+            chat_session = await session.scalar(
+                select(ChatSession).where(
+                    ChatSession.user_id == m.from_user.id,
+                    ChatSession.is_active == True
+                )
+            )
+
+            if not chat_session:
+                session.add(ChatSession(
+                    user_id=m.from_user.id,
+                    title="Новый чат",
+                    mode="assistant",
+                    is_active=True
+                ))
+                await session.commit()
+
         # Проверяем, новый ли это пользователь
         sub = await session.scalar(
             select(UserSubscription).where(UserSubscription.user_id == user.id)
@@ -478,7 +495,16 @@ async def switch_mode(cq: CallbackQuery):
         )
         if chat_session:
             chat_session.mode = mode
-            await session.commit()
+        else:
+            chat_session = ChatSession(
+                user_id=cq.from_user.id,
+                title="Новый чат",
+                mode=mode,
+                is_active=True
+            )
+            session.add(chat_session)
+
+        await session.commit()
 
     DESCRIPTIONS = {
         "assistant": (
