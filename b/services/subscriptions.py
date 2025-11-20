@@ -82,7 +82,7 @@ def _calculate_conversion(
 
         # ---- Запросы ----
         if old_plan.max_requests and new_plan.max_requests:
-            unused = max(old_plan.max_requests - usage.used_requests, 0)
+            unused = max(max(old_plan.max_requests, 100) - usage.used_requests, 0)
 
             price_item_old = old_plan.price_rub / old_plan.max_requests
             price_item_new = new_plan.price_rub / new_plan.max_requests
@@ -91,7 +91,7 @@ def _calculate_conversion(
 
         # ---- Изображения ----
         if old_plan.max_image_generations and new_plan.max_image_generations:
-            unused = max(old_plan.max_image_generations - usage.used_images, 0)
+            unused = max(max(old_plan.max_image_generations, 5) - usage.used_images, 0)
 
             price_item_old = old_plan.price_rub / old_plan.max_image_generations
             price_item_new = new_plan.price_rub / new_plan.max_image_generations
