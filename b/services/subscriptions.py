@@ -309,6 +309,21 @@ async def preview_plan_change(session: AsyncSession, user_id: int, new_plan_code
 
     final = new_plan.duration_days + conv["converted"] + conv["bonus_req"] + conv["bonus_img"]
 
+    # ====== БЛОК ЭФФЕКТИВНОСТИ / ЭКОНОМИИ ======
+    # сколько дней сверху даём по сравнению с “чистой” покупкой
+    extra_days = max(final - new_plan.duration_days, 0.0)
+
+    if new_plan.duration_days > 0:
+        efficiency_factor = final / new_plan.duration_days  # во сколько раз срок больше
+    else:
+        efficiency_factor = 1.0
+
+    efficiency_percent = max((efficiency_factor - 1.0) * 100.0, 0.0)
+
+    # “ценность” доп. дней в рублях
+    price_per_day = new_plan.price_rub / new_plan.duration_days
+    saved_rub = extra_days * price_per_day
+
     return {
         "old_plan": old_plan,
 
@@ -326,4 +341,11 @@ async def preview_plan_change(session: AsyncSession, user_id: int, new_plan_code
 
         "final_days": final,
         "final_str": format_days_hours(final),
+
+        # 🔥 Новые поля для UI
+        "extra_days": extra_days,
+        "extra_str": format_days_hours(extra_days),
+        "efficiency_factor": efficiency_factor,
+        "efficiency_percent": efficiency_percent,
+        "saved_rub": saved_rub,
     }

@@ -522,19 +522,19 @@ def format_plan_info(code: str) -> str:
 
     BENEFITS = {
         "pro_lite": [
-            "Быстрые ответы",
-            "Редактирование & генерация фото",
-            "Для ежедневных задач"
+            "⚡ Быстрые ответы",
+            "🎨 Редактирование и генерация фото",
+            "📌 Для ежедневных задач"
         ],
         "pro_plus": [
-            "Высокая скорость",
-            "Повышенные лимиты",
-            "Качественная генерация"
+            "🚀 Повышенная скорость",
+            "📈 Повышенные лимиты",
+            "🎯 Уверенная генерация изображений"
         ],
         "pro_premium": [
-            "Максимальные лимиты",
-            "Приоритетная обработка",
-            "Для работы, бизнеса и творчества"
+            "🔥 Максимальные лимиты",
+            "👑 Приоритетная обработка",
+            "💼 Для работы, бизнеса и творчества"
         ]
     }
 
@@ -542,34 +542,45 @@ def format_plan_info(code: str) -> str:
     img_limit = "∞" if plan.max_image_generations is None else plan.max_image_generations
     text_limit = f"{plan.max_text_len} символов"
 
-    benefits = " / ".join(BENEFITS.get(code, []))
+    benefits_list = "\n".join(f"• {b}" for b in BENEFITS.get(code, []))
 
+    # Разделитель для красоты
     return (
-        f"<b>{plan.title}</b> — <b>{plan.price_rub} ₽</b> / {plan.duration_days} дн.\n\n"
+        f"<b>────────────────────────</b>\n"
+        f"🎫 <b>{plan.title}</b>\n"
+        f"💰 <b>{plan.price_rub} ₽</b> / {plan.duration_days} дней\n"
+        f"<b>────────────────────────</b>\n\n"
+
         f"✨ <b>Преимущества:</b>\n"
-        f"{benefits}\n\n"
-        f"📦 <b>Включено:</b>\n"
+        f"{benefits_list}\n\n"
+
+        f"📦 <b>Что входит:</b>\n"
         f"• Запросы: <b>{req_limit}</b>\n"
-        f"• Изобр.: <b>{img_limit}</b>\n"
-        f"• Сообщения: <b>{text_limit}</b>"
+        f"• Изображения: <b>{img_limit}</b>\n"
+        f"• Сообщения: <b>{text_limit}</b>\n"
     )
 
 
 @router.callback_query(F.data == "subs:show")
 async def show_subs(cq: CallbackQuery, is_edit: bool = True):
     text = (
-        "💳 <b>Доступные подписки</b>\n\n"
-        f"{format_plan_info('pro_lite')}\n\n"
-        f"{format_plan_info('pro_plus')}\n\n"
-        f"{format_plan_info('pro_premium')}\n\n"
-        "Выберите нужный тариф для оплаты."
+        "💳 <b>Доступные подписки</b>\n"
+        "Выберите тариф, который подходит вам лучше всего:\n\n"
+
+        f"{format_plan_info('pro_lite')}\n"
+        f"{format_plan_info('pro_plus')}\n"
+        f"{format_plan_info('pro_premium')}\n"
+        "<b>────────────────────────</b>\n"
+        "👇 Выберите тариф для оформления:"
     )
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Купить Pro Lite", callback_data="buy:pro_lite")],
-        [InlineKeyboardButton(text="Купить Pro Plus", callback_data="buy:pro_plus")],
-        [InlineKeyboardButton(text="Купить Pro Premium", callback_data="buy:pro_premium")],
-        [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="panel:main")],
+        [InlineKeyboardButton(text="⚡ Купить Pro Lite", callback_data="buy:pro_lite")],
+        [InlineKeyboardButton(text="🚀 Купить Pro Plus", callback_data="buy:pro_plus")],
+        [InlineKeyboardButton(text="👑 Купить Pro Premium", callback_data="buy:pro_premium")],
+        [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="panel:main")],
     ])
+
     if is_edit:
         await cq.message.edit_text(text=text, reply_markup=kb)
         await cq.answer()
@@ -603,7 +614,6 @@ async def buy(cq: CallbackQuery):
         # 3) Делаем превью
         preview = await preview_plan_change(session, cq.from_user.id, plan_code)
 
-
     # --- Извлекаем данные ---
     old_plan_title = preview["old_plan"].title if preview["old_plan"] else "Нет"
 
@@ -612,6 +622,11 @@ async def buy(cq: CallbackQuery):
     bonus_req = format_days_hours(preview["bonus_days_req"])
     bonus_img = format_days_hours(preview["bonus_days_img"])
     final_days = format_days_hours(preview["final_days"])
+
+    # 🔥 Эффективность апгрейда
+    extra_str = preview.get("extra_str", format_days_hours(preview["final_days"] - plan.duration_days))
+    eff_percent = int(round(preview.get("efficiency_percent", 0)))
+    saved_rub = int(round(preview.get("saved_rub", 0)))
 
     # --- Шаг 1: мини-загрузка ---
     loading_msg = await cq.message.edit_text("⏳ Выполняем расчёт…")
@@ -629,7 +644,10 @@ async def buy(cq: CallbackQuery):
         f"🔄 <b>Конвертация:</b> +{converted}\n"
         f"⚡ <b>Бонус за запросы:</b> +{bonus_req}\n"
         f"🖼 <b>Бонус за изображения:</b> +{bonus_img}\n\n"
-        f"📈 <b>Итог:</b> {final_days} по тарифу <b>{plan.title}</b>"
+        f"📈 <b>Итог:</b> {final_days} по тарифу <b>{plan.title}</b>\n\n"
+        f"💎 <b>Дополнительно к базовому сроку:</b> +{extra_str}\n"
+        f"📊 <b>Эффективность апгрейда:</b> +{eff_percent}% к длительности\n"
+        f"💰 <b>Ориентировочная выгода:</b> ~{saved_rub} ₽ ценности сверху\n"
     )
 
     await loading_msg.edit_text(
