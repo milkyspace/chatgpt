@@ -191,7 +191,7 @@ async def _render_status_line(session, user_id: int) -> str:
 
     # --- Прогресс-бары ---
     req_bar = (build_progress_bar(used_req, max_req) + '\n\n') if used_req > 0 else ""
-    img_bar = build_progress_bar(used_img, max_img) if used_img > 0 else ""
+    img_bar = (build_progress_bar(used_img, max_img) + '\n') if used_img > 0 else ""
 
     def fmt(v):
         return "∞" if v is None else v
@@ -213,7 +213,6 @@ async def _render_status_line(session, user_id: int) -> str:
         "\n"
         "📈 <b>Лимиты</b>\n"
         f"{limits_text}\n"
-        "\n"
         f"🆔 <code>{user_id}</code>"
     )
 
