@@ -225,13 +225,41 @@ async def start(m: TgMessage):
         ref_code = m.text.split(" ", 1)[1].strip()
 
     async with AsyncSessionMaker() as session:
-        user = await ensure_user(session, m.from_user.id, m.from_user.username,
-                                 m.from_user.first_name, m.from_user.last_name, ref_code)
+        user = await ensure_user(
+            session,
+            m.from_user.id,
+            m.from_user.username,
+            m.from_user.first_name,
+            m.from_user.last_name,
+            ref_code
+        )
+
+        # Проверяем, новый ли это пользователь
+        sub = await session.scalar(
+            select(UserSubscription).where(UserSubscription.user_id == user.id)
+        )
+        is_new_user = sub and sub.is_trial and sub.plan_code is None
 
         status_panel = await _render_status_line(session, m.from_user.id)
 
     me = await m.bot.get_me()
 
+    # Если новый — отправляем приветствие
+    if is_new_user:
+        welcome_text = (
+            "👋 <b>Добро пожаловать!</b>\n\n"
+            "🎁 <b>Мы подарили вам пробную подписку!</b>\n"
+            f"Она активна на <b>{cfg.trial_days} дней</b>.\n\n"
+            "Доступные возможности:\n"
+            "• 💬 Умный чат-ассистент\n"
+            "• 🎨 Генерация изображений\n"
+            "• 🛠 Редактор фото\n"
+            "• 🤳 Селфи со звёздами\n\n"
+            "Приятного использования! 🫶"
+        )
+        await m.answer(welcome_text)
+
+    # Основная панель
     await m.answer(
         status_panel,
         reply_markup=top_panel(me.username, user.referral_code)
