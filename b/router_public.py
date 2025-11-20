@@ -798,12 +798,11 @@ async def on_photo(m: TgMessage):
             #  РЕЖИМ: celebrity_selfie
             # -----------------------------
             if mode == "celebrity_selfie":
-                # В этом режиме подпись = имя знаменитости
-                celebrity_name = instruction
+                celebrity_name = instruction.strip()
 
                 if not celebrity_name:
-                    # Не редактируем progress_msg — выводим ОТДЕЛЬНОЕ сообщение
                     error_happened = True
+                    done_event.set()
                     await m.answer("❗ Укажите имя знаменитости в подписи к фото.")
                     return
 
@@ -814,8 +813,15 @@ async def on_photo(m: TgMessage):
 
                 if err:
                     error_happened = True
-                    logger.error(f"Ошибка celebrity_selfie: {err}")
+                    done_event.set()
                     await m.answer(f"❗ {err}")
+                    return
+
+                # если модель вернула то же фото
+                if new_img == img_bytes:
+                    error_happened = True
+                    done_event.set()
+                    await m.answer("❗ Не удалось добавить знаменитость. Попробуйте другое фото или другое имя.")
                     return
 
                 await m.answer_photo(
@@ -823,7 +829,6 @@ async def on_photo(m: TgMessage):
                     caption=f"Готово! ⭐ Ваше селфи с {celebrity_name}",
                 )
 
-                # Списание изображения
                 async with AsyncSessionMaker() as session:
                     await spend_image(session, m.from_user.id)
 
