@@ -51,7 +51,7 @@ class NotificationService:
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="👫 Пригласить друга", callback_data="panel:referral")],
                 [InlineKeyboardButton(text="❓ Помощь", callback_data="panel:help")],
-                [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")]
+                [InlineKeyboardButton(text="⬅️ В главное меню", callback_data="panel:main")]
             ])
 
             await self.bot.send_message(
