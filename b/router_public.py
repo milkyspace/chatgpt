@@ -350,7 +350,7 @@ async def panel_referral(cq: CallbackQuery):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📤 Поделиться ссылкой",
                               switch_inline_query=f"Присоединяйся! {referral_url}")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")]
+        [InlineKeyboardButton(text="⬅️ В главное меню", callback_data="panel:main")]
     ])
 
     await cq.message.edit_text(text, reply_markup=keyboard)
