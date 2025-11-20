@@ -190,15 +190,15 @@ async def _render_status_line(session, user_id: int) -> str:
             status_text = "Истекла"
 
     # --- Прогресс-бары ---
-    req_bar = build_progress_bar(used_req, max_req)
-    img_bar = build_progress_bar(used_img, max_img)
+    req_bar = (build_progress_bar(used_req, max_req) + '\n\n') if used_req > 0 else ""
+    img_bar = build_progress_bar(used_img, max_img) if used_img > 0 else ""
 
     def fmt(v):
         return "∞" if v is None else v
 
     limits_text = (
         f"Запросы: {used_req}/{fmt(max_req)}\n"
-        f"{req_bar}\n\n"
+        f"{req_bar}"
         f"Изображения: {used_img}/{fmt(max_img)}\n"
         f"{img_bar}"
     )
@@ -323,13 +323,27 @@ async def panel_referral(cq: CallbackQuery):
     me = await cq.bot.get_me()
     referral_url = f"https://t.me/{me.username}?start={user_row.referral_code}"
 
+    from sqlalchemy import func
+
+    referred_total = await session.scalar(
+        select(func.count(User.id)).where(User.referred_by == cq.from_user.id)
+    )
+
+    paid_total = await session.scalar(
+        select(func.count(User.id))
+        .join(Payment, Payment.user_id == User.id)
+        .where(User.referred_by == cq.from_user.id)
+        .where(Payment.status == "succeeded")
+    )
+
     text = (
-        "👫 <b>Приглашайте друзей и получайте бонусы!</b>\n\n"
-        f"Ваша реферальная ссылка:\n<code>{referral_url}</code>\n\n"
+        "👫 <b>Приглашайте друзей</b>\n\n"
+        f"📨 Пришло пользователей: <b>{referred_total}</b>\n"
+        f"💳 Оплатили подписку: <b>{paid_total}</b>\n\n"
+        f"Ваша ссылка:\n<code>{referral_url}</code>\n\n"
         "За каждого друга, который оплатит подписку:\n"
-        "• <b>Вам</b> – +5 дней к подписке\n"
-        "• <b>Другу</b> – 3 дня бесплатного доступа\n\n"
-        "Просто поделитесь ссылкой с друзьями!"
+        "• Вам — +5 дней\n"
+        "• Ему — 3 дня"
     )
 
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton

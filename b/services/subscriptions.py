@@ -84,8 +84,8 @@ def _calculate_conversion(
         if old_plan.max_requests and new_plan.max_requests:
             unused = max(max(old_plan.max_requests, 100) - usage.used_requests, 0)
 
-            price_item_old = old_plan.price_rub / old_plan.max_requests
-            price_item_new = new_plan.price_rub / new_plan.max_requests
+            price_item_old = old_plan.price_rub / max(old_plan.max_requests, 100)
+            price_item_new = new_plan.price_rub / max(new_plan.max_requests, 100)
 
             bonus_req = _calc_bonus_days(unused, price_item_old, price_item_new)
 
@@ -93,15 +93,15 @@ def _calculate_conversion(
         if old_plan.max_image_generations and new_plan.max_image_generations:
             unused = max(max(old_plan.max_image_generations, 5) - usage.used_images, 0)
 
-            price_item_old = old_plan.price_rub / old_plan.max_image_generations
-            price_item_new = new_plan.price_rub / new_plan.max_image_generations
+            price_item_old = old_plan.price_rub / max(old_plan.max_image_generations, 5)
+            price_item_new = new_plan.price_rub / max(new_plan.max_image_generations, 5)
 
             bonus_img = _calc_bonus_days(unused, price_item_old, price_item_new)
 
     # Немного уменьшим бонусы, чтобы не было слишком жирно
     return {
         "converted": converted_days * 0.2,
-        "bonus_req": bonus_req * 0.2,
+        "bonus_req": bonus_req * 0.3,
         "bonus_img": bonus_img * 0.2
     }
 
@@ -148,9 +148,23 @@ async def ensure_user(
 
     # рефералка
     if referred_by_code:
-        referrer = await session.scalar(select(User).where(User.referral_code == referred_by_code))
+        referrer = await session.scalar(
+            select(User).where(User.referral_code == referred_by_code)
+        )
         if referrer:
             user.referred_by = referrer.id
+
+            # === уведомление рефереру ===
+            if bot := cfg.bot_ref:  # сюда передадим bot в startup
+                try:
+                    ref_username = f"@{username}" if username else f"id {tg_user_id}"
+                    await bot.send_message(
+                        chat_id=referrer.id,
+                        text=f"🎉 <b>Новый реферал!</b>\n"
+                             f"Пользователь {ref_username} зарегистрировался по вашей ссылке!"
+                    )
+                except Exception:
+                    pass
 
     # trial
     sub = UserSubscription(

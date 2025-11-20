@@ -36,7 +36,7 @@ def keyboards_for_modes(active_mode: str | None = None) -> InlineKeyboardMarkup:
     def btn(mode, title, icon):
         if mode == active_mode:
             return InlineKeyboardButton(
-                text=f"{icon} {title} ⭐",
+                text=f"✅{icon} {title}",
                 callback_data="noop"
             )
         return InlineKeyboardButton(

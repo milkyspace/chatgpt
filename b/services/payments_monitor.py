@@ -123,12 +123,19 @@ class PaymentMonitor:
             plan = cfg.plans.get(payment.plan_code)
             plan_title = plan.title if plan else payment.plan_code
 
-            # 4.1. Базовое уведомление «подписка активирована»
+            # 4.1.1 Базовое уведомление «подписка активирована»
             await self.notification_service.send_subscription_activated(
                 user_id=payment.user_id,
                 plan_title=plan_title,
                 expires_at=upgrade.expires_at,
             )
+
+            # 4.1.2 Уведомление рефералу
+            if user and user.referred_by:
+                await self.notification_service.send_message(
+                    user.referred_by,
+                    f"🎉 Ваш реферал оплатил подписку!\nВам начислено +5 дней."
+                )
 
             # 4.2. Детализация апгрейда/даунгрейда
             # Внутри send_subscription_upgrade_info уже учтено:

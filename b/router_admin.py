@@ -14,10 +14,11 @@ import logging
 from config import cfg
 from db import AsyncSessionMaker
 from keyboards import admin_menu, admin_back_keyboard, broadcast_segments_keyboard, grant_plan_keyboard
-from models import Payment, User, UserSubscription, ChatSession, Message
+from models import Payment, User, UserSubscription, ChatSession, Message, Usage
 from payments.yoomoney import YooMoneyProvider
 from services.subscriptions import activate_paid_plan
 from services.auth import is_admin
+from states.admin_states import AdminStates
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +36,10 @@ router.callback_query.filter(admin_filter)
 class BroadcastStates(StatesGroup):
     waiting_for_broadcast_text = State()
 
+
 class LookupStates(StatesGroup):
     waiting_for_query = State()
+
 
 @router.message(Command("lookup"))
 async def lookup_user(m: TgMessage):
@@ -68,6 +71,7 @@ async def lookup_user(m: TgMessage):
 
     await show_lookup_card(m, user.id)
 
+
 @router.callback_query(F.data.startswith("lookup:"))
 async def lookup_back(cq: CallbackQuery):
     user_id = int(cq.data.split(":")[1])
@@ -76,6 +80,7 @@ async def lookup_back(cq: CallbackQuery):
     await show_lookup_card(cq.message, user_id)
 
     await cq.answer()
+
 
 async def show_lookup_card(target_message: TgMessage, user_id: int):
     async with AsyncSessionMaker() as session:
@@ -124,14 +129,17 @@ async def show_lookup_card(target_message: TgMessage, user_id: int):
     )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Обнулить подписку", callback_data=f"admin:zero_sub:{user_id}")],
+        [InlineKeyboardButton(text="Убрать дни", callback_data=f"admin:remove_days:{user_id}")],
+        [InlineKeyboardButton(text="🌟 Выдать подписку", callback_data=f"user:grant:{user_id}")],
         [InlineKeyboardButton(text="⛔ Забанить", callback_data=f"user:ban:{user_id}")],
         [InlineKeyboardButton(text="♻ Разбанить", callback_data=f"user:unban:{user_id}")],
-        [InlineKeyboardButton(text="🌟 Выдать подписку", callback_data=f"user:grant:{user_id}")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin:main")],
     ])
 
     # ключевой момент: мы не меняем Message; мы редактируем текст
     await target_message.edit_text(text, reply_markup=kb)
+
 
 async def lookup_render(target_message: TgMessage, query: str):
     async with AsyncSessionMaker() as session:
@@ -155,6 +163,7 @@ async def lookup_render(target_message: TgMessage, query: str):
     # Показываем карточку
     await show_lookup_card(target_message, user.id)
 
+
 @router.callback_query(F.data == "admin:lookup")
 async def admin_lookup_start(cq: CallbackQuery, state: FSMContext):
     await state.set_state(LookupStates.waiting_for_query)
@@ -168,6 +177,7 @@ async def admin_lookup_start(cq: CallbackQuery, state: FSMContext):
     )
     await cq.answer()
 
+
 @router.message(LookupStates.waiting_for_query)
 async def admin_lookup_process(m: TgMessage, state: FSMContext):
     query = m.text.strip()
@@ -180,6 +190,56 @@ async def admin_lookup_process(m: TgMessage, state: FSMContext):
 
     await lookup_render(sent, query)
 
+
+@router.callback_query(F.data.startswith("admin:zero_sub:"))
+async def admin_zero_sub(cq: CallbackQuery):
+    user_id = int(cq.data.split(":")[2])
+    async with AsyncSessionMaker() as session:
+        sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
+        if sub:
+            sub.expires_at = datetime.now(timezone.utc)
+            await session.commit()
+
+    await cq.answer("Готово!")
+    await cq.message.answer(f"✔ Подписка пользователя {user_id} обнулена.")
+
+
+@router.callback_query(F.data.startswith("admin:remove_days:"))
+async def admin_remove_days_start(cq: CallbackQuery, state: FSMContext):
+    user_id = int(cq.data.split(":")[2])
+    await state.update_data(target_user=user_id)
+    await state.set_state(AdminStates.REMOVE_DAYS)
+    await cq.message.answer("Введите количество дней, которые нужно удалить у пользователя:")
+    await cq.answer()
+
+
+@router.message(AdminStates.REMOVE_DAYS)
+async def admin_remove_days_finish(m: TgMessage, state: FSMContext):
+    data = await state.get_data()
+    user_id = data["target_user"]
+
+    try:
+        days = float(m.text.replace(",", "."))
+    except:
+        await m.answer("❗ Введите число (например: 3.5)")
+        return
+
+    async with AsyncSessionMaker() as session:
+        sub = await session.scalar(
+            select(UserSubscription).where(UserSubscription.user_id == user_id)
+        )
+        if not sub or not sub.expires_at:
+            await m.answer("❗ У пользователя нет активной подписки.")
+            await state.clear()
+            return
+
+        sub.expires_at -= timedelta(days=days)
+        await session.commit()
+
+    await state.clear()
+    await m.answer(f"✔ У пользователя {user_id} убрано {days} дней.")
+
+
 @router.callback_query(F.data.startswith("user:ban:"))
 async def user_ban(cq: CallbackQuery):
     user_id = int(cq.data.split(":")[2])
@@ -190,11 +250,38 @@ async def user_ban(cq: CallbackQuery):
             await cq.answer("Пользователь не найден", show_alert=True)
             return
 
+        # Находим подписку
+        sub = await session.scalar(
+            select(UserSubscription).where(UserSubscription.user_id == user_id)
+        )
+
+        # Находим usage
+        usage = await session.scalar(
+            select(Usage).where(Usage.user_id == user_id)
+        )
+
+        # Баним пользователя
         user.is_blocked = True
+
+        # Обнуляем подписку
+        if sub:
+            sub.plan_code = None
+            sub.is_trial = False
+            sub.expires_at = None
+
+        # Обнуляем Usage
+        if usage:
+            usage.used_requests = 0
+            usage.used_images = 0
+
         await session.commit()
 
     await cq.answer("Пользователь заблокирован", show_alert=True)
-    await cq.message.edit_text(f"⛔ Пользователь {user_id} забанен.")
+    await cq.message.edit_text(
+        f"⛔ Пользователь <b>{user_id}</b> забанен.\n"
+        f"Все подписки и лимиты обнулены."
+    )
+
 
 @router.callback_query(F.data.startswith("user:unban:"))
 async def user_unban(cq: CallbackQuery):
@@ -212,6 +299,7 @@ async def user_unban(cq: CallbackQuery):
     await cq.answer("Пользователь разбанен", show_alert=True)
     await cq.message.edit_text(f"♻ Пользователь {user_id} разбанен.")
 
+
 @router.callback_query(F.data.startswith("user:grant:"))
 async def user_grant_select(cq: CallbackQuery):
     user_id = int(cq.data.split(":")[2])
@@ -221,6 +309,7 @@ async def user_grant_select(cq: CallbackQuery):
         reply_markup=grant_plan_keyboard(user_id)
     )
     await cq.answer()
+
 
 @router.callback_query(F.data.startswith("grant:"))
 async def user_grant_plan(cq: CallbackQuery):
@@ -245,6 +334,7 @@ async def user_grant_plan(cq: CallbackQuery):
     await cq.answer("Подписка успешно назначена", show_alert=True)
     await cq.message.edit_text(f"🌟 Подписка <b>{plan.title}</b> назначена пользователю {user_id}")
 
+
 @router.callback_query(F.data.startswith("lookup:"))
 async def lookup_back(cq: CallbackQuery):
     user_id = int(cq.data.split(":")[1])
@@ -252,6 +342,7 @@ async def lookup_back(cq: CallbackQuery):
     fake_message.text = f"/lookup {user_id}"
     await lookup_user(fake_message)
     await cq.answer()
+
 
 @router.callback_query(F.data == "admin:main")
 async def admin_main(cq: CallbackQuery):
@@ -468,6 +559,7 @@ async def admin_broadcast(cq: CallbackQuery, state: FSMContext):
         reply_markup=broadcast_segments_keyboard()
     )
     await cq.answer()
+
 
 @router.callback_query(F.data.startswith("broadcast:"))
 async def choose_segment(cq: CallbackQuery, state: FSMContext):
