@@ -1,6 +1,6 @@
 from __future__ import annotations
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import String, Integer, DateTime, ForeignKey, Boolean, Text
+from sqlalchemy import String, Integer, DateTime, ForeignKey, Boolean, Text, BigInteger
 from sqlalchemy.sql import func
 from db import Base
 from typing import Optional
@@ -8,7 +8,7 @@ from datetime import datetime
 
 class User(Base):
     __tablename__ = "users"
-    id: Mapped[int] = mapped_column(primary_key=True)         # telegram user id
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)         # telegram user id
     username: Mapped[Optional[str]] = mapped_column(String(255))
     first_name: Mapped[Optional[str]] = mapped_column(String(255))
     last_name: Mapped[Optional[str]] = mapped_column(String(255))
