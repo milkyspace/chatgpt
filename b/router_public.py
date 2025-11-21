@@ -399,10 +399,6 @@ async def panel_referral(cq: CallbackQuery):
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     invisible = "\u2060"  # zero width no-break space
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="📤 Поделиться ссылкой",
-            switch_inline_query=invisible + f"Присоединяйся! {referral_url}"
-        )],
         [InlineKeyboardButton(text="⬅️ В главное меню", callback_data="panel:main")]
     ])
 
