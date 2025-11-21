@@ -498,8 +498,8 @@ async def panel_help(obj, is_edit_message: bool = True):
 async def switch_mode(cq: CallbackQuery):
     mode = cq.data.split(":", 1)[1]
 
-    # --- обновляем режим в базе ---
     async with AsyncSessionMaker() as session:
+        # Деактивируем старый активный режим
         chat_session = await session.scalar(
             select(ChatSession).where(
                 ChatSession.user_id == cq.from_user.id,
@@ -509,62 +509,98 @@ async def switch_mode(cq: CallbackQuery):
         if chat_session:
             chat_session.mode = mode
         else:
-            session.add(ChatSession(
+            chat_session = ChatSession(
                 user_id=cq.from_user.id,
                 title="Новый чат",
                 mode=mode,
-                is_active=True,
-            ))
+                is_active=True
+            )
+            session.add(chat_session)
+
         await session.commit()
 
-    # --- текст описания ---
     DESCRIPTIONS = {
-        "ghibli": "🎨 Режим Ghibli — создаёт мягкий мультяшный look.",
-        "pixar": "🚀 Режим Pixar — превращает фото в 3D-персонажа.",
-        "comic": "💥 Комикс — яркие контуры и halftone.",
+        "assistant": (
+            "💬 <b>Ассистент</b>\n"
+            "GPT-чат для любых задач: вопросы, идеи, код, советы.\n\n"
+            "<b>Как пользоваться:</b>\n"
+            "Просто напишите сообщение — получите ответ."
+        ),
+        "image": (
+            "🎨 <b>Генерация изображений</b>\n"
+            "Создаёт картинки по вашему тексту.\n\n"
+            "<b>Как пользоваться:</b>\n"
+            "Напишите, что должно быть на изображении.\n"
+            "Пример: <i>«кот в космосе»</i>"
+        ),
+        "editor": (
+            "🛠 <b>Редактор фото</b>\n"
+            "Улучшение, ретушь, изменение содержимого фото.\n\n"
+            "<b>Как пользоваться:</b>\n"
+            "Отправьте фото + инструкцию.\n"
+            "Пример: <i>«сделай ярче», «удали лишние объекты»</i>"
+        ),
+        "celebrity_selfie": (
+            "🤳 <b>Селфи со звездой</b>\n"
+            "Магическое добавление знаменитостей на ваше фото.\n\n"
+            "<b>Как пользоваться:</b>\n"
+            "Отправьте своё фото + имя звезды.\n"
+            "Пример: <i>«Скарлетт Йоханссон»</i>"
+        ),
+        "ghibli": "🎨 Режим Ghibli — создаёт мягкий мультяшный look в стиле студии Ghibli.",
+        "pixar": "🚀 Режим Pixar — превращает фото в 3D-мультяшного персонажа.",
+        "comic": "💥 Режим Комикс — создаёт яркий комикс-эффект.",
         "anime": "🌸 Аниме — стиль японской анимации.",
-        "watercolor": "📖 Акварельная книга — мягкие кисти и бумага.",
+        "watercolor": "📖 Акварель — мягкий художественный эффект акварельной книги.",
     }
-    caption = DESCRIPTIONS.get(mode, "Режим переключён.")
+
+    new_text = DESCRIPTIONS.get(mode, "Режим переключён.")
     markup = keyboards_for_modes(active_mode=mode)
 
-    # --- пути к примерам ---
     import os
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     EXAMPLES_DIR = os.path.join(BASE_DIR, "static/styles")
+    EXAMPLES = {
+        "ghibli": [os.path.join(EXAMPLES_DIR, "ghibli.png"), os.path.join(EXAMPLES_DIR, "ghibli_2.png")],
+        "pixar": [os.path.join(EXAMPLES_DIR, "pixar.png"), os.path.join(EXAMPLES_DIR, "pixar_2.png")],
+        "comic": [os.path.join(EXAMPLES_DIR, "comic.png"), os.path.join(EXAMPLES_DIR, "comic_2.png")],
+        "anime": [os.path.join(EXAMPLES_DIR, "anime.png"), os.path.join(EXAMPLES_DIR, "anime_2.png")],
+        "watercolor": [os.path.join(EXAMPLES_DIR, "watercolor.png"), os.path.join(EXAMPLES_DIR, "watercolor_2.png")],
+    }
+    example_paths = EXAMPLES.get(mode)
+    if example_paths:
+        media = []
 
-    example_path = os.path.join(EXAMPLES_DIR, f"{mode}.png")
+        for idx, path in enumerate(example_paths):
+            with open(path, "rb") as f:
+                photo_bytes = f.read()
 
-    # Проверяем, можем ли изменить текущее сообщение как медиа
-    if cq.message.content_type == "photo" and os.path.exists(example_path):
-        # Меняем медиа в существующем сообщении
-        with open(example_path, "rb") as f:
-            await cq.message.edit_media(
-                InputMediaPhoto(
-                    media=BufferedInputFile(f.read(), filename=f"{mode}.png"),
-                    caption=caption,
-                    parse_mode="HTML"
-                ),
-            )
-        # Меняем клавиатуру отдельно
-        await cq.message.edit_reply_markup(reply_markup=markup)
+            if idx == 0:
+                # только к первому разрешена подпись
+                media.append(
+                    InputMediaPhoto(
+                        media=BufferedInputFile(photo_bytes, filename=f"{mode}_{idx + 1}.jpg"),
+                        caption=new_text,
+                        parse_mode="HTML"
+                    )
+                )
+            else:
+                media.append(
+                    InputMediaPhoto(
+                        media=BufferedInputFile(photo_bytes, filename=f"{mode}_{idx + 1}.jpg")
+                    )
+                )
+
+        # 1) Отправляем альбом
+        await cq.message.answer_media_group(media)
+
+        # 2) Отдельно отправляем клавиатуру
+        await cq.message.answer("Выберите режим:", reply_markup=markup)
+
         await cq.answer("Режим переключён")
         return
 
-    # Если текущее сообщение не фото → отправляем новое
-    if os.path.exists(example_path):
-        with open(example_path, "rb") as f:
-            await cq.message.answer_photo(
-                BufferedInputFile(f.read(), filename=f"{mode}.png"),
-                caption=caption,
-                parse_mode="HTML",
-                reply_markup=markup
-            )
-        await cq.answer("Режим переключён")
-        return
-
-    # fallback
-    await animate_panel_change(cq.message, caption, markup)
+    await animate_panel_change(cq.message, new_text, markup)
     await cq.answer("Режим переключён")
 
 
