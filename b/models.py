@@ -53,14 +53,12 @@ class Payment(Base):
 
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
-
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, index=True)
     title: Mapped[str] = mapped_column(String(255))
     mode: Mapped[str] = mapped_column(String(32), default="assistant")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    extra_style: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
 
 class Message(Base):
     __tablename__ = "messages"

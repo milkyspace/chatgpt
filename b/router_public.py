@@ -547,6 +547,11 @@ async def switch_mode(cq: CallbackQuery):
             "Отправьте своё фото + имя звезды.\n"
             "Пример: <i>«Скарлетт Йоханссон»</i>"
         ),
+        "ghibli": "🎨 Режим Ghibli — создаёт мягкий мультяшный look в стиле студии Ghibli.",
+        "pixar": "🚀 Режим Pixar — превращает фото в 3D-мультяшного персонажа.",
+        "comic": "💥 Режим Комикс — создаёт яркий комикс-эффект.",
+        "anime": "🌸 Аниме — стиль японской анимации.",
+        "watercolor": "📖 Акварель — мягкий художественный эффект акварельной книги.",
     }
 
     new_text = DESCRIPTIONS.get(mode, "Режим переключён.")
@@ -1007,35 +1012,40 @@ async def on_photo(m: TgMessage):
 
                 return
 
-            if mode == "creative_editor":
-                # получаем выбранный стиль
-                instruction = (m.caption or "").strip()
-                style_code = chat_session.extra_style or "anime"
-
-                if not instruction:
-                    error_happened = True
-                    done_event.set()
-                    await m.answer("❗ Добавьте инструкцию или описание того, что нужно сделать.")
-                    return
+            if mode in ("ghibli", "pixar", "comic", "anime", "watercolor"):
+                # Если пользователь ничего не написал — делаем мягкую дефолтную инструкцию
+                user_instruction = (m.caption or "").strip()
+                if not user_instruction:
+                    user_instruction = "Сделать художественную стилизацию фото."
 
                 new_img, err = await img_service.creative_edit(
                     image_bytes=img_bytes,
-                    style=style_code,
-                    instruction=instruction
+                    style=mode,
+                    instruction=user_instruction,
                 )
 
                 if err:
                     error_happened = True
+                    logger.error(f"Ошибка creative style [{mode}]: {err}")
                     await m.answer(f"❗ {err}")
                     return
 
+                style_text_map = {
+                    "ghibli": "🏯 Стиль Ghibli",
+                    "pixar": "🚀 Стиль Pixar 3D",
+                    "comic": "💥 Комикс-стиль",
+                    "anime": "🌸 Аниме-стиль",
+                    "watercolor": "📖 Акварельная книга",
+                }
+
                 await m.answer_photo(
-                    BufferedInputFile(new_img, filename=f"creative_{style_code}.png"),
-                    caption=f"Готово! 🎨 Стиль: {style_map.get(style_code, style_code)}",
+                    BufferedInputFile(new_img, filename=f"{mode}.png"),
+                    caption=f"Готово! {style_text_map.get(mode, '')}"
                 )
 
-                async with AsyncSessionMaker() as session2:
-                    await spend_image(session2, m.from_user.id)
+                # списываем лимит (как для редактора)
+                async with AsyncSessionMaker() as session:
+                    await spend_image(session, m.from_user.id)
 
                 return
 

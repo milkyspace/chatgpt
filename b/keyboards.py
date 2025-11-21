@@ -33,10 +33,11 @@ def admin_back_keyboard() -> InlineKeyboardMarkup:
 
 
 def keyboards_for_modes(active_mode: str | None = None) -> InlineKeyboardMarkup:
-    def btn(mode, title, icon):
+    def btn(mode: str, title: str, icon: str):
+        """Универсальная кнопка режима с учётом активного"""
         if mode == active_mode:
             return InlineKeyboardButton(
-                text=f"✅{icon} {title}",
+                text=f"✅ {icon} {title}",
                 callback_data="noop"
             )
         return InlineKeyboardButton(
@@ -46,16 +47,28 @@ def keyboards_for_modes(active_mode: str | None = None) -> InlineKeyboardMarkup:
 
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            btn("assistant", "Ассистент", "💬")
+            btn("assistant", "Ассистент", "💬"),
         ],
         [
             btn("image", "Генерация", "🎨"),
-            btn("editor", "Редактор фото", "🛠")
-        ],
-        [
-            btn("creative_editor", "Творческий редактор", "🎨"),
             btn("celebrity_selfie", "Селфи со звездой", "🤳")
         ],
+        [
+            btn("editor", "Редактор фото", "🛠"),
+        ],
+        # --- Творческие стили прямо в общем меню ---
+        [
+            btn("ghibli", "Ghibli (Аниме)", "🏯"),
+            btn("pixar", "Pixar 3D", "🚀"),
+        ],
+        [
+            btn("comic", "Комикс", "💥"),
+            btn("anime", "Аниме", "🌸"),
+        ],
+        [
+            btn("watercolor", "Акварель", "📖"),
+        ],
+        # назад
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")],
     ])
 
