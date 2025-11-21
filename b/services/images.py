@@ -108,38 +108,39 @@ class ImageService:
         # формируем промпт в зависимости от стиля
         prompt_map = {
             "ghibli": (
-                "Transform this photo into a magical Studio Ghibli–inspired illustration: "
-                "soft pastel colors, gentle cel-shading, warm lighting, expressive anime-style eyes, "
-                "hand-painted watercolor textures, dreamy atmosphere, delicate linework. "
-                "Keep the original person’s identity and main composition."
+                "Transform the photo into a vivid, detailed Studio Ghibli style illustration: "
+                "bold cel-shading, strong outlines, saturated pastel colors, dramatic lighting, "
+                "distinct anime facial proportions, expressive large eyes, hand-painted watercolor textures. "
+                "Highly stylized look. Keep identity."
             ),
 
             "pixar": (
-                "Turn this photo into a high-quality Pixar-style 3D character render: "
-                "smooth stylized skin, big expressive eyes, realistic soft shadows, "
-                "subsurface scattering, cinematic lighting, vibrant colors, "
-                "3D cartoon proportions while preserving the original likeness and pose."
+                "Turn this photo into a high-impact Pixar-style 3D character: "
+                "strong 3D modeling look, exaggerated cartoon proportions, large glossy eyes, "
+                "sharp rim lighting, cinematic key lights, high-contrast shadows, "
+                "vibrant color palette, plastic-like render quality. "
+                "Highly stylized transformation. Preserve identity."
             ),
 
             "comic": (
-                "Convert this photo into a dynamic comic-book illustration: "
-                "bold ink outlines, halftone shading, dramatic highlights, bright contrasting colors, "
-                "heroic aesthetics, expressive contour lines, stylized shadows. "
-                "Maintain the person’s identity and facial features."
+                "Convert this photo into a striking comic book scene: "
+                "heavy black ink outlines, thick contour lines, intense halftone textures, "
+                "high contrast shading, bold color blocks, dramatic highlights, "
+                "energetic action-hero vibe. Strong stylization. Keep likeness."
             ),
 
             "anime": (
-                "Transform this photo into a polished anime-style portrait: "
-                "clean line art, vivid colors, glossy eyes, subtle soft shading, "
-                "smooth gradients, sharp highlights, refined facial proportions. "
-                "Preserve the original appearance while applying high-quality anime rendering."
+                "Transform this photo into a clean and bold anime portrait: "
+                "sharp line art, bright vibrant colors, strong cel shading, "
+                "glossy oversized eyes, crisp highlights, defined contours, "
+                "refined anime facial proportions. Highly stylized. Preserve identity."
             ),
 
             "watercolor": (
-                "Reimagine this photo as a gentle watercolor storybook illustration: "
-                "soft flowing pigment, textured paper effect, subtle outlines, "
-                "warm natural tones, hand-painted brush strokes, light dreamy atmosphere. "
-                "Keep the character’s recognizable features and overall pose."
+                "Convert the photo into a detailed storybook watercolor painting: "
+                "rich pigment flow, defined brush strokes, textured paper, "
+                "controlled bleeding edges, deep shadows, vivid natural tones. "
+                "Stronger stylization but keep the original face recognizable."
             ),
         }
         base_prompt = prompt_map.get(style, "")
