@@ -256,6 +256,19 @@ async def start(m: TgMessage):
         )
         is_new_user = sub and sub.is_trial and sub.plan_code is None
 
+        # вычисляем оставшиеся дни trial
+        remaining = "—"
+        if sub and sub.is_trial and sub.expires_at:
+            expires_at = sub.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+            now = datetime.now(timezone.utc)
+            if expires_at > now:
+                delta = expires_at - now
+                days_float = delta.total_seconds() / 86400.0
+                remaining = format_days_hours(days_float)
+
         status_panel = await _render_status_line(session, m.from_user.id)
 
     me = await m.bot.get_me()
@@ -265,7 +278,7 @@ async def start(m: TgMessage):
         welcome_text = (
             "👋 <b>Добро пожаловать!</b>\n\n"
             "🎁 <b>Мы подарили вам пробную подписку!</b>\n"
-            f"Она активна <b>{format_days_hours(cfg.trial_days)}</b>.\n\n"
+            f"Она активна <b>{remaining}</b>.\n\n"
             "Доступные возможности:\n"
             "• 💬 Умный чат-ассистент\n"
             "• 🎨 Генерация изображений\n"
