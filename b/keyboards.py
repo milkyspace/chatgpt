@@ -15,7 +15,7 @@ def subscriptions_keyboard() -> InlineKeyboardMarkup:
 def admin_menu() -> InlineKeyboardMarkup:
     """Главное меню админ-панели"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔍 Проверить пользователя", callback_data="admin:lookup"),],
+        [InlineKeyboardButton(text="🔍 Проверить пользователя", callback_data="admin:lookup"), ],
         [InlineKeyboardButton(text="👤 Пользователи", callback_data="admin:users"),
          InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")],
         [InlineKeyboardButton(text="💳 Платежи", callback_data="admin:payments"),
@@ -45,10 +45,17 @@ def keyboards_for_modes(active_mode: str | None = None) -> InlineKeyboardMarkup:
         )
 
     return InlineKeyboardMarkup(inline_keyboard=[
-        [btn("assistant", "Ассистент", "💬"),
-         btn("image", "Генерация", "🎨")],
-        [btn("editor", "Редактор фото", "🛠"),
-         btn("celebrity_selfie", "Селфи со звездой", "🤳")],
+        [
+            btn("assistant", "Ассистент", "💬")
+        ],
+        [
+            btn("image", "Генерация", "🎨"),
+            btn("editor", "Редактор фото", "🛠")
+        ],
+        [
+            btn("creative_editor", "Творческий редактор", "🎨"),
+            btn("celebrity_selfie", "Селфи со звездой", "🤳")
+        ],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:main")],
     ])
 
@@ -109,4 +116,30 @@ def help_main_menu():
 def help_back_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="help:main")]
+    ])
+
+def creative_editor_styles_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора стилистики творческого редактора"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="🏯 Стиль студии Ghibli (Аниме)",
+            callback_data="creative:ghibli"
+        )],
+        [InlineKeyboardButton(
+            text="🚀 Стиль Pixar 3D",
+            callback_data="creative:pixar"
+        )],
+        [InlineKeyboardButton(
+            text="💥 Стиль комиксов",
+            callback_data="creative:comic"
+        )],
+        [InlineKeyboardButton(
+            text="🌸 Стиль аниме",
+            callback_data="creative:anime"
+        )],
+        [InlineKeyboardButton(
+            text="📖 Акварельная книга рассказов",
+            callback_data="creative:watercolor"
+        )],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="panel:mode")]
     ])

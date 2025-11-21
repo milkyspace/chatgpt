@@ -16,7 +16,7 @@ from aiogram.types import CallbackQuery
 
 from config import cfg
 from db import AsyncSessionMaker
-from keyboards import top_panel, keyboards_for_modes, help_main_menu, help_back_kb
+from keyboards import top_panel, keyboards_for_modes, help_main_menu, help_back_kb, keyboards_for_creative_styles
 from models import (
     User,
     ChatSession,
@@ -465,22 +465,22 @@ async def panel_mode(cq: CallbackQuery):
 @router.callback_query(F.data == "panel:help")
 async def panel_help(obj, is_edit_message: bool = True):
     text = (
-        "ℹ️ <b>Помощь и быстрый старт</b>\n\n"
+            "ℹ️ <b>Помощь и быстрый старт</b>\n\n"
 
-        "💬 <b>Ассистент</b>\n"
-        "Общение с GPT: ответы, идеи, помощь, код.\n\n"
+            "💬 <b>Ассистент</b>\n"
+            "Общение с GPT: ответы, идеи, помощь, код.\n\n"
 
-        "🎨 <b>Генерация изображений</b>\n"
-        "Создание картинок по вашему описанию.\n\n"
+            "🎨 <b>Генерация изображений</b>\n"
+            "Создание картинок по вашему описанию.\n\n"
 
-        "🛠 <b>Редактор фото</b>\n"
-        "Улучшение качества, изменение объектов.\n\n"
+            "🛠 <b>Редактор фото</b>\n"
+            "Улучшение качества, изменение объектов.\n\n"
 
-        "🤳 <b>Селфи со звездой</b>\n"
-        "Добавление знаменитостей на ваши фото.\n\n"
+            "🤳 <b>Селфи со звездой</b>\n"
+            "Добавление знаменитостей на ваши фото.\n\n"
 
-        "🆘 <b>Поддержка:</b> " + cfg.support_username + "\n\n"
-        "👇 Выберите действие в меню ниже."
+            "🆘 <b>Поддержка:</b> " + cfg.support_username + "\n\n"
+                                                            "👇 Выберите действие в меню ниже."
     )
 
     if isinstance(obj, CallbackQuery):
@@ -554,6 +554,84 @@ async def switch_mode(cq: CallbackQuery):
 
     await animate_panel_change(cq.message, new_text, markup)
     await cq.answer("Режим переключён")
+
+
+@router.callback_query(F.data == "mode:creative_editor")
+async def panel_creative_editor(cq: CallbackQuery):
+    """
+    Переключение в режим «Творческий редактор».
+    После этого показываем меню стилистик.
+    """
+    # Обновляем режим сессии
+    async with AsyncSessionMaker() as session:
+        chat_session = await session.scalar(
+            select(ChatSession).where(
+                ChatSession.user_id == cq.from_user.id,
+                ChatSession.is_active == True
+            )
+        )
+        if chat_session:
+            chat_session.mode = "creative_editor"
+        else:
+            chat_session = ChatSession(
+                user_id=cq.from_user.id,
+                title="Новый чат",
+                mode="creative_editor",
+                is_active=True
+            )
+            session.add(chat_session)
+        await session.commit()
+
+    await cq.message.edit_text(
+        "🎨 <b>Творческий редактор</b>\n\nВыберите стиль:",
+        reply_markup=keyboards_for_creative_styles()
+    )
+    await cq.answer()
+
+
+@router.callback_query(F.data.startswith("creative:"))
+async def handle_creative_style(cq: CallbackQuery):
+    """
+    Обработка выбора стилистики творческого редактора.
+    Сохраняем выбранный стиль в сессии чат и уведомляем пользователя.
+    """
+    style_code = cq.data.split(":", 1)[1]  # e.g. 'ghibli', 'pixar', ...
+    style_map = {
+        "ghibli": "Стиль студии Ghibli",
+        "pixar": "Стиль Pixar 3D",
+        "comic": "Стиль комиксов",
+        "anime": "Стиль аниме",
+        "watercolor": "Акварельная книга рассказов",
+    }
+    style_name = style_map.get(style_code, style_code)
+
+    async with AsyncSessionMaker() as session:
+        chat_session = await session.scalar(
+            select(ChatSession).where(
+                ChatSession.user_id == cq.from_user.id,
+                ChatSession.is_active == True
+            )
+        )
+        # сохраняем дополнительное поле style в ChatSession (нужно добавить в модель)
+        if chat_session:
+            chat_session.mode = "creative_editor"
+            chat_session.extra_style = style_code  # новое поле
+        else:
+            chat_session = ChatSession(
+                user_id=cq.from_user.id,
+                title="Новый чат",
+                mode="creative_editor",
+                is_active=True,
+                extra_style=style_code
+            )
+            session.add(chat_session)
+        await session.commit()
+
+    await cq.message.edit_text(
+        f"Выбран режим: <b>{style_name}</b>\n\n"
+        "📸 Отправьте фото с подписью-инструкцией."
+    )
+    await cq.answer(f"Стиль {style_name} выбран")
 
 
 def format_plan_info(code: str) -> str:
@@ -922,6 +1000,38 @@ async def on_photo(m: TgMessage):
 
                 async with AsyncSessionMaker() as session:
                     await spend_image(session, m.from_user.id)
+
+                return
+
+            if mode == "creative_editor":
+                # получаем выбранный стиль
+                instruction = (m.caption or "").strip()
+                style_code = chat_session.extra_style or "anime"
+
+                if not instruction:
+                    error_happened = True
+                    done_event.set()
+                    await m.answer("❗ Добавьте инструкцию или описание того, что нужно сделать.")
+                    return
+
+                new_img, err = await img_service.creative_edit(
+                    image_bytes=img_bytes,
+                    style=style_code,
+                    instruction=instruction
+                )
+
+                if err:
+                    error_happened = True
+                    await m.answer(f"❗ {err}")
+                    return
+
+                await m.answer_photo(
+                    BufferedInputFile(new_img, filename=f"creative_{style_code}.png"),
+                    caption=f"Готово! 🎨 Стиль: {style_map.get(style_code, style_code)}",
+                )
+
+                async with AsyncSessionMaker() as session2:
+                    await spend_image(session2, m.from_user.id)
 
                 return
 

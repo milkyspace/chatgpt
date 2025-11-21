@@ -89,3 +89,41 @@ class ImageService:
             return img_bytes, None
         except Exception as e:
             return None, f"Ошибка создания селфи: {str(e)}"
+
+    async def creative_edit(
+            self,
+            image_bytes: bytes,
+            style: str,
+            instruction: str
+    ) -> Tuple[Optional[bytes], Optional[str]]:
+        """
+        Редактирование изображения в творческой стилистике.
+        Args:
+            image_bytes: исходное изображение (байты)
+            style: код стиля (ghibli, pixar, comic, anime, watercolor)
+            instruction: дополнительная инструкция от пользователя
+        Returns:
+            Tuple[bytes_image, error_str]
+        """
+        # формируем промпт в зависимости от стиля
+        prompt_map = {
+            "ghibli": "Let this photo become a dreamy Studio Ghibli-style watercolor illustration.",
+            "pixar": "Let this photo become a colorful 3D cartoon character in Pixar animation style.",
+            "comic": "Let this photo become a bold comic book-style superhero illustration.",
+            "anime": "Let this photo become a cinematic anime‐style character with expressive eyes.",
+            "watercolor": "Let this photo become a soft watercolor storybook-style illustration.",
+        }
+        base_prompt = prompt_map.get(style, "")
+        if not base_prompt:
+            return None, "Неизвестный стиль творческого редактора."
+
+        full_prompt = f"{base_prompt} {instruction}"
+
+        try:
+            img_bytes = await self.provider.edit_image(
+                image_bytes=image_bytes,
+                instruction=full_prompt
+            )
+            return img_bytes, None
+        except Exception as e:
+            return None, f"Ошибка творческого редактирования: {str(e)}"
