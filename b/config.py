@@ -21,6 +21,10 @@ class PlanConfig(BaseModel):
     max_text_len: int              # макс. символов в одном запросе
 
 class AppConfig(BaseModel):
+    model_config = {
+        "arbitrary_types_allowed": True
+    }
+
     # Telegram
     admins: List[int] = Field(default_factory=lambda: [
         int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x
