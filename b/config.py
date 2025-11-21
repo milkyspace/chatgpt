@@ -1,9 +1,11 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import field
+from typing import Optional
+from aiogram import Bot
 
 from typing import List
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import os
 from dotenv import load_dotenv
 
@@ -20,11 +22,11 @@ class PlanConfig(BaseModel):
 
 class AppConfig(BaseModel):
     # Telegram
-    admins: List[int] = field(default_factory=lambda: [
+    admins: List[int] = Field(default_factory=lambda: [
         int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x
     ])
     bot_token: str = os.getenv("BOT_TOKEN", "")
-    admin_ids: set[int] = field(default_factory=lambda: {
+    admin_ids: set[int] = Field(default_factory=lambda: {
         int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x
     })
     support_username: str = os.getenv("SUPPORT_USERNAME", "")
@@ -58,6 +60,7 @@ class AppConfig(BaseModel):
 
     # Рефералка
     referral_bonus_days: int = 5
+    bot_ref: Optional[Bot] = None
 
     # Разрешенные режимы
     modes: tuple[str, ...] = ("assistant", "image", "editor", "celebrity_selfie")
