@@ -294,14 +294,7 @@ async def cmd_subscription(m: TgMessage):
 
 @router.message(Command("help"))
 async def cmd_help(m: TgMessage):
-    fake_cq = CallbackQuery(
-        id="manual",
-        from_user=m.from_user,
-        chat_instance="manual",
-        message=m,
-        data="panel:help"
-    )
-    await panel_help(fake_cq, False)
+    await panel_help(m, False)
 
 
 @router.message(Command("new"))
@@ -457,7 +450,7 @@ async def panel_mode(cq: CallbackQuery):
 
 
 @router.callback_query(F.data == "panel:help")
-async def panel_help(cq: CallbackQuery, is_edit_message: bool = True):
+async def panel_help(obj, is_edit_message: bool = True):
     text = (
         "ℹ️ <b>Помощь и быстрый старт</b>\n\n"
 
@@ -477,12 +470,15 @@ async def panel_help(cq: CallbackQuery, is_edit_message: bool = True):
         "👇 Выберите действие в меню ниже."
     )
 
-    if is_edit_message:
-        await cq.message.edit_text(text, reply_markup=help_main_menu())
-    else:
-        await cq.message.answer(text, reply_markup=help_main_menu())
+    if isinstance(obj, CallbackQuery):
+        if is_edit_message:
+            await obj.message.edit_text(text, reply_markup=help_main_menu())
+        else:
+            await obj.message.answer(text, reply_markup=help_main_menu())
+        await obj.answer()
 
-    await cq.answer()
+    else:  # Message
+        await obj.answer(text, reply_markup=help_main_menu())
 
 
 @router.callback_query(F.data.startswith("mode:"))
