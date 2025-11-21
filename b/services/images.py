@@ -114,13 +114,16 @@ class ImageService:
             ),
 
             "pixar": (
-                "Turn this photo into a full Pixar-style 3D scene: "
-                "convert both the subject and the entire background into a cinematic Pixar environment. "
-                "Use stylized 3D lighting, soft global illumination, colorful ambient light, "
-                "smooth plastic-like shaders, rounded shapes, and warm Pixar-style palette. "
-                "Rebuild the background in a fully 3D-rendered cartoon look — no realistic photo elements. "
-                "Create a cohesive Pixar world around the character. "
-                "Keep the person's identity but stylize facial features in Pixar manner."
+                "Transform this photo into a complete Pixar-style 3D scene: "
+                "rebuild the entire background from scratch as a fully 3D-rendered cartoon environment. "
+                "Remove all real photo elements entirely — do not keep the original background. "
+                "Create a new cinematic Pixar-style world behind the character: rounded shapes, soft geometry, "
+                "warm color palette, stylized architecture or scenery, colorful volumetric lighting, "
+                "and smooth plastic-like shaders. "
+                "Apply Pixar-style 3D modeling to the person as well: glossy eyes, softened proportions, "
+                "clean subsurface scattering, rich global illumination, and expressive facial features. "
+                "Ensure BOTH the subject AND the background are fully transformed into a cohesive Pixar 3D universe. "
+                "Preserve identity, but no realistic details should remain."
             ),
 
             "comic": (
