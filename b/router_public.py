@@ -557,12 +557,11 @@ async def switch_mode(cq: CallbackQuery):
 
 
 @router.callback_query(F.data == "mode:creative_editor")
-async def panel_creative_editor(cq: CallbackQuery):
+async def mode_creative_editor(cq: CallbackQuery):
     """
-    Переключение в режим «Творческий редактор».
-    После этого показываем меню стилистик.
+    Специальный хендлер для режима «Творческий редактор».
+    НЕ должен попадать в общий switch_mode!
     """
-    # Обновляем режим сессии
     async with AsyncSessionMaker() as session:
         chat_session = await session.scalar(
             select(ChatSession).where(
@@ -570,22 +569,29 @@ async def panel_creative_editor(cq: CallbackQuery):
                 ChatSession.is_active == True
             )
         )
+
+        # Обновляем режим
         if chat_session:
             chat_session.mode = "creative_editor"
+            chat_session.extra_style = None
         else:
-            chat_session = ChatSession(
+            session.add(ChatSession(
                 user_id=cq.from_user.id,
                 title="Новый чат",
                 mode="creative_editor",
-                is_active=True
-            )
-            session.add(chat_session)
+                is_active=True,
+                extra_style=None
+            ))
+
         await session.commit()
 
+    from keyboards import keyboards_for_creative_styles
+
     await cq.message.edit_text(
-        "🎨 <b>Творческий редактор</b>\n\nВыберите стиль:",
-        reply_markup=creative_editor_styles_keyboard()
+        "🎨 <b>Творческий редактор</b>\n\nВыберите стиль обработки:",
+        reply_markup=keyboards_for_creative_styles()
     )
+
     await cq.answer()
 
 
