@@ -1013,37 +1013,41 @@ async def on_photo(m: TgMessage):
                 return
 
             if mode in ("ghibli", "pixar", "comic", "anime", "watercolor"):
-                # Если пользователь ничего не написал — делаем мягкую дефолтную инструкцию
+                # Инструкция пользователя (caption)
                 user_instruction = (m.caption or "").strip()
                 if not user_instruction:
-                    user_instruction = "Сделать художественную стилизацию фото."
+                    user_instruction = "Сделать художественную стилизацию фотографии."
 
+                # Творческая обработка
                 new_img, err = await img_service.creative_edit(
                     image_bytes=img_bytes,
                     style=mode,
                     instruction=user_instruction,
                 )
 
+                # Ошибка сервиса
                 if err:
                     error_happened = True
                     logger.error(f"Ошибка creative style [{mode}]: {err}")
                     await m.answer(f"❗ {err}")
                     return
 
-                style_text_map = {
+                # Подписи стилей
+                style_caption = {
                     "ghibli": "🏯 Стиль Ghibli",
                     "pixar": "🚀 Стиль Pixar 3D",
-                    "comic": "💥 Комикс-стиль",
-                    "anime": "🌸 Аниме-стиль",
+                    "comic": "💥 Комикс",
+                    "anime": "🌸 Аниме",
                     "watercolor": "📖 Акварельная книга",
-                }
+                }[mode]
 
+                # Отправляем результат
                 await m.answer_photo(
                     BufferedInputFile(new_img, filename=f"{mode}.png"),
-                    caption=f"Готово! {style_text_map.get(mode, '')}"
+                    caption=f"Готово! {style_caption}"
                 )
 
-                # списываем лимит (как для редактора)
+                # Списываем лимит
                 async with AsyncSessionMaker() as session:
                     await spend_image(session, m.from_user.id)
 
