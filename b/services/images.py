@@ -114,23 +114,29 @@ class ImageService:
             ),
 
             "pixar": (
-                "Transform this photo into a complete Pixar-style 3D scene: "
-                "rebuild the entire background from scratch as a fully 3D-rendered cartoon environment. "
-                "Remove all real photo elements entirely — do not keep the original background. "
-                "Create a new cinematic Pixar-style world behind the character: rounded shapes, soft geometry, "
-                "warm color palette, stylized architecture or scenery, colorful volumetric lighting, "
-                "and smooth plastic-like shaders. "
-                "Apply Pixar-style 3D modeling to the person as well: glossy eyes, softened proportions, "
-                "clean subsurface scattering, rich global illumination, and expressive facial features. "
-                "Ensure BOTH the subject AND the background are fully transformed into a cohesive Pixar 3D universe. "
-                "Preserve identity, but no realistic details should remain."
+                "Transform this photo into a fully stylized Pixar 3D render: "
+                "recreate the person, their clothing, and the entire background from scratch "
+                "as a cohesive Pixar-style CGI scene. "
+                "Replace all real clothing with Pixar-style 3D simplified shapes, fabric, and textures. "
+                "Do NOT preserve real-life clothing details — fully restyle the outfit in a cartoon 3D manner. "
+                "Also rebuild the background entirely in a Pixar cartoon style: smooth geometry, soft global illumination, "
+                "rounded forms, warm ambient light, and a colorful cinematic environment. "
+                "Do not keep any real photo elements. "
+                "Apply full 3D character shading: glossy stylized eyes, clean subsurface scattering, "
+                "soft facial topology, and exaggerated Pixar proportions. "
+                "The entire image must look like a frame from a Pixar movie."
             ),
 
             "comic": (
-                "Convert this photo into a striking comic book scene: "
-                "heavy black ink outlines, thick contour lines, intense halftone textures, "
-                "high contrast shading, bold color blocks, dramatic highlights, "
-                "energetic action-hero vibe. Strong stylization. Keep likeness."
+                "Convert this photo into a fully illustrated comic book panel: "
+                "redraw the person, their clothing, and the entire background in a hand-drawn style. "
+                "Do NOT preserve real clothing textures — restylize all clothing with bold comic fabric shading, "
+                "solid color blocks, and illustrated contour lines. "
+                "Rebuild the background entirely as a comic-style environment with no photographic elements. "
+                "Use heavy black ink outlines, thick contour strokes, halftone patterns, dramatic shadows, "
+                "dynamic highlights, and ultra-stylized action-comic rendering. "
+                "The result must look fully illustrated — not a filtered photo. "
+                "Maintain the person's identity but stylize all features in comic form."
             ),
 
             "anime": (

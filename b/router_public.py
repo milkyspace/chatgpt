@@ -978,10 +978,11 @@ async def on_photo(m: TgMessage):
                     BufferedInputFile(new_img, filename="celebrity_selfie.png"),
                     caption=f"Готово! ⭐ Ваше селфи с {celebrity_name}",
                 )
-                await send_after_photo_info(m, m.from_user.id, "celebrity_selfie")
 
                 async with AsyncSessionMaker() as session:
                     await spend_image(session, m.from_user.id)
+
+                await send_after_photo_info(m, m.from_user.id, "celebrity_selfie")
 
                 return
 
@@ -1006,10 +1007,11 @@ async def on_photo(m: TgMessage):
                     BufferedInputFile(new_img, filename="edited.png"),
                     caption="Готово! 🎨",
                 )
-                await send_after_photo_info(m, m.from_user.id, "editor")
 
                 async with AsyncSessionMaker() as session:
                     await spend_image(session, m.from_user.id)
+
+                await send_after_photo_info(m, m.from_user.id, "editor")
 
                 return
 
@@ -1059,10 +1061,11 @@ async def on_photo(m: TgMessage):
                     BufferedInputFile(new_img, filename="add_people.png"),
                     caption="Готово! 👥",
                 )
-                await send_after_photo_info(m, m.from_user.id, "add_people")
 
                 async with AsyncSessionMaker() as session:
                     await spend_image(session, m.from_user.id)
+
+                await send_after_photo_info(m, m.from_user.id, "add_people")
 
                 return
 
@@ -1100,11 +1103,12 @@ async def on_photo(m: TgMessage):
                     BufferedInputFile(new_img, filename=f"{mode}.png"),
                     caption=f"Готово! {style_caption}"
                 )
-                await send_after_photo_info(m, m.from_user.id, mode)
 
                 # Списываем лимит
                 async with AsyncSessionMaker() as session:
                     await spend_image(session, m.from_user.id)
+
+                await send_after_photo_info(m, m.from_user.id, mode)
 
                 return
 
@@ -1223,11 +1227,12 @@ async def on_text(m: TgMessage):
             # Отправляем результат
             file = BufferedInputFile(img, filename="generated.png")
             await m.answer_photo(file, caption="Готово! 🎨")
-            await send_after_photo_info(m, m.from_user.id, "image")
 
             # Списание использования
             async with AsyncSessionMaker() as session:
                 await spend_image(session, user_id)
+
+            await send_after_photo_info(m, m.from_user.id, "image")
 
         asyncio.create_task(progress_updater())
         await img_pool.submit(generate_job)
