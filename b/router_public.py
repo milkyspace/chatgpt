@@ -12,7 +12,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import Message as TgMessage, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select
 from sqlalchemy import update
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, InputMediaPhoto
 
 from config import cfg
 from db import AsyncSessionMaker
@@ -561,21 +561,38 @@ async def switch_mode(cq: CallbackQuery):
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     EXAMPLES_DIR = os.path.join(BASE_DIR, "static/styles")
     EXAMPLES = {
-        "ghibli": os.path.join(EXAMPLES_DIR, "ghibli.png"),
-        "pixar": os.path.join(EXAMPLES_DIR, "pixar.png"),
-        "comic": os.path.join(EXAMPLES_DIR, "comic.png"),
-        "anime": os.path.join(EXAMPLES_DIR, "anime.png"),
-        "watercolor": os.path.join(EXAMPLES_DIR, "watercolor.png"),
+        "ghibli": [os.path.join(EXAMPLES_DIR, "ghibli.png"), os.path.join(EXAMPLES_DIR, "ghibli_2.png")],
+        "pixar": [os.path.join(EXAMPLES_DIR, "pixar.png"), os.path.join(EXAMPLES_DIR, "pixar_2.png")],
+        "comic": [os.path.join(EXAMPLES_DIR, "comic.png"), os.path.join(EXAMPLES_DIR, "comic_2.png")],
+        "anime": [os.path.join(EXAMPLES_DIR, "anime.png"), os.path.join(EXAMPLES_DIR, "anime_2.png")],
+        "watercolor": [os.path.join(EXAMPLES_DIR, "watercolor.png"), os.path.join(EXAMPLES_DIR, "watercolor_2.png")],
     }
-    example_path = EXAMPLES.get(mode)
-    if example_path:
-        with open(example_path, "rb") as f:
-            await cq.message.answer_photo(
-                BufferedInputFile(f.read(), filename=f"{mode}.jpg"),
-                caption=new_text,
-                parse_mode="HTML",
-                reply_markup=markup
-            )
+    example_paths = EXAMPLES.get(mode)
+    if example_paths:
+        media = []
+
+        for idx, path in enumerate(example_paths):
+            with open(path, "rb") as f:
+                photo_bytes = f.read()
+
+            if idx == 0:
+                # только к первому разрешена подпись
+                media.append(
+                    InputMediaPhoto(
+                        media=BufferedInputFile(photo_bytes, filename=f"{mode}_{idx + 1}.jpg"),
+                        caption=new_text,
+                        parse_mode="HTML"
+                    )
+                )
+            else:
+                media.append(
+                    InputMediaPhoto(
+                        media=BufferedInputFile(photo_bytes, filename=f"{mode}_{idx + 1}.jpg")
+                    )
+                )
+
+        # Отправляем альбом
+        await cq.message.answer_media_group(media)
         await cq.answer("Режим переключён")
         return
 
