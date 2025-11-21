@@ -585,11 +585,9 @@ async def mode_creative_editor(cq: CallbackQuery):
 
         await session.commit()
 
-    from keyboards import keyboards_for_creative_styles
-
     await cq.message.edit_text(
         "🎨 <b>Творческий редактор</b>\n\nВыберите стиль обработки:",
-        reply_markup=keyboards_for_creative_styles()
+        reply_markup=creative_editor_styles_keyboard()
     )
 
     await cq.answer()
