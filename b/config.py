@@ -69,15 +69,15 @@ class AppConfig(BaseModel):
     plans: dict[str, PlanConfig] = {
         "pro_lite": PlanConfig(
             code="pro_lite", title="Pro Lite", price_rub=499, duration_days=10,
-            max_requests=1000, max_image_generations=20, max_text_len=4000
+            max_requests=1000, max_image_generations=20, max_text_len=2000
         ),
         "pro_plus": PlanConfig(
             code="pro_plus", title="Pro Plus", price_rub=1290, duration_days=30,
-            max_requests=None, max_image_generations=30, max_text_len=32000
+            max_requests=None, max_image_generations=30, max_text_len=4000
         ),
         "pro_premium": PlanConfig(
             code="pro_premium", title="Pro Premium", price_rub=2990, duration_days=90,
-            max_requests=None, max_image_generations=50, max_text_len=32000
+            max_requests=None, max_image_generations=50, max_text_len=4000
         ),
     }
 
