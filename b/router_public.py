@@ -532,11 +532,11 @@ async def switch_mode(cq: CallbackQuery):
 
     # Примеры изображений
     EXAMPLES = {
-        "ghibli": "static/examples/ghibli.jpg",
-        "pixar": "static/examples/pixar.jpg",
-        "comic": "static/examples/comic.jpg",
-        "anime": "static/examples/anime.jpg",
-        "watercolor": "static/examples/watercolor.jpg",
+        "ghibli": "static/styles/ghibli.jpg",
+        "pixar": "static/styles/pixar.jpg",
+        "comic": "static/styles/comic.jpg",
+        "anime": "static/styles/anime.jpg",
+        "watercolor": "static/styles/watercolor.jpg",
     }
 
     text = DESCRIPTIONS.get(mode, "Режим переключён.")
