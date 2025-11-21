@@ -499,6 +499,7 @@ async def switch_mode(cq: CallbackQuery):
     mode = cq.data.split(":", 1)[1]
 
     async with AsyncSessionMaker() as session:
+        # Деактивируем старый активный режим
         chat_session = await session.scalar(
             select(ChatSession).where(
                 ChatSession.user_id == cq.from_user.id,
@@ -508,56 +509,77 @@ async def switch_mode(cq: CallbackQuery):
         if chat_session:
             chat_session.mode = mode
         else:
-            session.add(ChatSession(
+            chat_session = ChatSession(
                 user_id=cq.from_user.id,
                 title="Новый чат",
                 mode=mode,
                 is_active=True
-            ))
+            )
+            session.add(chat_session)
+
         await session.commit()
 
-    # Текстовые описания
     DESCRIPTIONS = {
-        "assistant": "💬 <b>Ассистент</b>\nGPT-чат…",
-        "image": "🎨 <b>Генерация изображений</b>…",
-        "editor": "🛠 <b>Редактор фото</b>…",
-        "celebrity_selfie": "🤳 <b>Селфи со звездой</b>…",
-
+        "assistant": (
+            "💬 <b>Ассистент</b>\n"
+            "GPT-чат для любых задач: вопросы, идеи, код, советы.\n\n"
+            "<b>Как пользоваться:</b>\n"
+            "Просто напишите сообщение — получите ответ."
+        ),
+        "image": (
+            "🎨 <b>Генерация изображений</b>\n"
+            "Создаёт картинки по вашему тексту.\n\n"
+            "<b>Как пользоваться:</b>\n"
+            "Напишите, что должно быть на изображении.\n"
+            "Пример: <i>«кот в космосе»</i>"
+        ),
+        "editor": (
+            "🛠 <b>Редактор фото</b>\n"
+            "Улучшение, ретушь, изменение содержимого фото.\n\n"
+            "<b>Как пользоваться:</b>\n"
+            "Отправьте фото + инструкцию.\n"
+            "Пример: <i>«сделай ярче», «удали лишние объекты»</i>"
+        ),
+        "celebrity_selfie": (
+            "🤳 <b>Селфи со звездой</b>\n"
+            "Магическое добавление знаменитостей на ваше фото.\n\n"
+            "<b>Как пользоваться:</b>\n"
+            "Отправьте своё фото + имя звезды.\n"
+            "Пример: <i>«Скарлетт Йоханссон»</i>"
+        ),
         "ghibli": "🎨 Режим Ghibli — создаёт мягкий мультяшный look в стиле студии Ghibli.",
         "pixar": "🚀 Режим Pixar — превращает фото в 3D-мультяшного персонажа.",
-        "comic": "💥 Режим Комикс — яркий комикс-эффект.",
-        "anime": "🌸 Аниме — чистые линии и яркие глаза.",
-        "watercolor": "📖 Акварельный стиль — как книжная иллюстрация.",
+        "comic": "💥 Режим Комикс — создаёт яркий комикс-эффект.",
+        "anime": "🌸 Аниме — стиль японской анимации.",
+        "watercolor": "📖 Акварель — мягкий художественный эффект акварельной книги.",
     }
 
-    # Примеры изображений
-    EXAMPLES = {
-        "ghibli": "static/styles/ghibli.jpg",
-        "pixar": "static/styles/pixar.jpg",
-        "comic": "static/styles/comic.jpg",
-        "anime": "static/styles/anime.jpg",
-        "watercolor": "static/styles/watercolor.jpg",
-    }
-
-    text = DESCRIPTIONS.get(mode, "Режим переключён.")
+    new_text = DESCRIPTIONS.get(mode, "Режим переключён.")
     markup = keyboards_for_modes(active_mode=mode)
 
-    # Если есть пример — отправляем фото-пример
+    import os
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    EXAMPLES_DIR = os.path.join(BASE_DIR, "static/styles")
+    EXAMPLES = {
+        "ghibli": os.path.join(EXAMPLES_DIR, "ghibli.jpg"),
+        "pixar": os.path.join(EXAMPLES_DIR, "pixar.jpg"),
+        "comic": os.path.join(EXAMPLES_DIR, "comic.jpg"),
+        "anime": os.path.join(EXAMPLES_DIR, "anime.jpg"),
+        "watercolor": os.path.join(EXAMPLES_DIR, "watercolor.jpg"),
+    }
     example_path = EXAMPLES.get(mode)
-
     if example_path:
         with open(example_path, "rb") as f:
             await cq.message.answer_photo(
                 BufferedInputFile(f.read(), filename=f"{mode}.jpg"),
-                caption=text,
+                caption=new_text,
                 parse_mode="HTML",
                 reply_markup=markup
             )
         await cq.answer("Режим переключён")
         return
 
-    # Если примера нет — просто меняем текст панели
-    await animate_panel_change(cq.message, text, markup)
+    await animate_panel_change(cq.message, new_text, markup)
     await cq.answer("Режим переключён")
 
 
