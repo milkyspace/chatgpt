@@ -58,7 +58,7 @@ class Payment(Base):
 
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
     title: Mapped[str] = mapped_column(String(255))
     mode: Mapped[str] = mapped_column(String(32), default="assistant")
@@ -67,7 +67,7 @@ class ChatSession(Base):
 
 class Message(Base):
     __tablename__ = "messages"
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     session_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chat_sessions.id"))
     role: Mapped[str] = mapped_column(String(32))  # user|assistant|system
     content: Mapped[str] = mapped_column(Text)
