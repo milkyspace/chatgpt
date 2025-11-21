@@ -547,11 +547,11 @@ async def switch_mode(cq: CallbackQuery):
             "Отправьте своё фото + имя звезды.\n"
             "Пример: <i>«Скарлетт Йоханссон»</i>"
         ),
-        "ghibli": "🎨 Режим Ghibli — создаёт мягкий мультяшный look в стиле студии Ghibli.",
-        "pixar": "🚀 Режим Pixar — превращает фото в 3D-мультяшного персонажа.",
-        "comic": "💥 Режим Комикс — создаёт яркий комикс-эффект.",
-        "anime": "🌸 Аниме — стиль японской анимации.",
-        "watercolor": "📖 Акварель — мягкий художественный эффект акварельной книги.",
+        "ghibli": "🎨 Режим Ghibli — создаёт мягкий мультяшный look в стиле студии Ghibli.\n\n<b>Как пользоваться:</b>\nОтправьте фото",
+        "pixar": "🚀 Режим Pixar — превращает фото в 3D-мультяшного персонажа.\n\n<b>Как пользоваться:</b>\nОтправьте фото",
+        "comic": "💥 Режим Комикс — создаёт яркий комикс-эффект.\n\n<b>Как пользоваться:</b>\nОтправьте фото",
+        "anime": "🌸 Аниме — стиль японской анимации.\n\n<b>Как пользоваться:</b>\nОтправьте фото",
+        "watercolor": "📖 Акварель — мягкий художественный эффект акварельной книги.\n\n<b>Как пользоваться:</b>\nОтправьте фото",
     }
 
     new_text = DESCRIPTIONS.get(mode, "Режим переключён.")
@@ -580,7 +580,6 @@ async def switch_mode(cq: CallbackQuery):
                 media.append(
                     InputMediaPhoto(
                         media=BufferedInputFile(photo_bytes, filename=f"{mode}_{idx + 1}.jpg"),
-                        caption=new_text,
                         parse_mode="HTML"
                     )
                 )
@@ -595,7 +594,7 @@ async def switch_mode(cq: CallbackQuery):
         await cq.message.answer_media_group(media)
 
         # 2) Отдельно отправляем клавиатуру
-        await cq.message.answer("Выберите режим:", reply_markup=markup)
+        await cq.message.answer(new_text, reply_markup=markup)
 
         await cq.answer("Режим переключён")
         return
@@ -979,6 +978,7 @@ async def on_photo(m: TgMessage):
                     BufferedInputFile(new_img, filename="celebrity_selfie.png"),
                     caption=f"Готово! ⭐ Ваше селфи с {celebrity_name}",
                 )
+                await send_after_photo_info(m, m.from_user.id, "celebrity_selfie")
 
                 async with AsyncSessionMaker() as session:
                     await spend_image(session, m.from_user.id)
@@ -1006,6 +1006,7 @@ async def on_photo(m: TgMessage):
                     BufferedInputFile(new_img, filename="edited.png"),
                     caption="Готово! 🎨",
                 )
+                await send_after_photo_info(m, m.from_user.id, "editor")
 
                 async with AsyncSessionMaker() as session:
                     await spend_image(session, m.from_user.id)
@@ -1058,6 +1059,7 @@ async def on_photo(m: TgMessage):
                     BufferedInputFile(new_img, filename="add_people.png"),
                     caption="Готово! 👥",
                 )
+                await send_after_photo_info(m, m.from_user.id, "add_people")
 
                 async with AsyncSessionMaker() as session:
                     await spend_image(session, m.from_user.id)
@@ -1098,6 +1100,7 @@ async def on_photo(m: TgMessage):
                     BufferedInputFile(new_img, filename=f"{mode}.png"),
                     caption=f"Готово! {style_caption}"
                 )
+                await send_after_photo_info(m, m.from_user.id, mode)
 
                 # Списываем лимит
                 async with AsyncSessionMaker() as session:
@@ -1220,6 +1223,7 @@ async def on_text(m: TgMessage):
             # Отправляем результат
             file = BufferedInputFile(img, filename="generated.png")
             await m.answer_photo(file, caption="Готово! 🎨")
+            await send_after_photo_info(m, m.from_user.id, "image")
 
             # Списание использования
             async with AsyncSessionMaker() as session:
@@ -1408,3 +1412,42 @@ async def help_support(cq: CallbackQuery):
         reply_markup=help_back_kb()
     )
     await cq.answer()
+
+async def send_after_photo_info(m: TgMessage, user_id: int, mode: str):
+    """
+    Отправляет:
+    1) лимиты изображений (оставшиеся)
+    2) инструкцию по выбранному режиму
+    """
+
+    # --- Лимиты ---
+    async with AsyncSessionMaker() as session:
+        usage = await session.scalar(select(Usage).where(Usage.user_id == user_id))
+        sub = await session.scalar(select(UserSubscription).where(UserSubscription.user_id == user_id))
+
+    used_img = usage.used_images if usage else 0
+
+    if sub and (plan := cfg.plans.get(sub.plan_code)):
+        max_img = plan.max_image_generations
+    elif sub and sub.is_trial:
+        max_img = cfg.trial_max_images
+    else:
+        max_img = 0
+
+    lim = f"🖼️ Лимит изображений: <b>{used_img}/{max_img}</b>"
+    await m.answer(lim, parse_mode="HTML")
+
+    # --- Инструкция ---
+    INSTR = {
+        "celebrity_selfie": "🤳 <b>Селфи со звездой</b>\nОтправьте фото + имя знаменитости.",
+        "editor": "🛠 <b>Редактор</b>\nОтправьте фото и напишите, что изменить.",
+        "ghibli": "🏯 Режим Ghibli — отправьте фото, я превращу его в арт Ghibli.",
+        "pixar": "🚀 Режим Pixar — преобразую фото в 3D стиль Pixar.",
+        "comic": "💥 Комикс — превращу фото в комикс-арт.",
+        "anime": "🌸 Аниме — превращу фото в аниме.",
+        "watercolor": "📖 Акварель — мягкая художественная стилизация.",
+        "image": "🎨 Генерация — напишите текст, я создам картинку.",
+    }
+
+    if mode in INSTR:
+        await m.answer(INSTR[mode], parse_mode="HTML")
