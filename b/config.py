@@ -64,7 +64,7 @@ class AppConfig(BaseModel):
 
     # Рефералка
     referral_bonus_days: int = 5
-    bot_ref: Optional[Bot] = None
+    bot_ref: any = None
 
     # Разрешенные режимы
     modes: tuple[str, ...] = ("assistant", "image", "editor", "celebrity_selfie")

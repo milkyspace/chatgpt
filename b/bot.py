@@ -45,6 +45,7 @@ async def main():
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
     await _set_commands(bot)
+    cfg.bot_ref = bot
 
     dp = Dispatcher(storage=storage)
 
