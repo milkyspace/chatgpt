@@ -107,11 +107,40 @@ class ImageService:
         """
         # формируем промпт в зависимости от стиля
         prompt_map = {
-            "ghibli": "Let this photo become a dreamy Studio Ghibli-style watercolor illustration.",
-            "pixar": "Let this photo become a colorful 3D cartoon character in Pixar animation style.",
-            "comic": "Let this photo become a bold comic book-style superhero illustration.",
-            "anime": "Let this photo become a cinematic anime‐style character with expressive eyes.",
-            "watercolor": "Let this photo become a soft watercolor storybook-style illustration.",
+            "ghibli": (
+                "Transform this photo into a magical Studio Ghibli–inspired illustration: "
+                "soft pastel colors, gentle cel-shading, warm lighting, expressive anime-style eyes, "
+                "hand-painted watercolor textures, dreamy atmosphere, delicate linework. "
+                "Keep the original person’s identity and main composition."
+            ),
+
+            "pixar": (
+                "Turn this photo into a high-quality Pixar-style 3D character render: "
+                "smooth stylized skin, big expressive eyes, realistic soft shadows, "
+                "subsurface scattering, cinematic lighting, vibrant colors, "
+                "3D cartoon proportions while preserving the original likeness and pose."
+            ),
+
+            "comic": (
+                "Convert this photo into a dynamic comic-book illustration: "
+                "bold ink outlines, halftone shading, dramatic highlights, bright contrasting colors, "
+                "heroic aesthetics, expressive contour lines, stylized shadows. "
+                "Maintain the person’s identity and facial features."
+            ),
+
+            "anime": (
+                "Transform this photo into a polished anime-style portrait: "
+                "clean line art, vivid colors, glossy eyes, subtle soft shading, "
+                "smooth gradients, sharp highlights, refined facial proportions. "
+                "Preserve the original appearance while applying high-quality anime rendering."
+            ),
+
+            "watercolor": (
+                "Reimagine this photo as a gentle watercolor storybook illustration: "
+                "soft flowing pigment, textured paper effect, subtle outlines, "
+                "warm natural tones, hand-painted brush strokes, light dreamy atmosphere. "
+                "Keep the character’s recognizable features and overall pose."
+            ),
         }
         base_prompt = prompt_map.get(style, "")
         if not base_prompt:
