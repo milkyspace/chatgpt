@@ -59,7 +59,6 @@ class ImageService:
         except Exception as e:
             return None, f"Ошибка редактирования изображения: {str(e)}"
 
-
     async def celebrity_selfie(
             self,
             image_bytes: bytes,
@@ -115,11 +114,13 @@ class ImageService:
             ),
 
             "pixar": (
-                "Turn this photo into a high-impact Pixar-style 3D character: "
-                "strong 3D modeling look, exaggerated cartoon proportions, large glossy eyes, "
-                "sharp rim lighting, cinematic key lights, high-contrast shadows, "
-                "vibrant color palette, plastic-like render quality. "
-                "Highly stylized transformation. Preserve identity."
+                "Turn this photo into a full Pixar-style 3D scene: "
+                "convert both the subject and the entire background into a cinematic Pixar environment. "
+                "Use stylized 3D lighting, soft global illumination, colorful ambient light, "
+                "smooth plastic-like shaders, rounded shapes, and warm Pixar-style palette. "
+                "Rebuild the background in a fully 3D-rendered cartoon look — no realistic photo elements. "
+                "Create a cohesive Pixar world around the character. "
+                "Keep the person's identity but stylize facial features in Pixar manner."
             ),
 
             "comic": (
