@@ -398,8 +398,10 @@ async def panel_referral(cq: CallbackQuery):
 
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📤 Поделиться ссылкой",
-                              switch_inline_query=f"Присоединяйся! {referral_url}")],
+        [InlineKeyboardButton(
+            text="📤 Поделиться ссылкой",
+            switch_inline_query_current_chat=f"Присоединяйся! {referral_url}"
+        )],
         [InlineKeyboardButton(text="⬅️ В главное меню", callback_data="panel:main")]
     ])
 
@@ -1417,6 +1419,7 @@ async def help_support(cq: CallbackQuery):
         reply_markup=help_back_kb()
     )
     await cq.answer()
+
 
 async def send_after_photo_info(m: TgMessage, user_id: int, mode: str):
     """
