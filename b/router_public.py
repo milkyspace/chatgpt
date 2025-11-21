@@ -194,7 +194,7 @@ async def _render_status_line(session, user_id: int) -> str:
     img_bar = (build_progress_bar(used_img, max_img) + '\n') if used_img > 0 else ""
 
     def fmt(v):
-        return "∞" if v is None else v
+        return "Бесконечно" if v is None else v
 
     limits_text = (
         f"Запросы: {used_req}/{fmt(max_req)}\n"
@@ -265,7 +265,7 @@ async def start(m: TgMessage):
         welcome_text = (
             "👋 <b>Добро пожаловать!</b>\n\n"
             "🎁 <b>Мы подарили вам пробную подписку!</b>\n"
-            f"Она активна на <b>{format_days_hours(cfg.trial_days)}</b>.\n\n"
+            f"Она активна <b>{format_days_hours(cfg.trial_days)}</b>.\n\n"
             "Доступные возможности:\n"
             "• 💬 Умный чат-ассистент\n"
             "• 🎨 Генерация изображений\n"
@@ -301,7 +301,7 @@ async def cmd_help(m: TgMessage):
         message=m,
         data="panel:help"
     )
-    await panel_help(fake_cq)
+    await panel_help(fake_cq, False)
 
 
 @router.message(Command("new"))
@@ -457,7 +457,7 @@ async def panel_mode(cq: CallbackQuery):
 
 
 @router.callback_query(F.data == "panel:help")
-async def panel_help(cq: CallbackQuery):
+async def panel_help(cq: CallbackQuery, is_edit_message: bool = True):
     text = (
         "ℹ️ <b>Помощь и быстрый старт</b>\n\n"
 
@@ -477,7 +477,11 @@ async def panel_help(cq: CallbackQuery):
         "👇 Выберите действие в меню ниже."
     )
 
-    await cq.message.edit_text(text, reply_markup=help_main_menu())
+    if is_edit_message:
+        await cq.message.edit_text(text, reply_markup=help_main_menu())
+    else:
+        await cq.message.answer(text, reply_markup=help_main_menu())
+
     await cq.answer()
 
 
@@ -545,30 +549,9 @@ async def switch_mode(cq: CallbackQuery):
 
 def format_plan_info(code: str) -> str:
     plan = cfg.plans[code]
-
-    BENEFITS = {
-        "pro_lite": [
-            "⚡ Быстрые ответы",
-            "🎨 Редактирование и генерация фото",
-            "📌 Для ежедневных задач"
-        ],
-        "pro_plus": [
-            "🚀 Повышенная скорость",
-            "📈 Повышенные лимиты",
-            "🎯 Уверенная генерация изображений"
-        ],
-        "pro_premium": [
-            "🔥 Максимальные лимиты",
-            "👑 Приоритетная обработка",
-            "💼 Для работы, бизнеса и творчества"
-        ]
-    }
-
-    req_limit = "∞" if plan.max_requests is None else plan.max_requests
-    img_limit = "∞" if plan.max_image_generations is None else plan.max_image_generations
+    req_limit = "Бесконечно" if plan.max_requests is None else plan.max_requests
+    img_limit = "Бесконечно" if plan.max_image_generations is None else plan.max_image_generations
     text_limit = f"{plan.max_text_len} символов"
-
-    benefits_list = "\n".join(f"• {b}" for b in BENEFITS.get(code, []))
 
     # Разделитель для красоты
     return (
@@ -576,11 +559,6 @@ def format_plan_info(code: str) -> str:
         f"🎫 <b>{plan.title}</b>\n"
         f"💰 <b>{plan.price_rub} ₽</b> / {plan.duration_days} дней\n"
         f"<b>────────────────────────</b>\n\n"
-
-        f"✨ <b>Преимущества:</b>\n"
-        f"{benefits_list}\n\n"
-
-        f"📦 <b>Что входит:</b>\n"
         f"• Запросы: <b>{req_limit}</b>\n"
         f"• Изображения: <b>{img_limit}</b>\n"
         f"• Сообщения: <b>{text_limit}</b>\n"
@@ -596,7 +574,6 @@ async def show_subs(cq: CallbackQuery, is_edit: bool = True):
         f"{format_plan_info('pro_lite')}\n"
         f"{format_plan_info('pro_plus')}\n"
         f"{format_plan_info('pro_premium')}\n"
-        "<b>────────────────────────</b>\n"
         "👇 Выберите тариф для оформления:"
     )
 
@@ -945,7 +922,7 @@ async def on_photo(m: TgMessage):
             error_happened = True
             await m.answer(
                 f"⚙️ Для режима '{mode}' пока нет обработки изображений. "
-                f"Переключитесь в /mode на editor / analyze / celebrity_selfie / add_people."
+                f"Переключитесь в /mode на editor / celebrity_selfie."
             )
 
         except Exception as e:
