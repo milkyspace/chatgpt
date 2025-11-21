@@ -591,8 +591,12 @@ async def switch_mode(cq: CallbackQuery):
                     )
                 )
 
-        # Отправляем альбом
+        # 1) Отправляем альбом
         await cq.message.answer_media_group(media)
+
+        # 2) Отдельно отправляем клавиатуру
+        await cq.message.answer("Выберите следующий шаг:", reply_markup=markup)
+
         await cq.answer("Режим переключён")
         return
 
