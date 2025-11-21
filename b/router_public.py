@@ -561,11 +561,11 @@ async def switch_mode(cq: CallbackQuery):
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     EXAMPLES_DIR = os.path.join(BASE_DIR, "static/styles")
     EXAMPLES = {
-        "ghibli": os.path.join(EXAMPLES_DIR, "ghibli.jpg"),
-        "pixar": os.path.join(EXAMPLES_DIR, "pixar.jpg"),
-        "comic": os.path.join(EXAMPLES_DIR, "comic.jpg"),
-        "anime": os.path.join(EXAMPLES_DIR, "anime.jpg"),
-        "watercolor": os.path.join(EXAMPLES_DIR, "watercolor.jpg"),
+        "ghibli": os.path.join(EXAMPLES_DIR, "ghibli.png"),
+        "pixar": os.path.join(EXAMPLES_DIR, "pixar.png"),
+        "comic": os.path.join(EXAMPLES_DIR, "comic.png"),
+        "anime": os.path.join(EXAMPLES_DIR, "anime.png"),
+        "watercolor": os.path.join(EXAMPLES_DIR, "watercolor.png"),
     }
     example_path = EXAMPLES.get(mode)
     if example_path:
