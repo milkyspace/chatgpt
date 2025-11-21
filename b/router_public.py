@@ -603,15 +603,13 @@ async def switch_mode(cq: CallbackQuery):
     # Если предыдущее сообщение было фото — редактировать текст нельзя
     if cq.message.content_type == "photo":
         await cq.message.answer(
-            caption,
+            new_text,
             parse_mode="HTML",
             reply_markup=markup
         )
-        await cq.answer("Режим переключён")
-        return
 
     # Если текст — можно анимировать
-    await animate_panel_change(cq.message, caption, markup)
+    await animate_panel_change(cq.message, new_text, markup)
     await cq.answer("Режим переключён")
 
 
