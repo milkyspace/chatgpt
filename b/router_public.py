@@ -16,7 +16,7 @@ from aiogram.types import CallbackQuery
 
 from config import cfg
 from db import AsyncSessionMaker
-from keyboards import top_panel, keyboards_for_modes, help_main_menu, help_back_kb, keyboards_for_creative_styles
+from keyboards import top_panel, keyboards_for_modes, help_main_menu, help_back_kb, creative_editor_styles_keyboard
 from models import (
     User,
     ChatSession,
@@ -584,7 +584,7 @@ async def panel_creative_editor(cq: CallbackQuery):
 
     await cq.message.edit_text(
         "🎨 <b>Творческий редактор</b>\n\nВыберите стиль:",
-        reply_markup=keyboards_for_creative_styles()
+        reply_markup=creative_editor_styles_keyboard()
     )
     await cq.answer()
 
